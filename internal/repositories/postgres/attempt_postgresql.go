@@ -238,7 +238,7 @@ func (a AttemptPostgreSQL) GetProgress(ctx context.Context, id uint) (*repositor
 		return nil, err
 	}
 
-	timeSpent := int(time.Now().UTC().Sub(*attempt.StartedAt))
+	timeSpent := int(time.Now().UTC().Sub(*attempt.StartedAt).Minutes())
 	return &repositories.AttemptProgress{
 		AttemptID:            id,
 		CurrentQuestionIndex: attempt.CurrentQuestionIndex,

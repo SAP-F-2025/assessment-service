@@ -501,10 +501,7 @@ func (a *AssessmentPostgreSQL) HasActiveAttempts(ctx context.Context, id uint) (
 	var count int64
 	err := a.db.WithContext(ctx).
 		Model(&models.AssessmentAttempt{}).
-		Where("assessment_id = ? AND status IN ?", id, []models.AttemptStatus{
-			models.AttemptInProgress,
-			models.AttemptCompleted,
-		}).
+		Where("assessment_id = ? AND status IN ?", id, models.AttemptInProgress).
 		Count(&count).Error
 
 	return count > 0, err
