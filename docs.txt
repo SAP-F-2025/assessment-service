@@ -1,0 +1,1567 @@
+# Tài liệu AS-001
+
+## 1. Thông tin Cơ bản
+
+- **Mã tính năng**: AS-001
+- **Tên tính năng**: Tạo, chỉnh sửa, xóa bài thi (CRUD Operations for Assessments)
+- **Nhóm tính năng**: Quản lý Bài thi và Câu hỏi
+- **Độ ưu tiên**: Quan trọng
+- **Trạng thái**: Sẵn sàng phát triển
+- **Phụ thuộc**: AUTH-001 (OAuth2), AUTH-004 (RBAC)
+
+## 2. User Story
+
+Là một giáo viên (Teacher)
+Tôi muốn tạo mới, chỉnh sửa và xóa các bài thi
+Để có thể quản lý nội dung đánh giá cho học sinh của mình một cách linh hoạt và hiệu quả
+
+## 3. Acceptance Criteria
+
+- **Tạo bài thi mới**
+Khi giáo viên truy cập chức năng tạo bài thi
+Thì họ có thể nhập thông tin cơ bản (tiêu đề, mô tả, thời gian làm bài, điểm chuẩn)
+Và hệ thống tạo bài thi với trạng thái "Draft" mặc định
+- **Chỉnh sửa bài thi**
+Khi giáo viên chọn chỉnh sửa bài thi đã tạo
+Thì họ có thể cập nhật tất cả thông tin của bài thi
+Và chỉ có thể chỉnh sửa bài thi ở trạng thái "Draft" hoặc là chủ sở hữu
+- **Xóa bài thi**
+Khi giáo viên xóa một bài thi
+Thì hệ thống xác nhận trước khi xóa
+Và chỉ cho phép xóa bài thi chưa có học sinh nào tham gia
+- **Quản lý trạng thái bài thi**
+Khi giáo viên thay đổi trạng thái bài thi
+Thì bài thi có thể chuyển từ Draft → Active → Expired
+Và học sinh chỉ có thể thấy và làm bài thi ở trạng thái "Active"
+
+## 4. Đặc tả Trường hợp Sử dụng
+
+### 4.1 Tác nhân Chính
+
+- **Teacher**: Giáo viên tạo và quản lý bài thi
+- **Admin**: Quản trị viên có thể quản lý tất cả bài thi
+- **System**: Hệ thống backend xử lý CRUD operations
+- **Database**: Lưu trữ thông tin bài thi
+
+### 4.2 Điều kiện Tiên quyết
+
+- User đã đăng nhập thành công với role "Teacher" hoặc "Admin"
+- Assessment service đang hoạt động
+- Database connection khả dụng
+- User có quyền truy cập chức năng quản lý bài thi
+
+### 4.3 Luồng Chính - Tạo Bài thi Mới
+
+1. Teacher truy cập trang "Create Assessment"
+2. Teacher nhập thông tin bài thi:
+    - Tiêu đề bài thi (bắt buộc)
+    - Mô tả chi tiết
+    - Thời gian làm bài (phút)
+    - Điểm chuẩn đậu/rớt
+    - Số lần làm bài tối đa
+    - Ngày hết hạn
+3. System validate dữ liệu đầu vào
+4. System tạo assessment mới với status="Draft"
+5. System gán created_by = current_user_id
+6. System trả về assessment_id và thông báo thành công
+7. Teacher được redirect đến trang chỉnh sửa assessment
+
+### 4.4 Luồng Thay thế - Chỉnh sửa Bài thi
+
+1. Teacher truy cập danh sách bài thi của mình
+2. Teacher chọn bài thi cần chỉnh sửa
+3. System kiểm tra quyền (owner hoặc admin)
+4. System hiển thị form chỉnh sửa với dữ liệu hiện tại
+5. Teacher cập nhật thông tin cần thiết
+6. Teacher submit form cập nhật
+7. System validate dữ liệu và business rules
+8. System cập nhật database với updated_at timestamp
+9. System trả về thông báo thành công
+
+### 4.5 Luồng Thay thế - Xóa Bài thi
+
+1. Teacher chọn xóa bài thi từ danh sách
+2. System kiểm tra quyền và điều kiện xóa:
+    - User là owner hoặc admin
+    - Bài thi chưa có attempts nào
+    - Bài thi không đang trong trạng thái "Active" với người thi
+3. System hiển thị dialog xác nhận với thông tin rủi ro
+4. Teacher xác nhận xóa
+5. System thực hiện soft delete (set deleted_at timestamp)
+6. System trả về thông báo thành công và refresh danh sách
+
+### 4.6 Xử lý Ngoại lệ
+
+**Ngoại lệ E1**: Validation Error
+
+1. Dữ liệu đầu vào không hợp lệ (tiêu đề trống, thời gian âm, etc.)
+2. System trả về HTTP 400 với chi tiết lỗi validation
+3. Frontend hiển thị error messages tương ứng với từng field
+
+**Ngoại lệ E2**: Permission Denied
+
+1. User không có quyền truy cập assessment (không phải owner/admin)
+2. System trả về HTTP 403 Forbidden
+3. User được redirect về trang danh sách assessments
+
+**Ngoại lệ E3**: Assessment In Use
+
+1. Teacher cố gắng xóa assessment đã có attempts
+2. System trả về HTTP 409 Conflict
+3. Hiển thị thông báo không thể xóa và đề xuất archive thay thế
+
+### 4.7 Điều kiện Sau
+
+- Assessment được tạo/cập nhật thành công trong database
+- Audit log ghi nhận hành động với user_id và timestamp
+- Cache được invalidate nếu cần thiết
+- Notifications được gửi cho related users nếu có
+- Assessment data consistency được đảm bảo
+
+## 4.8 Sơ đồ Tuần tự
+
+### 4.8.1 Tạo Bài thi Mới
+
+```mermaid
+sequenceDiagram
+    participant U as Teacher
+    participant F as Frontend
+    participant A as API Gateway
+    participant AS as Assessment Service
+    participant DB as Database
+    participant AU as Audit Service
+
+    U->>F: Click "Create Assessment"
+    F->>U: Show create form
+    U->>F: Fill form & submit
+    F->>A: POST /assessments
+    Note over A: Validate JWT token
+    A->>AS: Forward request with user context
+    AS->>AS: Validate input data
+    AS->>AS: Check user permissions (Teacher/Admin)
+    AS->>DB: BEGIN TRANSACTION
+    AS->>DB: INSERT INTO assessments
+    AS->>DB: INSERT INTO assessment_settings
+    AS->>DB: COMMIT TRANSACTION
+    AS->>AU: Log assessment creation
+    AS->>A: Return created assessment
+    A->>F: HTTP 201 + Assessment data
+    F->>U: Show success message
+    F->>F: Redirect to edit assessment
+
+```
+
+### 4.8.2 Chỉnh sửa Bài thi
+
+```mermaid
+sequenceDiagram
+    participant U as Teacher
+    participant F as Frontend
+    participant A as API Gateway
+    participant AS as Assessment Service
+    participant DB as Database
+    participant AU as Audit Service
+
+    U->>F: Click "Edit Assessment"
+    F->>A: GET /assessments/{id}
+    A->>AS: Forward request
+    AS->>AS: Check user permissions
+    AS->>DB: SELECT assessment WHERE id AND created_by
+    DB->>AS: Return assessment data
+    AS->>A: Return assessment
+    A->>F: Assessment data
+    F->>U: Show edit form with current data
+
+    U->>F: Update fields & submit
+    F->>A: PUT /assessments/{id}
+    A->>AS: Forward update request
+    AS->>AS: Validate input & permissions
+    AS->>AS: Check business rules (status, attempts)
+    AS->>DB: BEGIN TRANSACTION
+    AS->>DB: UPDATE assessments SET ... WHERE id
+    AS->>DB: UPDATE assessment_settings
+    AS->>DB: COMMIT TRANSACTION
+    AS->>AU: Log assessment modification
+    AS->>A: Return updated assessment
+    A->>F: HTTP 200 + Updated data
+    F->>U: Show success message
+
+```
+
+### 4.8.3 Xóa Bài thi
+
+```mermaid
+sequenceDiagram
+    participant U as Teacher
+    participant F as Frontend
+    participant A as API Gateway
+    participant AS as Assessment Service
+    participant DB as Database
+    participant AU as Audit Service
+
+    U->>F: Click "Delete Assessment"
+    F->>U: Show confirmation dialog
+    U->>F: Confirm deletion
+    F->>A: DELETE /assessments/{id}
+    A->>AS: Forward delete request
+    AS->>AS: Check user permissions
+    AS->>DB: SELECT COUNT(*) FROM attempts WHERE assessment_id
+    DB->>AS: Return attempt count
+
+    alt Has attempts
+        AS->>A: HTTP 409 Conflict
+        A->>F: Cannot delete error
+        F->>U: Show error message
+    else No attempts
+        AS->>DB: BEGIN TRANSACTION
+        AS->>DB: UPDATE assessments SET deleted_at = NOW()
+        AS->>DB: COMMIT TRANSACTION
+        AS->>AU: Log assessment deletion
+        AS->>A: HTTP 204 No Content
+        A->>F: Delete successful
+        F->>F: Remove from list
+        F->>U: Show success message
+    end
+
+```
+
+## 4.9 Sơ đồ Trạng thái Assessment
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draft : Create Assessment
+
+    Draft --> Active : Publish Assessment
+    Draft --> Draft : Edit Assessment
+    Draft --> Deleted : Delete (if no attempts)
+
+    Active --> Expired : Due Date Reached
+    Active --> Expired : Manual Expiration
+    Active --> Draft : Unpublish (if no attempts)
+
+    Expired --> Active : Extend Due Date
+    Expired --> Archived : Archive Assessment
+
+    Deleted --> [*]
+    Archived --> [*]
+
+    note right of Draft
+        - Visible to creator only
+        - Can be edited freely
+        - Can be deleted if no attempts
+        - Students cannot see/take
+    end note
+
+    note right of Active
+        - Visible to assigned students
+        - Students can take assessment
+        - Limited editing allowed
+        - Cannot delete if has attempts
+    end note
+
+    note right of Expired
+        - No new attempts allowed
+        - Existing attempts can continue
+        - Results are available
+        - Can be reactivated
+    end note
+
+    note right of Deleted
+        - Soft deleted (deleted_at set)
+        - Hidden from UI
+        - Data preserved for audit
+        - Cannot be restored via UI
+    end note
+
+    note right of Archived
+        - Read-only state
+        - Results preserved
+        - Hidden from active lists
+        - Can be restored by admin
+    end note
+
+```
+
+## 4.10 Sơ đồ Trạng thái Quyền Truy cập
+
+```mermaid
+stateDiagram-v2
+    [*] --> CheckAuth : Request Received
+
+    CheckAuth --> Unauthorized : Invalid Token
+    CheckAuth --> CheckRole : Valid Token
+
+    CheckRole --> Forbidden : Not Teacher/Admin
+    CheckRole --> CheckOwnership : Teacher Role
+    CheckRole --> Authorized : Admin Role
+
+    CheckOwnership --> Forbidden : Not Owner
+    CheckOwnership --> Authorized : Is Owner
+
+    Authorized --> ProcessRequest : Permission Granted
+    ProcessRequest --> Success : Operation Complete
+    ProcessRequest --> BusinessError : Business Rule Violation
+    ProcessRequest --> SystemError : Technical Error
+
+    Unauthorized --> [*] : Return 401
+    Forbidden --> [*] : Return 403
+    BusinessError --> [*] : Return 400/409
+    SystemError --> [*] : Return 500
+    Success --> [*] : Return 200/201/204
+
+    note right of CheckOwnership
+        For Teacher role:
+        - Can only access own assessments
+        - created_by = current_user_id
+    end note
+
+    note right of Authorized
+        Admin role permissions:
+        - Access all assessments
+        - Override ownership rules
+        - System-wide management
+    end note
+
+```
+
+## 5. Yêu cầu Chức năng
+
+### 5.1 Quy tắc Nghiệp vụ
+
+- **QT-001**: Chỉ Teacher và Admin có quyền tạo assessments
+- **QT-002**: Teacher chỉ có thể quản lý assessments do mình tạo
+- **QT-003**: Admin có thể quản lý tất cả assessments trong hệ thống
+- **QT-004**: Assessment mới được tạo với trạng thái "Draft" mặc định
+- **QT-005**: Chỉ có thể xóa assessment khi chưa có attempts nào
+- **QT-006**: Assessment title phải unique trong phạm vi của creator
+- **QT-007**: Thời gian làm bài tối thiểu 5 phút, tối đa 180 phút
+- **QT-008**: Điểm chuẩn phải trong khoảng 0-100
+- **QT-009**: Ngày hết hạn phải lớn hơn ngày hiện tại
+
+### 5.2 Quy tắc Xác thực
+
+- **XT-001**: Title không được để trống và tối đa 200 ký tự
+- **XT-002**: Description tối đa 1000 ký tự
+- **XT-003**: Duration phải là số nguyên dương (5-180 phút)
+- **XT-004**: Passing score phải là số trong khoảng 0-100
+- **XT-005**: Max attempts phải là số nguyên dương (1-10)
+- **XT-006**: Due date phải có format ISO 8601 hợp lệ
+
+### 5.3 Yêu cầu Dữ liệu
+
+- **Dữ liệu Đầu vào**:
+    - Assessment metadata (title, description, duration, etc.)
+    - Assessment settings (randomize, show_results, etc.)
+    - Creator information từ JWT token
+- **Dữ liệu Đầu ra**:
+    - Assessment object với full details
+    - Operation status và messages
+    - Updated assessment list for UI refresh
+- **Dữ liệu Lưu trữ**:
+    - Assessments table với foreign key tới Users
+    - Assessment settings trong separate table
+    - Audit logs cho tracking changes
+
+## 6. Yêu cầu Phi chức năng
+
+### 6.1 Hiệu suất
+
+- Assessment creation: <500ms
+- Assessment update: <300ms
+- Assessment deletion: <200ms
+- Assessment list loading: <200ms with pagination
+- Search/filter operations: <300ms
+
+### 6.2 Bảo mật
+
+- **BM-001**: Implement proper authorization checks cho mọi operation
+- **BM-002**: Sanitize và validate tất cả input data
+- **BM-003**: Use parameterized queries để tránh SQL injection
+- **BM-004**: Log tất cả assessment modifications với user tracking
+- **BM-005**: Implement rate limiting cho creation operations
+- **BM-006**: Encrypt sensitive assessment data nếu cần
+
+### 6.3 Độ tin cậy
+
+- **TC-001**: 99.95% availability cho assessment CRUD operations
+- **TC-002**: Automatic backup assessment data mỗi 24 giờ
+- **TC-003**: Transaction rollback khi operation fails
+- **TC-004**: Graceful error handling với user-friendly messages
+
+### 6.4 Khả năng sử dụng
+
+- **SD-001**: Intuitive UI với clear action buttons và confirmations
+- **SD-002**: Real-time validation feedback trên forms
+- **SD-003**: Auto-save draft functionality mỗi 30 giây
+- **SD-004**: Responsive design cho mobile/tablet support
+- **SD-005**: Keyboard shortcuts cho power users
+- **SD-006**: Bulk operations cho managing multiple assessments
+
+## 7. Đặc tả API
+
+### 7.1 Assessment Management APIs
+
+```yaml
+paths:
+  /assessments:
+    get:
+      summary: List assessments with pagination and filtering
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Draft, Active, Expired]
+        - name: search
+          in: query
+          schema:
+            type: string
+            description: Search trong title và description
+      responses:
+        '200':
+          description: Assessment list retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentPage'
+
+    post:
+      summary: Create new assessment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssessmentCreateRequest'
+      responses:
+        '201':
+          description: Assessment created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assessment'
+        '400':
+          description: Validation errors
+        '403':
+          description: Insufficient permissions
+
+  /assessments/{assessmentId}:
+    get:
+      summary: Get assessment details by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: assessmentId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Assessment details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assessment'
+        '404':
+          description: Assessment not found
+        '403':
+          description: Access denied
+
+    put:
+      summary: Update assessment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: assessmentId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssessmentUpdateRequest'
+      responses:
+        '200':
+          description: Assessment updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assessment'
+        '400':
+          description: Validation errors
+        '403':
+          description: Access denied
+        '404':
+          description: Assessment not found
+
+    delete:
+      summary: Delete assessment (soft delete)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: assessmentId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '204':
+          description: Assessment deleted successfully
+        '403':
+          description: Access denied
+        '404':
+          description: Assessment not found
+        '409':
+          description: Cannot delete - assessment has attempts
+
+  /assessments/{assessmentId}/status:
+    patch:
+      summary: Update assessment status
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: assessmentId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [Draft, Active, Expired]
+                reason:
+                  type: string
+                  description: Reason for status change
+              required: [status]
+      responses:
+        '200':
+          description: Status updated successfully
+        '400':
+          description: Invalid status transition
+        '403':
+          description: Access denied
+
+components:
+  schemas:
+    Assessment:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        title:
+          type: string
+          example: "Java Programming Quiz"
+        description:
+          type: string
+          example: "Basic concepts of Java programming"
+        duration:
+          type: integer
+          example: 60
+          description: Duration in minutes
+        status:
+          type: string
+          enum: [Draft, Active, Expired]
+          example: "Draft"
+        passingScore:
+          type: integer
+          example: 70
+          description: Minimum score to pass (0-100)
+        maxAttempts:
+          type: integer
+          example: 2
+          description: Maximum attempts allowed
+        dueDate:
+          type: string
+          format: date-time
+          example: "2025-03-15T23:59:59Z"
+        createdBy:
+          type: string
+          example: "Mike Johnson"
+        createdDate:
+          type: string
+          format: date-time
+          example: "2025-02-15T10:30:00Z"
+        updatedDate:
+          type: string
+          format: date-time
+          example: "2025-02-16T14:20:00Z"
+        questionsCount:
+          type: integer
+          example: 4
+          description: Number of questions in assessment
+        settings:
+          $ref: '#/components/schemas/AssessmentSettings'
+
+    AssessmentCreateRequest:
+      type: object
+      required: [title, duration, passingScore]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: "Java Programming Quiz"
+        description:
+          type: string
+          maxLength: 1000
+          example: "Basic concepts of Java programming"
+        duration:
+          type: integer
+          minimum: 5
+          maximum: 180
+          example: 60
+        passingScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 70
+        maxAttempts:
+          type: integer
+          minimum: 1
+          maximum: 10
+          example: 2
+        dueDate:
+          type: string
+          format: date-time
+          example: "2025-03-15T23:59:59Z"
+        settings:
+          $ref: '#/components/schemas/AssessmentSettingsRequest'
+
+    AssessmentUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+        duration:
+          type: integer
+          minimum: 5
+          maximum: 180
+        passingScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+        maxAttempts:
+          type: integer
+          minimum: 1
+          maximum: 10
+        dueDate:
+          type: string
+          format: date-time
+        settings:
+          $ref: '#/components/schemas/AssessmentSettingsRequest'
+
+    AssessmentSettings:
+      type: object
+      properties:
+        randomizeQuestions:
+          type: boolean
+          example: true
+        showResults:
+          type: boolean
+          example: true
+        allowRetake:
+          type: boolean
+          example: false
+        timeLimitEnforced:
+          type: boolean
+          example: true
+        requireWebcam:
+          type: boolean
+          example: true
+        preventTabSwitching:
+          type: boolean
+          example: true
+        requireIdentityVerification:
+          type: boolean
+          example: false
+
+    AssessmentSettingsRequest:
+      type: object
+      properties:
+        randomizeQuestions:
+          type: boolean
+          default: false
+        showResults:
+          type: boolean
+          default: true
+        allowRetake:
+          type: boolean
+          default: false
+        timeLimitEnforced:
+          type: boolean
+          default: true
+        requireWebcam:
+          type: boolean
+          default: false
+        preventTabSwitching:
+          type: boolean
+          default: false
+        requireIdentityVerification:
+          type: boolean
+          default: false
+
+    AssessmentPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssessmentSummary'
+        pageable:
+          $ref: '#/components/schemas/PageableObject'
+        totalElements:
+          type: integer
+          example: 42
+        totalPages:
+          type: integer
+          example: 5
+        last:
+          type: boolean
+          example: false
+        first:
+          type: boolean
+          example: true
+        numberOfElements:
+          type: integer
+          example: 10
+        size:
+          type: integer
+          example: 10
+        empty:
+          type: boolean
+          example: false
+
+    AssessmentSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        duration:
+          type: integer
+        status:
+          type: string
+          enum: [Draft, Active, Expired]
+        dueDate:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+        createdDate:
+          type: string
+          format: date-time
+        attempts:
+          type: integer
+          description: Total number of attempts
+        passingScore:
+          type: integer
+        questionsCount:
+          type: integer
+
+```
+
+### 7.2 Database Schema
+
+```sql
+-- Assessments table
+CREATE TABLE assessments (
+    id BIGSERIAL PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    duration INTEGER NOT NULL CHECK (duration >= 5 AND duration <= 180),
+    status VARCHAR(20) NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft', 'Active', 'Expired')),
+    passing_score INTEGER NOT NULL CHECK (passing_score >= 0 AND passing_score <= 100),
+    max_attempts INTEGER NOT NULL DEFAULT 1 CHECK (max_attempts >= 1 AND max_attempts <= 10),
+    due_date TIMESTAMP WITH TIME ZONE,
+    created_by BIGINT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    deleted_at TIMESTAMP WITH TIME ZONE,
+
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    UNIQUE(title, created_by, deleted_at)
+);
+
+-- Assessment settings table
+CREATE TABLE assessment_settings (
+    assessment_id BIGINT PRIMARY KEY,
+    randomize_questions BOOLEAN DEFAULT FALSE,
+    show_results BOOLEAN DEFAULT TRUE,
+    allow_retake BOOLEAN DEFAULT FALSE,
+    time_limit_enforced BOOLEAN DEFAULT TRUE,
+    require_webcam BOOLEAN DEFAULT FALSE,
+    prevent_tab_switching BOOLEAN DEFAULT FALSE,
+    require_identity_verification BOOLEAN DEFAULT FALSE,
+
+    FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE
+);
+
+-- Indexes for performance
+CREATE INDEX idx_assessments_created_by ON assessments(created_by);
+CREATE INDEX idx_assessments_status ON assessments(status);
+CREATE INDEX idx_assessments_due_date ON assessments(due_date);
+CREATE INDEX idx_assessments_deleted_at ON assessments(deleted_at);
+CREATE INDEX idx_assessments_title_search ON assessments USING gin(to_tsvector('english', title || ' ' || COALESCE(description, '')));
+
+```
+
+## 8. Sơ đồ Kiến trúc và Luồng Dữ liệu
+
+### 8.1 Sơ đồ Kiến trúc Tổng quan
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        UI[Web UI<br/>React/Vue]
+        API_CLIENT[API Client<br/>Axios/Fetch]
+    end
+
+    subgraph "API Gateway Layer"
+        GATEWAY[API Gateway<br/>Authentication & Routing]
+        RATE_LIMITER[Rate Limiter]
+        VALIDATOR[Request Validator]
+    end
+
+    subgraph "Service Layer"
+        AS[Assessment Service<br/>Go/Java]
+        AUTH[Auth Service<br/>Casdoor]
+        AUDIT[Audit Service]
+    end
+
+    subgraph "Data Layer"
+        POSTGRES[(PostgreSQL<br/>Assessment Data)]
+        REDIS[(Redis<br/>Cache & Sessions)]
+        FILES[File Storage<br/>DigitalOcean Spaces]
+    end
+
+    UI --> API_CLIENT
+    API_CLIENT --> GATEWAY
+    GATEWAY --> RATE_LIMITER
+    RATE_LIMITER --> VALIDATOR
+    VALIDATOR --> AS
+
+    AS --> AUTH
+    AS --> AUDIT
+    AS --> POSTGRES
+    AS --> REDIS
+    AS --> FILES
+
+    AUTH --> POSTGRES
+    AUDIT --> POSTGRES
+
+```
+
+### 8.2 Luồng Dữ liệu Assessment CRUD
+
+```mermaid
+flowchart TD
+    START([User Action]) --> AUTH_CHECK{Valid Token?}
+    AUTH_CHECK -->|No| RETURN_401[Return 401 Unauthorized]
+    AUTH_CHECK -->|Yes| ROLE_CHECK{Teacher/Admin Role?}
+
+    ROLE_CHECK -->|No| RETURN_403[Return 403 Forbidden]
+    ROLE_CHECK -->|Yes| OPERATION{Operation Type}
+
+    OPERATION -->|CREATE| VALIDATE_CREATE[Validate Create Data]
+    OPERATION -->|READ| CHECK_OWNERSHIP[Check Ownership/Admin]
+    OPERATION -->|UPDATE| CHECK_UPDATE_PERM[Check Update Permission]
+    OPERATION -->|DELETE| CHECK_DELETE_PERM[Check Delete Permission]
+
+    VALIDATE_CREATE --> CREATE_DB[Insert to Database]
+    CHECK_OWNERSHIP -->|Authorized| FETCH_DB[Fetch from Database]
+    CHECK_UPDATE_PERM -->|Authorized| VALIDATE_UPDATE[Validate Update Data]
+    CHECK_DELETE_PERM -->|Authorized| CHECK_ATTEMPTS[Check Existing Attempts]
+
+    CREATE_DB --> LOG_AUDIT[Log to Audit Service]
+    FETCH_DB --> CACHE_RESULT[Cache Result]
+    VALIDATE_UPDATE --> UPDATE_DB[Update Database]
+    CHECK_ATTEMPTS -->|No Attempts| SOFT_DELETE[Soft Delete Record]
+    CHECK_ATTEMPTS -->|Has Attempts| RETURN_409[Return 409 Conflict]
+
+    LOG_AUDIT --> RETURN_SUCCESS[Return Success Response]
+    CACHE_RESULT --> RETURN_DATA[Return Assessment Data]
+    UPDATE_DB --> LOG_AUDIT
+    SOFT_DELETE --> LOG_AUDIT
+
+    CHECK_OWNERSHIP -->|Denied| RETURN_403
+    CHECK_UPDATE_PERM -->|Denied| RETURN_403
+    CHECK_DELETE_PERM -->|Denied| RETURN_403
+
+    VALIDATE_CREATE -->|Invalid| RETURN_400[Return 400 Bad Request]
+    VALIDATE_UPDATE -->|Invalid| RETURN_400
+
+    RETURN_401 --> END([End])
+    RETURN_403 --> END
+    RETURN_400 --> END
+    RETURN_409 --> END
+    RETURN_SUCCESS --> END
+    RETURN_DATA --> END
+
+```
+
+## 9. Test Cases
+
+### 9.1 Unit Tests
+
+```go
+func TestCreateAssessment_Success(t *testing.T) {
+    // Test successful assessment creation with valid data
+    req := &AssessmentCreateRequest{
+        Title: "Test Assessment",
+        Duration: 60,
+        PassingScore: 70,
+    }
+
+    assessment, err := service.CreateAssessment(ctx, req, teacherID)
+    assert.NoError(t, err)
+    assert.Equal(t, "Test Assessment", assessment.Title)
+    assert.Equal(t, "Draft", assessment.Status)
+    assert.Equal(t, teacherID, assessment.CreatedBy)
+}
+
+func TestCreateAssessment_ValidationError(t *testing.T) {
+    // Test validation errors for invalid input
+    req := &AssessmentCreateRequest{
+        Title: "", // Empty title should fail
+        Duration: 300, // Duration too long
+        PassingScore: 150, // Invalid passing score
+    }
+
+    _, err := service.CreateAssessment(ctx, req, teacherID)
+    assert.Error(t, err)
+    assert.Contains(t, err.Error(), "title is required")
+}
+
+func TestUpdateAssessment_PermissionCheck(t *testing.T) {
+    // Test that users can only update their own assessments
+    assessment := createTestAssessment(t, teacher1ID)
+
+    req := &AssessmentUpdateRequest{Title: "Updated Title"}
+    _, err := service.UpdateAssessment(ctx, assessment.ID, req, teacher2ID)
+
+    assert.Error(t, err)
+    assert.Equal(t, ErrAccessDenied, err)
+}
+
+```
+
+### 9.2 Integration Tests
+
+```go
+func TestAssessmentCRUD_EndToEnd(t *testing.T) {
+    // Test complete CRUD flow with database
+    // 1. Create assessment
+    // 2. Read assessment details
+    // 3. Update assessment
+    // 4. Delete assessment
+    // 5. Verify audit logs
+}
+
+func TestAssessmentAPI_Authorization(t *testing.T) {
+    // Test API endpoints với different roles
+    // Student should not be able to create/update/delete
+    // Teacher can manage own assessments
+    // Admin can manage all assessments
+}
+
+```
+
+## 10. Monitoring và Alerting
+
+### 10.1 Metrics cần theo dõi
+
+- **Performance Metrics**:
+    - API response times cho từng endpoint
+    - Database query execution times
+    - Memory và CPU usage của Assessment Service
+    - Cache hit/miss ratios
+- **Business Metrics**:
+    - Number of assessments created per day/week
+    - Assessment status distribution (Draft/Active/Expired)
+    - User adoption rate (active teachers creating assessments)
+    - Assessment completion rates
+- **Error Metrics**:
+    - HTTP error rates (4xx, 5xx)
+    - Database connection failures
+    - Validation error frequencies
+    - Authorization failures
+
+### 10.2 Alerts cần thiết lập
+
+```yaml
+alerts:
+  - name: "High API Response Time"
+    condition: "avg(api_response_time) > 500ms"
+    severity: "warning"
+
+  - name: "Assessment Creation Failures"
+    condition: "rate(assessment_create_errors) > 5%"
+    severity: "critical"
+
+  - name: "Database Connection Issues"
+    condition: "database_connection_failures > 0"
+    severity: "critical"
+
+  - name: "Unauthorized Access Attempts"
+    condition: "rate(403_errors) > 10/min"
+    severity: "warning"
+
+```
+
+# Tài liệu Đặc tả các Tính năng AS (Assessment System)
+
+## AS-002: Thiết lập thời gian thi, số lần làm bài cho phép
+
+**Mức độ**: Normal Change
+**Dependencies**: AS-001
+
+### User Story
+Là giáo viên, tôi muốn thiết lập thời gian làm bài và giới hạn số lần thi để kiểm soát điều kiện thi một cách linh hoạt.
+
+### Acceptance Criteria
+- Thiết lập thời gian thi: 5-300 phút
+- Số lần làm bài: 1-10 lần
+- Tự động hết giờ khi timeout
+- Tracking remaining attempts per student
+
+### Technical Implementation
+```go
+type AssessmentSettings struct {
+    Duration     int  `json:"duration" validate:"min=5,max=300"`
+    MaxAttempts  int  `json:"max_attempts" validate:"min=1,max=10"`
+    TimeWarning  int  `json:"time_warning" default:"300"` // Warn 5 mins before
+}
+
+// Extend Assessment model
+type Assessment struct {
+    // ... existing fields
+    TimeSettings AssessmentTimeSettings `gorm:"embedded"`
+}
+```
+
+### Business Rules
+- **QT-001**: Duration có thể thay đổi khi assessment ở trạng thái Draft
+- **QT-002**: Max attempts chỉ có thể tăng, không giảm khi có attempts
+- **QT-003**: Time warnings ở 50%, 25%, 5 minutes remaining
+
+---
+
+## AS-003: Quản lý trạng thái bài thi (Draft, Active, Expired)
+
+**Mức độ**: Normal Change
+**Dependencies**: AS-001
+
+### User Story
+Là giáo viên, tôi muốn quản lý trạng thái bài thi để kiểm soát khi nào học sinh có thể làm bài.
+
+### State Transitions
+```mermaid
+stateDiagram-v2
+    [*] --> Draft
+    Draft --> Active : publish()
+    Active --> Expired : expire() / due_date
+    Expired --> Active : reactivate()
+    Draft --> Archived : archive()
+    Active --> Archived : archive()
+```
+
+### Technical Implementation
+- Extend existing status management in AS-001
+- Add scheduled job for auto-expiration
+- Add bulk status operations
+
+---
+
+## AS-004: Nhập/xuất câu hỏi từ file (Excel, CSV) 📦 **BIG CHANGE**
+
+**Mức độ**: Big Change
+**Dependencies**: AS-001, File Upload Service
+
+### User Story
+Là giáo viên, tôi muốn nhập hàng loạt câu hỏi từ file Excel/CSV để tiết kiệm thời gian tạo bài thi.
+
+### Detailed Specification
+
+#### 4.1 Supported File Formats
+- **Excel (.xlsx)**: Primary format với rich formatting
+- **CSV (.csv)**: Simple format với UTF-8 encoding
+- **JSON**: Structured format cho advanced users
+
+#### 4.2 File Structure Template
+
+**Excel Template:**
+```
+| Question Type | Question Text | Option A | Option B | Option C | Option D | Correct Answer | Points | Category | Difficulty |
+|---------------|---------------|----------|----------|----------|----------|----------------|--------|----------|------------|
+| multiple      | What is...?   | Answer 1 | Answer 2 | Answer 3 | Answer 4 | A              | 10     | Math     | Easy       |
+| true_false    | Is this...?   | True     | False    |          |          | A              | 5      | Logic    | Medium     |
+| essay         | Explain...    |          |          |          |          |                | 20     | Essay    | Hard       |
+```
+
+#### 4.3 Import Process Flow
+
+```mermaid
+sequenceDiagram
+    participant T as Teacher
+    participant UI as Frontend
+    participant API as Assessment API
+    participant FS as File Service
+    participant Q as Queue
+    participant DB as Database
+
+    T->>UI: Upload file
+    UI->>FS: Store file temporarily
+    FS->>API: POST /assessments/{id}/questions/import
+    API->>Q: Queue import job
+    API-->>UI: HTTP 202 Accepted (job_id)
+    UI-->>T: "Processing... check back later"
+
+    Q->>API: Process import job
+    API->>FS: Download & parse file
+    API->>API: Validate questions
+    API->>DB: Bulk insert questions
+    API->>Q: Publish import_completed event
+    Q->>UI: WebSocket notification
+    UI-->>T: "Import completed!"
+```
+
+#### 4.4 Validation Rules
+
+```go
+type QuestionImportValidator struct {
+    MaxQuestions    int `default:"1000"`
+    MaxFileSize     int `default:"10485760"` // 10MB
+    AllowedTypes    []string `default:"multiple,true_false,essay"`
+    RequiredFields  []string `default:"question_text,question_type"`
+}
+
+type ImportValidationError struct {
+    Row     int    `json:"row"`
+    Column  string `json:"column"`
+    Message string `json:"message"`
+    Value   string `json:"value"`
+}
+```
+
+#### 4.5 Technical Implementation
+
+**File Parser Service:**
+```go
+type FileParser interface {
+    ParseExcel(file io.Reader) (*ImportData, error)
+    ParseCSV(file io.Reader) (*ImportData, error)
+    ValidateData(data *ImportData) []ImportValidationError
+}
+
+type ImportJob struct {
+    ID           string    `json:"id"`
+    AssessmentID uint      `json:"assessment_id"`
+    UserID       uint      `json:"user_id"`
+    FileName     string    `json:"file_name"`
+    Status       string    `json:"status"` // pending, processing, completed, failed
+    Progress     int       `json:"progress"` // 0-100
+    TotalRows    int       `json:"total_rows"`
+    ProcessedRows int      `json:"processed_rows"`
+    Errors       []ImportValidationError `json:"errors"`
+    CreatedAt    time.Time `json:"created_at"`
+}
+```
+
+**Async Processing:**
+```go
+func (s *QuestionService) ProcessImportJob(ctx context.Context, jobID string) error {
+    job, err := s.getImportJob(jobID)
+    if err != nil {
+        return err
+    }
+
+    // Download file
+    file, err := s.fileService.Download(job.FilePath)
+    if err != nil {
+        return s.updateJobStatus(jobID, "failed", err.Error())
+    }
+
+    // Parse file
+    parser := s.getParser(job.FileType)
+    data, err := parser.Parse(file)
+    if err != nil {
+        return s.updateJobStatus(jobID, "failed", err.Error())
+    }
+
+    // Validate data
+    errors := parser.ValidateData(data)
+    if len(errors) > 0 {
+        return s.updateJobWithErrors(jobID, "validation_failed", errors)
+    }
+
+    // Batch insert questions
+    return s.batchInsertQuestions(ctx, job.AssessmentID, data.Questions, jobID)
+}
+```
+
+#### 4.6 Export Functionality
+
+```go
+type ExportRequest struct {
+    AssessmentID uint     `json:"assessment_id"`
+    Format       string   `json:"format" validate:"oneof=xlsx csv json"`
+    IncludeStats bool     `json:"include_stats"`
+    Categories   []string `json:"categories"`
+}
+
+func (h *QuestionHandler) ExportQuestions(w http.ResponseWriter, r *http.Request) {
+    // Generate export file
+    // Stream download to client
+    // Log export event
+}
+```
+
+---
+
+## AS-005: Phân loại câu hỏi theo độ khó và chủ đề
+
+**Mức độ**: Normal Change
+**Dependencies**: AS-004
+
+### User Story
+Là giáo viên, tôi muốn phân loại câu hỏi để dễ dàng quản lý và tạo bài thi cân bằng.
+
+### Technical Implementation
+```go
+type QuestionCategory struct {
+    ID          uint   `json:"id"`
+    Name        string `json:"name"`
+    Description string `json:"description"`
+    Color       string `json:"color"`
+    CreatedBy   uint   `json:"created_by"`
+}
+
+type Question struct {
+    // ... existing fields
+    CategoryID   *uint      `json:"category_id"`
+    Difficulty   string     `json:"difficulty" validate:"oneof=easy medium hard"`
+    Tags         []string   `json:"tags" gorm:"type:text[]"`
+
+    Category     *QuestionCategory `gorm:"foreignKey:CategoryID"`
+}
+```
+
+### Features
+- Hierarchical categories (Math > Algebra > Equations)
+- Difficulty: Easy/Medium/Hard with auto-scoring
+- Tag system for flexible filtering
+- Smart question selection by difficulty distribution
+
+---
+
+## AS-006: Hỗ trợ nhiều loại câu hỏi: Multiple choice, True/False, Essay 📦 **BIG CHANGE**
+
+**Mức độ**: Big Change
+**Dependencies**: AS-005
+
+### Detailed Question Types Implementation
+
+#### 6.1 Question Type Architecture
+
+```go
+type QuestionType string
+
+const (
+    MultipleChoice QuestionType = "multiple_choice"
+    TrueFalse     QuestionType = "true_false"
+    Essay         QuestionType = "essay"
+    FillInBlank   QuestionType = "fill_blank"
+    Matching      QuestionType = "matching"
+    Ordering      QuestionType = "ordering"
+)
+
+type Question struct {
+    ID           uint         `json:"id"`
+    Type         QuestionType `json:"type"`
+    Text         string       `json:"text"`
+    Points       int          `json:"points"`
+    TimeLimit    *int         `json:"time_limit"` // seconds
+
+    // Polymorphic content based on type
+    Content      json.RawMessage `json:"content" gorm:"type:jsonb"`
+
+    // Common fields
+    Explanation  *string      `json:"explanation"`
+    Attachments  []Attachment `json:"attachments"`
+}
+```
+
+#### 6.2 Question Content Schemas
+
+**Multiple Choice:**
+```go
+type MultipleChoiceContent struct {
+    Options          []Option `json:"options" validate:"min=2,max=10"`
+    CorrectAnswers   []int    `json:"correct_answers"`
+    Randomize        bool     `json:"randomize"`
+    MultipleCorrect  bool     `json:"multiple_correct"`
+}
+
+type Option struct {
+    ID    string  `json:"id"`
+    Text  string  `json:"text"`
+    Image *string `json:"image_url"`
+}
+```
+
+**Essay Question:**
+```go
+type EssayContent struct {
+    MinWords        int      `json:"min_words"`
+    MaxWords        int      `json:"max_words"`
+    SuggestedLength string   `json:"suggested_length"`
+    RubricPoints    []string `json:"rubric_points"`
+    SampleAnswer    *string  `json:"sample_answer"`
+    AutoGrade       bool     `json:"auto_grade"`
+}
+```
+
+**Fill in the Blank:**
+```go
+type FillBlankContent struct {
+    Template    string              `json:"template"` // "The capital of {blank1} is {blank2}"
+    Blanks      map[string]BlankDef `json:"blanks"`
+    CaseSensitive bool              `json:"case_sensitive"`
+}
+
+type BlankDef struct {
+    AcceptedAnswers []string `json:"accepted_answers"`
+    Points          int      `json:"points"`
+}
+```
+
+#### 6.3 Question Builder UI Component
+
+**Frontend Architecture:**
+```typescript
+interface QuestionBuilder {
+    type: QuestionType;
+    content: QuestionContent;
+    settings: QuestionSettings;
+}
+
+// Vue/React component structure
+<QuestionBuilder>
+    <TypeSelector @change="handleTypeChange" />
+
+    <!-- Dynamic component based on question type -->
+    <MultipleChoiceBuilder v-if="type === 'multiple_choice'" />
+    <EssayBuilder v-if="type === 'essay'" />
+    <FillBlankBuilder v-if="type === 'fill_blank'" />
+
+    <AttachmentUploader />
+    <QuestionPreview />
+</QuestionBuilder>
+```
+
+#### 6.4 Grading Engine
+
+```go
+type GradingEngine interface {
+    GradeAnswer(question Question, studentAnswer interface{}) (GradingResult, error)
+    GetMaxPoints(question Question) int
+}
+
+type MultipleChoiceGrader struct{}
+func (g *MultipleChoiceGrader) GradeAnswer(question Question, answer []string) (GradingResult, error) {
+    content := unmarshalContent[MultipleChoiceContent](question.Content)
+
+    // Partial credit logic
+    correct := 0
+    total := len(content.CorrectAnswers)
+
+    for _, studentAnswer := range answer {
+        if contains(content.CorrectAnswers, studentAnswer) {
+            correct++
+        }
+    }
+
+    return GradingResult{
+        Points: int(float64(question.Points) * float64(correct) / float64(total)),
+        Feedback: generateFeedback(correct, total),
+    }, nil
+}
+```
+
+---
+
+## AS-007: Upload và quản lý file đính kèm (hình ảnh, video, audio)
+
+**Mức độ**: Normal Change
+**Dependencies**: File Upload Service
+
+### User Story
+Là giáo viên, tôi muốn đính kèm media files vào câu hỏi để tạo bài thi đa phương tiện.
+
+### Technical Implementation
+```go
+type Attachment struct {
+    ID       uint   `json:"id"`
+    FileName string `json:"file_name"`
+    FileType string `json:"file_type"`
+    FileSize int64  `json:"file_size"`
+    URL      string `json:"url"`
+    MimeType string `json:"mime_type"`
+}
+
+// Supported formats
+var SupportedFormats = map[string][]string{
+    "image": {"jpg", "jpeg", "png", "gif", "webp"},
+    "video": {"mp4", "webm", "mov"},
+    "audio": {"mp3", "wav", "m4a"},
+    "document": {"pdf", "doc", "docx"},
+}
+```
+
+### Features
+- File type validation và virus scanning
+- Auto-resize images for optimal loading
+- Video thumbnail generation
+- CDN integration for fast delivery
+- Quota management per teacher/organization
+
+---
+
+## AS-008: Tạo ngân hàng câu hỏi với khả năng tái sử dụng
+
+**Mức độ**: Normal Change
+**Dependencies**: AS-006
+
+### User Story
+Là giáo viên, tôi muốn tạo thư viện câu hỏi để tái sử dụng trong nhiều bài thi khác nhau.
+
+### Technical Implementation
+```go
+type QuestionBank struct {
+    ID          uint   `json:"id"`
+    Name        string `json:"name"`
+    Description string `json:"description"`
+    IsPublic    bool   `json:"is_public"`
+    CreatedBy   uint   `json:"created_by"`
+
+    Questions   []Question `gorm:"many2many:question_bank_questions"`
+}
+
+type AssessmentQuestion struct {
+    AssessmentID uint `json:"assessment_id"`
+    QuestionID   uint `json:"question_id"`
+    Order        int  `json:"order"`
+    Points       int  `json:"points"` // Can override question default points
+}
+```
+
+### Features
+- Personal và shared question banks
+- Question versioning và change tracking
+- Bulk import/export between banks
+- Usage analytics (most used questions)
+- Collaborative editing với approval workflow
+
+---
+
+## AS-009: Thiết lập điểm số và tiêu chí đánh giá
+
+**Mức độ**: Normal Change
+**Dependencies**: AS-006
+
+### User Story
+Là giáo viên, tôi muốn thiết lập cách tính điểm linh hoạt và tiêu chí đánh giá rõ ràng.
+
+### Technical Implementation
+```go
+type GradingScheme struct {
+    ID            uint              `json:"id"`
+    AssessmentID  uint              `json:"assessment_id"`
+    Type          string            `json:"type"` // percentage, points, letter
+    PassingScore  int               `json:"passing_score"`
+    GradeRanges   []GradeRange      `json:"grade_ranges"`
+    Weightings    []QuestionWeight  `json:"weightings"`
+}
+
+type GradeRange struct {
+    MinScore  int    `json:"min_score"`
+    MaxScore  int    `json:"max_score"`
+    Grade     string `json:"grade"`
+    Label     string `json:"label"`
+}
+```
+
+### Features
+- Flexible scoring: Points, percentage, letter grades
+- Question weighting by category/difficulty
+- Partial credit configuration
+- Custom rubrics for essay questions
+- Grade curve adjustments
+
+---
+
+## Summary & Implementation Priority
+
+### Phase 1 (Core Features)
+1. ✅ **AS-001**: CRUD Operations (Completed)
+2. 🔄 **AS-002**: Time & Attempt Settings
+3. 🔄 **AS-003**: Status Management
+4. 🔄 **AS-005**: Question Categories
+
+### Phase 2 (Big Changes)
+1. 📦 **AS-004**: File Import/Export
+2. 📦 **AS-006**: Multiple Question Types
+3. 🔄 **AS-007**: File Attachments
+4. 🔄 **AS-008**: Question Banks
+
+### Phase 3 (Advanced Features)
+1. 🔄 **AS-009**: Advanced Grading
+2. Integration với Proctoring System
+3. Analytics và Reporting
+4. AI-powered question generation
+
+### Technical Dependencies
+- **File Upload Service**: Required for AS-004, AS-007
+- **Queue System**: Required for AS-004 (Watermill ✅)
+- **WebSocket**: Required for real-time notifications
+- **CDN**: Required for media file delivery
+- **AI Service**: Optional for advanced features
+
+Mỗi tính năng đều có estimate timeline và resource requirements riêng. Big changes như AS-004 và AS-006 cần 2-3 sprint, normal changes có thể hoàn thành trong 1 sprint.
