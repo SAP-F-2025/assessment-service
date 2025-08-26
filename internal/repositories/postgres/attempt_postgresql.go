@@ -657,22 +657,26 @@ func (ar *AnswerPostgreSQL) UpdateBatch(ctx context.Context, answers []*models.S
 	})
 }
 
-// UpsertAnswer creates or updates an answer
+// UpsertAnswer creates or updates an answer atomically using ON CONFLICT
 func (ar *AnswerPostgreSQL) UpsertAnswer(ctx context.Context, answer *models.StudentAnswer) error {
-	// Check if answer already exists
-	existing, err := ar.GetByAttemptAndQuestion(ctx, answer.AttemptID, answer.QuestionID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return fmt.Errorf("failed to check existing answer: %w", err)
+	// Use ON CONFLICT for atomic upsert
+	err := ar.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "attempt_id"},
+			{Name: "question_id"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"answer", "updated_at", // add other fields to update as needed
+		}),
+	}).Create(answer).Error
+	if err != nil {
+		return fmt.Errorf("failed to upsert answer: %w", err)
 	}
 
-	if existing != nil {
-		// Update existing answer
-		answer.ID = existing.ID
-		return ar.Update(ctx, answer)
-	}
+	// Invalidate cache for the affected attempt
+	ar.cacheManager.Fast.InvalidatePattern(ctx, fmt.Sprintf("attempt:%d:*", answer.AttemptID))
 
-	// Create new answer
-	return ar.Create(ctx, answer)
+	return nil
 }
 
 // ===== QUERY OPERATIONS =====
