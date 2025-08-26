@@ -50,7 +50,6 @@ type QuestionRepository interface {
 
 	// Content management
 	UpdateContent(ctx context.Context, id uint, content interface{}) error
-	ValidateContent(ctx context.Context, questionType models.QuestionType, content interface{}) error
 }
 
 // QuestionCategoryRepository interface for question category operations

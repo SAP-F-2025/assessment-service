@@ -1,0 +1,611 @@
+package postgres
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/SAP-F-2025/assessment-service/internal/cache"
+	"github.com/SAP-F-2025/assessment-service/internal/models"
+	"github.com/SAP-F-2025/assessment-service/internal/repositories"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+)
+
+type QuestionPostgreSQL struct {
+	db           *gorm.DB
+	helpers      *SharedHelpers
+	cacheManager *cache.CacheManager
+}
+
+func NewQuestionPostgreSQL(db *gorm.DB, redisClient *redis.Client) repositories.QuestionRepository {
+	return &QuestionPostgreSQL{
+		db:           db,
+		helpers:      NewSharedHelpers(db),
+		cacheManager: cache.NewCacheManager(redisClient),
+	}
+}
+
+// ===== BASIC CRUD OPERATIONS =====
+
+// Create creates a new question and invalidates cache
+func (q *QuestionPostgreSQL) Create(ctx context.Context, question *models.Question) error {
+	if err := q.db.WithContext(ctx).Create(question).Error; err != nil {
+		return fmt.Errorf("failed to create question: %w", err)
+	}
+
+	// Invalidate related caches
+	q.cacheManager.Question.InvalidatePattern(ctx, fmt.Sprintf("creator:%d:*", question.CreatedBy))
+	q.cacheManager.Question.InvalidatePattern(ctx, "list:*")
+
+	return nil
+}
+
+// GetByID retrieves a question by ID with caching
+func (q *QuestionPostgreSQL) GetByID(ctx context.Context, id uint) (*models.Question, error) {
+	// Try cache first for performance
+	cacheKey := fmt.Sprintf("id:%d", id)
+	var question models.Question
+
+	err := q.cacheManager.Question.CacheOrExecute(ctx, cacheKey, &question, cache.QuestionCacheConfig.TTL, func() (interface{}, error) {
+		var dbQuestion models.Question
+		if err := q.db.WithContext(ctx).First(&dbQuestion, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("question not found with ID %d", id)
+			}
+			return nil, fmt.Errorf("failed to get question: %w", err)
+		}
+		return &dbQuestion, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &question, nil
+}
+
+// GetByIDWithDetails retrieves a question with all related data
+func (q *QuestionPostgreSQL) GetByIDWithDetails(ctx context.Context, id uint) (*models.Question, error) {
+	var question models.Question
+	if err := q.db.WithContext(ctx).
+		Preload("Category").
+		Preload("Attachments").
+		Preload("Creator", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id, username, email")
+		}).
+		First(&question, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("question not found with ID %d", id)
+		}
+		return nil, fmt.Errorf("failed to get question with details: %w", err)
+	}
+	return &question, nil
+}
+
+// Update updates a question
+func (q *QuestionPostgreSQL) Update(ctx context.Context, question *models.Question) error {
+	if err := q.db.WithContext(ctx).Save(question).Error; err != nil {
+		return fmt.Errorf("failed to update question: %w", err)
+	}
+
+	return nil
+}
+
+// Delete soft deletes a question
+func (q *QuestionPostgreSQL) Delete(ctx context.Context, id uint) error {
+	if err := q.db.WithContext(ctx).Delete(&models.Question{}, id).Error; err != nil {
+		return fmt.Errorf("failed to delete question: %w", err)
+	}
+
+	return nil
+}
+
+// ===== BULK OPERATIONS =====
+
+// CreateBatch creates multiple questions in a batch
+func (q *QuestionPostgreSQL) CreateBatch(ctx context.Context, questions []*models.Question) error {
+	if len(questions) == 0 {
+		return nil
+	}
+
+	// Use transaction for batch creation
+	return q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.CreateInBatches(questions, 100).Error; err != nil {
+			return fmt.Errorf("failed to create questions batch: %w", err)
+		}
+		return nil
+	})
+}
+
+// UpdateBatch updates multiple questions in a batch
+func (q *QuestionPostgreSQL) UpdateBatch(ctx context.Context, questions []*models.Question) error {
+	if len(questions) == 0 {
+		return nil
+	}
+
+	return q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(questions).Error; err != nil {
+			return fmt.Errorf("failed to update questions: %w", err)
+		}
+		return nil
+	})
+}
+
+// GetByIDs retrieves multiple questions by their IDs
+func (q *QuestionPostgreSQL) GetByIDs(ctx context.Context, ids []uint) ([]*models.Question, error) {
+	if len(ids) == 0 {
+		return []*models.Question{}, nil
+	}
+
+	var questions []*models.Question
+	if err := q.db.WithContext(ctx).
+		Where("id IN ?", ids).
+		Find(&questions).Error; err != nil {
+		return nil, fmt.Errorf("failed to get questions by IDs: %w", err)
+	}
+
+	return questions, nil
+}
+
+// DeleteBatch soft deletes multiple questions
+func (q *QuestionPostgreSQL) DeleteBatch(ctx context.Context, ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	if err := q.db.WithContext(ctx).Delete(&models.Question{}, ids).Error; err != nil {
+		return fmt.Errorf("failed to delete questions batch: %w", err)
+	}
+
+	return nil
+}
+
+// ===== QUERY OPERATIONS =====
+
+// List retrieves questions with filtering and pagination
+func (q *QuestionPostgreSQL) List(ctx context.Context, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
+	query := q.db.WithContext(ctx).Model(&models.Question{})
+
+	// Apply filters
+	query = q.applyQuestionFilters(query, filters)
+
+	// Count total records
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count questions: %w", err)
+	}
+
+	// Apply pagination and sorting
+	query = q.helpers.ApplyPaginationAndSort(query, filters.SortBy, filters.SortOrder, filters.Limit, filters.Offset)
+
+	var questions []*models.Question
+	if err := query.Find(&questions).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to list questions: %w", err)
+	}
+
+	return questions, total, nil
+}
+
+// GetByCreator retrieves questions created by a specific user
+func (q *QuestionPostgreSQL) GetByCreator(ctx context.Context, creatorID uint, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
+	filters.CreatedBy = &creatorID
+	return q.List(ctx, filters)
+}
+
+// GetByCategory retrieves questions by category
+func (q *QuestionPostgreSQL) GetByCategory(ctx context.Context, categoryID uint, filters repositories.QuestionFilters) ([]*models.Question, error) {
+	filters.CategoryID = &categoryID
+	questions, _, err := q.List(ctx, filters)
+	return questions, err
+}
+
+// GetByType retrieves questions by type
+func (q *QuestionPostgreSQL) GetByType(ctx context.Context, questionType models.QuestionType, filters repositories.QuestionFilters) ([]*models.Question, error) {
+	filters.Type = &questionType
+	questions, _, err := q.List(ctx, filters)
+	return questions, err
+}
+
+// GetByDifficulty retrieves questions by difficulty level
+func (q *QuestionPostgreSQL) GetByDifficulty(ctx context.Context, difficulty models.DifficultyLevel, limit, offset int) ([]*models.Question, error) {
+	var questions []*models.Question
+	query := q.db.WithContext(ctx).Where("difficulty = ?", difficulty)
+
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+
+	if err := query.Find(&questions).Error; err != nil {
+		return nil, fmt.Errorf("failed to get questions by difficulty: %w", err)
+	}
+
+	return questions, nil
+}
+
+// Search performs full-text search on questions
+func (q *QuestionPostgreSQL) Search(ctx context.Context, query string, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
+	dbQuery := q.db.WithContext(ctx).Model(&models.Question{})
+
+	// Apply text search
+	if query != "" {
+		searchTerm := "%" + strings.ToLower(query) + "%"
+		dbQuery = dbQuery.Where("LOWER(text) LIKE ? OR LOWER(explanation) LIKE ?", searchTerm, searchTerm)
+	}
+
+	// Apply additional filters
+	dbQuery = q.applyQuestionFilters(dbQuery, filters)
+
+	// Count total records
+	var total int64
+	if err := dbQuery.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count search results: %w", err)
+	}
+
+	// Apply pagination and sorting
+	dbQuery = q.helpers.ApplyPaginationAndSort(dbQuery, filters.SortBy, filters.SortOrder, filters.Limit, filters.Offset)
+
+	var questions []*models.Question
+	if err := dbQuery.Find(&questions).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to search questions: %w", err)
+	}
+
+	return questions, total, nil
+}
+
+// ===== ASSESSMENT-SPECIFIC QUERIES =====
+
+// GetByAssessment retrieves questions for a specific assessment with caching
+func (q *QuestionPostgreSQL) GetByAssessment(ctx context.Context, assessmentID uint) ([]*models.Question, error) {
+	// Cache frequently accessed assessment questions
+	cacheKey := fmt.Sprintf("assessment:%d", assessmentID)
+	var questions []*models.Question
+
+	err := q.cacheManager.Question.CacheOrExecute(ctx, cacheKey, &questions, cache.QuestionCacheConfig.TTL, func() (interface{}, error) {
+		var dbQuestions []*models.Question
+		if err := q.db.WithContext(ctx).
+			Joins("JOIN assessment_questions aq ON aq.question_id = questions.id").
+			Where("aq.assessment_id = ?", assessmentID).
+			Order("aq.order ASC").
+			Find(&dbQuestions).Error; err != nil {
+			return nil, fmt.Errorf("failed to get questions by assessment: %w", err)
+		}
+		return dbQuestions, nil
+	})
+
+	return questions, err
+}
+
+// GetRandomQuestions retrieves random questions based on filters
+func (q *QuestionPostgreSQL) GetRandomQuestions(ctx context.Context, filters repositories.RandomQuestionFilters) ([]*models.Question, error) {
+	query := q.db.WithContext(ctx).Model(&models.Question{})
+
+	// Apply filters
+	if filters.CategoryID != nil {
+		query = query.Where("category_id = ?", *filters.CategoryID)
+	}
+	if filters.Difficulty != nil {
+		query = query.Where("difficulty = ?", *filters.Difficulty)
+	}
+	if filters.Type != nil {
+		query = query.Where("type = ?", *filters.Type)
+	}
+	if len(filters.ExcludeIDs) > 0 {
+		query = query.Where("id NOT IN ?", filters.ExcludeIDs)
+	}
+
+	// Apply random ordering and limit
+	query = query.Order("RANDOM()").Limit(filters.Count)
+
+	var questions []*models.Question
+	if err := query.Find(&questions).Error; err != nil {
+		return nil, fmt.Errorf("failed to get random questions: %w", err)
+	}
+
+	return questions, nil
+}
+
+// GetQuestionBank retrieves questions for question bank
+func (q *QuestionPostgreSQL) GetQuestionBank(ctx context.Context, creatorID uint, filters repositories.QuestionBankFilters) ([]*models.Question, int64, error) {
+	query := q.db.WithContext(ctx).Model(&models.Question{}).Where("created_by = ?", creatorID)
+
+	// Apply bank-specific filters
+	if filters.CategoryID != nil {
+		query = query.Where("category_id = ?", *filters.CategoryID)
+	}
+	if filters.Type != nil {
+		query = query.Where("type = ?", *filters.Type)
+	}
+	if filters.Difficulty != nil {
+		query = query.Where("difficulty = ?", *filters.Difficulty)
+	}
+	if len(filters.Tags) > 0 {
+		for _, tag := range filters.Tags {
+			query = query.Where("tags::text LIKE ?", "%\""+tag+"\"%")
+		}
+	}
+
+	// Count total records
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count question bank: %w", err)
+	}
+
+	// Apply pagination and sorting
+	query = q.helpers.ApplyPaginationAndSort(query, filters.SortBy, filters.SortOrder, filters.Limit, filters.Offset)
+
+	var questions []*models.Question
+	if err := query.Find(&questions).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to get question bank: %w", err)
+	}
+
+	return questions, total, nil
+}
+
+// ===== ADVANCED FILTERING =====
+
+// GetByTags retrieves questions by tags
+func (q *QuestionPostgreSQL) GetByTags(ctx context.Context, tags []string, filters repositories.QuestionFilters) ([]*models.Question, error) {
+	query := q.db.WithContext(ctx).Model(&models.Question{})
+
+	// Apply tag filters using JSONB operations
+	for _, tag := range tags {
+		query = query.Where("tags::text LIKE ?", "%\""+tag+"\"%")
+	}
+
+	// Apply additional filters
+	query = q.applyQuestionFilters(query, filters)
+
+	// Apply pagination and sorting
+	query = q.helpers.ApplyPaginationAndSort(query, filters.SortBy, filters.SortOrder, filters.Limit, filters.Offset)
+
+	var questions []*models.Question
+	if err := query.Find(&questions).Error; err != nil {
+		return nil, fmt.Errorf("failed to get questions by tags: %w", err)
+	}
+
+	return questions, nil
+}
+
+// GetSimilarQuestions finds similar questions based on text similarity
+func (q *QuestionPostgreSQL) GetSimilarQuestions(ctx context.Context, questionID uint, limit int) ([]*models.Question, error) {
+	// Get the base question first
+	baseQuestion, err := q.GetByID(ctx, questionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find similar questions using simple text matching
+	words := strings.Fields(strings.ToLower(baseQuestion.Text))
+	if len(words) < 2 {
+		return []*models.Question{}, nil
+	}
+
+	// Use first few significant words for similarity
+	searchWords := words[:min(len(words), 5)]
+	likeConditions := make([]string, len(searchWords))
+	args := make([]interface{}, len(searchWords)+1)
+
+	for i, word := range searchWords {
+		likeConditions[i] = "LOWER(text) LIKE ?"
+		args[i] = "%" + word + "%"
+	}
+	args[len(searchWords)] = questionID
+
+	whereClause := fmt.Sprintf("(%s) AND id != ?", strings.Join(likeConditions, " OR "))
+
+	var questions []*models.Question
+	if err := q.db.WithContext(ctx).
+		Where(whereClause, args...).
+		Where("type = ? AND created_by = ?", baseQuestion.Type, baseQuestion.CreatedBy).
+		Limit(limit).
+		Find(&questions).Error; err != nil {
+		return nil, fmt.Errorf("failed to get similar questions: %w", err)
+	}
+
+	return questions, nil
+}
+
+// ===== STATISTICS AND ANALYTICS =====
+
+// GetQuestionStats retrieves basic statistics for a question
+func (q *QuestionPostgreSQL) GetQuestionStats(ctx context.Context, id uint) (*repositories.QuestionStats, error) {
+	stats := &repositories.QuestionStats{}
+
+	// Get usage count from assessment_questions table
+	var usageCount int64
+	if err := q.db.WithContext(ctx).
+		Table("assessment_questions").
+		Where("question_id = ?", id).
+		Count(&usageCount).Error; err != nil {
+		return nil, fmt.Errorf("failed to get question usage count: %w", err)
+	}
+	stats.UsageCount = int(usageCount)
+
+	// Get performance statistics from answers table if exists
+	var correctAnswers, totalAnswers int64
+	err := q.db.WithContext(ctx).
+		Table("answers").
+		Where("question_id = ?", id).
+		Count(&totalAnswers).Error
+	if err == nil && totalAnswers > 0 {
+		q.db.WithContext(ctx).
+			Table("answers").
+			Where("question_id = ? AND score > 0", id).
+			Count(&correctAnswers)
+
+		stats.CorrectRate = float64(correctAnswers) / float64(totalAnswers)
+	}
+
+	return stats, nil
+}
+
+// GetUsageStats retrieves usage statistics for a creator
+func (q *QuestionPostgreSQL) GetUsageStats(ctx context.Context, creatorID uint) (*repositories.QuestionUsageStats, error) {
+	stats := &repositories.QuestionUsageStats{
+		QuestionsByType: make(map[models.QuestionType]int),
+		QuestionsByDiff: make(map[models.DifficultyLevel]int),
+	}
+
+	// Get total questions count
+	var totalCount int64
+	if err := q.db.WithContext(ctx).
+		Model(&models.Question{}).
+		Where("created_by = ?", creatorID).
+		Count(&totalCount).Error; err != nil {
+		return nil, fmt.Errorf("failed to count total questions: %w", err)
+	}
+	stats.TotalQuestions = int(totalCount)
+
+	// Get questions by type
+	var typeResults []struct {
+		Type  models.QuestionType
+		Count int
+	}
+	if err := q.db.WithContext(ctx).
+		Model(&models.Question{}).
+		Select("type, COUNT(*) as count").
+		Where("created_by = ?", creatorID).
+		Group("type").
+		Find(&typeResults).Error; err != nil {
+		return nil, fmt.Errorf("failed to get questions by type: %w", err)
+	}
+	for _, result := range typeResults {
+		stats.QuestionsByType[result.Type] = result.Count
+	}
+
+	// Get questions by difficulty
+	var diffResults []struct {
+		Difficulty models.DifficultyLevel
+		Count      int
+	}
+	if err := q.db.WithContext(ctx).
+		Model(&models.Question{}).
+		Select("difficulty, COUNT(*) as count").
+		Where("created_by = ?", creatorID).
+		Group("difficulty").
+		Find(&diffResults).Error; err != nil {
+		return nil, fmt.Errorf("failed to get questions by difficulty: %w", err)
+	}
+	for _, result := range diffResults {
+		stats.QuestionsByDiff[result.Difficulty] = result.Count
+	}
+
+	return stats, nil
+}
+
+// GetPerformanceStats retrieves detailed performance statistics for a question
+func (q *QuestionPostgreSQL) GetPerformanceStats(ctx context.Context, questionID uint) (*repositories.QuestionPerformanceStats, error) {
+	stats := &repositories.QuestionPerformanceStats{
+		AnswerDistribution: make(map[string]int),
+	}
+
+	// This would require answers table - implementing basic version
+	// In a real implementation, you would join with answers/attempts tables
+
+	return stats, nil
+}
+
+// ===== VALIDATION AND CHECKS =====
+
+// ExistsByText checks if a question with the same text exists for the creator
+func (q *QuestionPostgreSQL) ExistsByText(ctx context.Context, text string, creatorID uint, excludeID *uint) (bool, error) {
+	query := q.db.WithContext(ctx).
+		Model(&models.Question{}).
+		Where("text = ? AND created_by = ?", text, creatorID)
+
+	if excludeID != nil {
+		query = query.Where("id != ?", *excludeID)
+	}
+
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return false, fmt.Errorf("failed to check question text existence: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+// IsUsedInAssessments checks if a question is used in any assessments
+func (q *QuestionPostgreSQL) IsUsedInAssessments(ctx context.Context, id uint) (bool, error) {
+	var count int64
+	if err := q.db.WithContext(ctx).
+		Table("assessment_questions").
+		Where("question_id = ?", id).
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("failed to check question usage in assessments: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+// GetUsageCount returns how many times a question has been used
+func (q *QuestionPostgreSQL) GetUsageCount(ctx context.Context, id uint) (int, error) {
+	var count int64
+	if err := q.db.WithContext(ctx).
+		Table("assessment_questions").
+		Where("question_id = ?", id).
+		Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("failed to get question usage count: %w", err)
+	}
+
+	return int(count), nil
+}
+
+// ===== CONTENT MANAGEMENT =====
+
+// UpdateContent updates only the content field of a question
+func (q *QuestionPostgreSQL) UpdateContent(ctx context.Context, id uint, content interface{}) error {
+	// Validate content structure
+	contentBytes, err := json.Marshal(content)
+	if err != nil {
+		return fmt.Errorf("failed to marshal content: %w", err)
+	}
+
+	if err := q.db.WithContext(ctx).
+		Model(&models.Question{}).
+		Where("id = ?", id).
+		Update("content", contentBytes).Error; err != nil {
+		return fmt.Errorf("failed to update question content: %w", err)
+	}
+
+	return nil
+}
+
+// ===== HELPER METHODS =====
+
+// applyQuestionFilters applies common question filters to a query
+func (q *QuestionPostgreSQL) applyQuestionFilters(query *gorm.DB, filters repositories.QuestionFilters) *gorm.DB {
+	if filters.Type != nil {
+		query = query.Where("type = ?", *filters.Type)
+	}
+	if filters.Difficulty != nil {
+		query = query.Where("difficulty = ?", *filters.Difficulty)
+	}
+	if filters.CategoryID != nil {
+		query = query.Where("category_id = ?", *filters.CategoryID)
+	}
+	if filters.CreatedBy != nil {
+		query = query.Where("created_by = ?", *filters.CreatedBy)
+	}
+	if len(filters.Tags) > 0 {
+		for _, tag := range filters.Tags {
+			query = query.Where("tags::text LIKE ?", "%\""+tag+"\"%")
+		}
+	}
+
+	return query
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

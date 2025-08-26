@@ -5,26 +5,30 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/SAP-F-2025/assessment-service/internal/cache"
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type AssessmentPostgreSQL struct {
-	db      *gorm.DB
-	helpers *SharedHelpers
+	db           *gorm.DB
+	helpers      *SharedHelpers
+	cacheManager *cache.CacheManager
 }
 
-func NewAssessmentPostgreSQL(db *gorm.DB) repositories.AssessmentRepository {
+func NewAssessmentPostgreSQL(db *gorm.DB, redisClient *redis.Client) repositories.AssessmentRepository {
 	return &AssessmentPostgreSQL{
-		db:      db,
-		helpers: NewSharedHelpers(db),
+		db:           db,
+		helpers:      NewSharedHelpers(db),
+		cacheManager: cache.NewCacheManager(redisClient),
 	}
 }
 
-// Create creates a new assessment with default settings
+// Create creates a new assessment with default settings and invalidates cache
 func (a *AssessmentPostgreSQL) Create(ctx context.Context, assessment *models.Assessment) error {
-	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Check title uniqueness for creator
 		exists, err := a.ExistsByTitle(ctx, assessment.Title, assessment.CreatedBy, nil)
 		if err != nil {
@@ -63,14 +67,34 @@ func (a *AssessmentPostgreSQL) Create(ctx context.Context, assessment *models.As
 
 		return nil
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// Invalidate related caches
+	a.cacheManager.Assessment.InvalidatePattern(ctx, fmt.Sprintf("creator:%d:*", assessment.CreatedBy))
+	a.cacheManager.Assessment.InvalidatePattern(ctx, "list:*")
+
+	return nil
 }
 
-// GetByID retrieves an assessment by ID
+// GetByID retrieves an assessment by ID with caching
 func (a *AssessmentPostgreSQL) GetByID(ctx context.Context, id uint) (*models.Assessment, error) {
+	// Try cache first for fast performance (<200ms requirement)
+	cacheKey := fmt.Sprintf("id:%d", id)
 	var assessment models.Assessment
-	err := a.db.WithContext(ctx).
-		Preload("Creator").
-		First(&assessment, id).Error
+
+	err := a.cacheManager.Assessment.CacheOrExecute(ctx, cacheKey, &assessment, cache.AssessmentCacheConfig.TTL, func() (interface{}, error) {
+		var dbAssessment models.Assessment
+		err := a.db.WithContext(ctx).
+			Preload("Creator").
+			First(&dbAssessment, id).Error
+		if err != nil {
+			return nil, fmt.Errorf("failed to get assessment: %w", err)
+		}
+		return &dbAssessment, nil
+	})
 
 	if err != nil {
 		return nil, err
@@ -81,29 +105,35 @@ func (a *AssessmentPostgreSQL) GetByID(ctx context.Context, id uint) (*models.As
 
 // GetByIDWithDetails retrieves an assessment with full details (questions, settings)
 func (a *AssessmentPostgreSQL) GetByIDWithDetails(ctx context.Context, id uint) (*models.Assessment, error) {
+	// Cache the most expensive query with shorter TTL
+	cacheKey := fmt.Sprintf("details:%d", id)
 	var assessment models.Assessment
-	err := a.db.WithContext(ctx).
-		Preload("Creator").
-		Preload("Settings").
-		Preload("Questions", func(db *gorm.DB) *gorm.DB {
-			return db.Order("order ASC")
-		}).
-		Preload("Questions.Question").
-		First(&assessment, id).Error
 
-	if err != nil {
-		return nil, err
-	}
+	err := a.cacheManager.Assessment.CacheOrExecute(ctx, cacheKey, &assessment, 10*time.Minute, func() (interface{}, error) {
+		var dbAssessment models.Assessment
+		err := a.db.WithContext(ctx).
+			Preload("Creator").
+			Preload("Settings").
+			Preload("Questions", func(db *gorm.DB) *gorm.DB {
+				return db.Order("order ASC")
+			}).
+			Preload("Questions.Question").
+			First(&dbAssessment, id).Error
+		if err != nil {
+			return nil, fmt.Errorf("failed to get assessment details: %w", err)
+		}
 
-	// Calculate computed fields
-	a.calculateComputedFields(&assessment)
+		// Calculate computed fields
+		a.calculateComputedFields(&dbAssessment)
+		return &dbAssessment, nil
+	})
 
-	return &assessment, nil
+	return &assessment, err
 }
 
-// Update updates an assessment
+// Update updates an assessment and invalidates cache
 func (a *AssessmentPostgreSQL) Update(ctx context.Context, assessment *models.Assessment) error {
-	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Get current assessment for validation
 		var currentAssessment models.Assessment
 		if err := tx.First(&currentAssessment, assessment.ID).Error; err != nil {
@@ -151,6 +181,17 @@ func (a *AssessmentPostgreSQL) Update(ctx context.Context, assessment *models.As
 
 		return nil
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// Invalidate caches
+	a.cacheManager.Assessment.Delete(ctx, fmt.Sprintf("id:%d", assessment.ID), fmt.Sprintf("details:%d", assessment.ID))
+	a.cacheManager.Assessment.InvalidatePattern(ctx, fmt.Sprintf("creator:%d:*", assessment.CreatedBy))
+	a.cacheManager.Assessment.InvalidatePattern(ctx, "list:*")
+
+	return nil
 }
 
 // Delete soft deletes an assessment

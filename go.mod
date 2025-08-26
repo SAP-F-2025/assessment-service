@@ -3,6 +3,7 @@ module github.com/SAP-F-2025/assessment-service
 go 1.24.6
 
 require (
+	github.com/casdoor/casdoor-go-sdk v0.44.0
 	github.com/go-playground/validator/v10 v10.27.0
 	github.com/joho/godotenv v1.5.1
 	github.com/redis/go-redis/v9 v9.12.1

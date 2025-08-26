@@ -1,6 +1,9 @@
 package pkg
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/SAP-F-2025/assessment-service/internal/config"
 	"github.com/redis/go-redis/v9"
 )
@@ -14,7 +17,13 @@ func NewRedisClient(cfg *config.Config) (*redis.Client, error) {
 	}
 
 	client := redis.NewClient(opt)
-	defer client.Close()
+
+	// Test connection
+	ctx := context.Background()
+	if err := client.Ping(ctx).Err(); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("redis connection failed: %w", err)
+	}
 
 	return client, nil
 }
