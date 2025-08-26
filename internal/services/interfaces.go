@@ -1,0 +1,275 @@
+package services
+
+import (
+	"context"
+	"time"
+
+	"github.com/SAP-F-2025/assessment-service/internal/models"
+	"github.com/SAP-F-2025/assessment-service/internal/repositories"
+	"github.com/SAP-F-2025/assessment-service/internal/utils"
+)
+
+// ===== REQUEST/RESPONSE DTOs =====
+
+// Use business validator types
+type CreateAssessmentRequest = utils.AssessmentCreateRequest
+type UpdateAssessmentRequest = utils.AssessmentUpdateRequest
+type AssessmentSettingsRequest = utils.AssessmentSettingsRequest
+
+// Use business validator types
+type AssessmentQuestionRequest = utils.AssessmentQuestionRequest
+
+type AssessmentResponse struct {
+	*models.Assessment
+	CanEdit   bool `json:"can_edit"`
+	CanDelete bool `json:"can_delete"`
+	CanTake   bool `json:"can_take"`
+}
+
+type AssessmentListResponse struct {
+	Assessments []*AssessmentResponse `json:"assessments"`
+	Total       int64                 `json:"total"`
+	Page        int                   `json:"page"`
+	Size        int                   `json:"size"`
+}
+
+type UpdateStatusRequest struct {
+	Status models.AssessmentStatus `json:"status" validate:"required,oneof=Draft Active Expired Archived"`
+	Reason *string                 `json:"reason" validate:"omitempty,max=500"`
+}
+
+// ===== ATTEMPT RELATED DTOs =====
+
+type StartAttemptRequest struct {
+	AssessmentID uint `json:"assessment_id" validate:"required"`
+}
+
+type SubmitAnswerRequest struct {
+	QuestionID   uint        `json:"question_id" validate:"required"`
+	AnswerData   interface{} `json:"answer_data" validate:"required"`
+	TimeSpent    *int        `json:"time_spent"`
+	IsSkipped    bool        `json:"is_skipped"`
+	IsBookmarked bool        `json:"is_bookmarked"`
+}
+
+type SubmitAttemptRequest struct {
+	AttemptID uint                    `json:"attempt_id" validate:"required"`
+	Answers   []SubmitAnswerRequest   `json:"answers" validate:"required,dive"`
+	TimeSpent *int                    `json:"time_spent"`
+	EndReason models.AttemptEndReason `json:"end_reason"`
+}
+
+type AttemptResponse struct {
+	*models.AssessmentAttempt
+	CanSubmit bool                 `json:"can_submit"`
+	CanResume bool                 `json:"can_resume"`
+	Questions []QuestionForAttempt `json:"questions,omitempty"`
+}
+
+type QuestionForAttempt struct {
+	*models.Question
+	Order          int                   `json:"order"`
+	Points         int                   `json:"points"`
+	ExistingAnswer *models.StudentAnswer `json:"existing_answer,omitempty"`
+	IsLast         bool                  `json:"is_last"`
+	IsFirst        bool                  `json:"is_first"`
+}
+
+// ===== QUESTION RELATED DTOs =====
+
+// Use business validator types
+type CreateQuestionRequest = utils.QuestionCreateRequest
+
+type UpdateQuestionRequest struct {
+	Text        *string                 `json:"text" validate:"omitempty,max=2000"`
+	Content     interface{}             `json:"content"`
+	Points      *int                    `json:"points" validate:"omitempty,min=1,max=100"`
+	TimeLimit   *int                    `json:"time_limit" validate:"omitempty,min=30,max=3600"`
+	Difficulty  *models.DifficultyLevel `json:"difficulty"`
+	CategoryID  *uint                   `json:"category_id"`
+	Tags        []string                `json:"tags"`
+	Explanation *string                 `json:"explanation" validate:"omitempty,max=1000"`
+}
+
+type QuestionResponse struct {
+	*models.Question
+	CanEdit    bool `json:"can_edit"`
+	CanDelete  bool `json:"can_delete"`
+	UsageCount int  `json:"usage_count"`
+}
+
+type QuestionListResponse struct {
+	Questions []*QuestionResponse `json:"questions"`
+	Total     int64               `json:"total"`
+	Page      int                 `json:"page"`
+	Size      int                 `json:"size"`
+}
+
+// ===== GRADING RELATED DTOs =====
+
+type GradingResult struct {
+	AnswerID      uint      `json:"answer_id"`
+	QuestionID    uint      `json:"question_id"`
+	Score         float64   `json:"score"`
+	MaxScore      float64   `json:"max_score"`
+	IsCorrect     bool      `json:"is_correct"`
+	PartialCredit bool      `json:"partial_credit"`
+	Feedback      *string   `json:"feedback"`
+	GradedAt      time.Time `json:"graded_at"`
+	GradedBy      *uint     `json:"graded_by"`
+}
+
+type AttemptGradingResult struct {
+	AttemptID  uint            `json:"attempt_id"`
+	TotalScore float64         `json:"total_score"`
+	MaxScore   float64         `json:"max_score"`
+	Percentage float64         `json:"percentage"`
+	IsPassing  bool            `json:"is_passing"`
+	Grade      *string         `json:"grade"`
+	Questions  []GradingResult `json:"questions"`
+	GradedAt   time.Time       `json:"graded_at"`
+	GradedBy   uint            `json:"graded_by"`
+}
+
+// ===== SERVICE INTERFACES =====
+
+type AssessmentService interface {
+	// Core CRUD operations
+	Create(ctx context.Context, req *CreateAssessmentRequest, creatorID uint) (*AssessmentResponse, error)
+	GetByID(ctx context.Context, id uint, userID uint) (*AssessmentResponse, error)
+	GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*AssessmentResponse, error)
+	Update(ctx context.Context, id uint, req *UpdateAssessmentRequest, userID uint) (*AssessmentResponse, error)
+	Delete(ctx context.Context, id uint, userID uint) error
+
+	// List and search operations
+	List(ctx context.Context, filters repositories.AssessmentFilters, userID uint) (*AssessmentListResponse, error)
+	GetByCreator(ctx context.Context, creatorID uint, filters repositories.AssessmentFilters) (*AssessmentListResponse, error)
+	Search(ctx context.Context, query string, filters repositories.AssessmentFilters, userID uint) (*AssessmentListResponse, error)
+
+	// Status management
+	UpdateStatus(ctx context.Context, id uint, req *UpdateStatusRequest, userID uint) error
+	Publish(ctx context.Context, id uint, userID uint) error
+	Archive(ctx context.Context, id uint, userID uint) error
+
+	// Question management
+	AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points *int, userID uint) error
+	RemoveQuestion(ctx context.Context, assessmentID, questionID uint, userID uint) error
+	ReorderQuestions(ctx context.Context, assessmentID uint, orders []repositories.QuestionOrder, userID uint) error
+
+	// Statistics and analytics
+	GetStats(ctx context.Context, id uint, userID uint) (*repositories.AssessmentStats, error)
+	GetCreatorStats(ctx context.Context, creatorID uint) (*repositories.CreatorStats, error)
+
+	// Permission checks
+	CanAccess(ctx context.Context, assessmentID uint, userID uint) (bool, error)
+	CanEdit(ctx context.Context, assessmentID uint, userID uint) (bool, error)
+	CanDelete(ctx context.Context, assessmentID uint, userID uint) (bool, error)
+	CanTake(ctx context.Context, assessmentID uint, userID uint) (bool, error)
+}
+
+type QuestionService interface {
+	// Core CRUD operations
+	Create(ctx context.Context, req *CreateQuestionRequest, creatorID uint) (*QuestionResponse, error)
+	GetByID(ctx context.Context, id uint, userID uint) (*QuestionResponse, error)
+	GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*QuestionResponse, error)
+	Update(ctx context.Context, id uint, req *UpdateQuestionRequest, userID uint) (*QuestionResponse, error)
+	Delete(ctx context.Context, id uint, userID uint) error
+
+	// List and search operations
+	List(ctx context.Context, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error)
+	GetByCreator(ctx context.Context, creatorID uint, filters repositories.QuestionFilters) (*QuestionListResponse, error)
+	Search(ctx context.Context, query string, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error)
+	GetRandomQuestions(ctx context.Context, filters repositories.RandomQuestionFilters, userID uint) ([]*models.Question, error)
+
+	// Bulk operations
+	CreateBatch(ctx context.Context, questions []*CreateQuestionRequest, creatorID uint) ([]*QuestionResponse, []error)
+	UpdateBatch(ctx context.Context, updates map[uint]*UpdateQuestionRequest, userID uint) (map[uint]*QuestionResponse, map[uint]error)
+
+	// Question banking
+	GetByBank(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error)
+	AddToBank(ctx context.Context, questionID, bankID uint, userID uint) error
+	RemoveFromBank(ctx context.Context, questionID, bankID uint, userID uint) error
+
+	// Statistics
+	GetStats(ctx context.Context, questionID uint, userID uint) (*repositories.QuestionStats, error)
+	GetUsageStats(ctx context.Context, creatorID uint) (*repositories.QuestionUsageStats, error)
+
+	// Permission checks
+	CanAccess(ctx context.Context, questionID uint, userID uint) (bool, error)
+	CanEdit(ctx context.Context, questionID uint, userID uint) (bool, error)
+	CanDelete(ctx context.Context, questionID uint, userID uint) (bool, error)
+}
+
+type AttemptService interface {
+	// Core attempt operations
+	Start(ctx context.Context, req *StartAttemptRequest, studentID uint) (*AttemptResponse, error)
+	Resume(ctx context.Context, attemptID uint, studentID uint) (*AttemptResponse, error)
+	Submit(ctx context.Context, req *SubmitAttemptRequest, studentID uint) (*AttemptResponse, error)
+	SubmitAnswer(ctx context.Context, attemptID uint, req *SubmitAnswerRequest, studentID uint) error
+
+	// Get operations
+	GetByID(ctx context.Context, id uint, userID uint) (*AttemptResponse, error)
+	GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*AttemptResponse, error)
+	GetCurrentAttempt(ctx context.Context, assessmentID uint, studentID uint) (*AttemptResponse, error)
+
+	// List operations
+	List(ctx context.Context, filters repositories.AttemptFilters, userID uint) ([]*AttemptResponse, int64, error)
+	GetByStudent(ctx context.Context, studentID uint, filters repositories.AttemptFilters) ([]*AttemptResponse, int64, error)
+	GetByAssessment(ctx context.Context, assessmentID uint, filters repositories.AttemptFilters, userID uint) ([]*AttemptResponse, int64, error)
+
+	// Time management
+	GetTimeRemaining(ctx context.Context, attemptID uint, studentID uint) (int, error) // seconds
+	ExtendTime(ctx context.Context, attemptID uint, minutes int, userID uint) error
+	HandleTimeout(ctx context.Context, attemptID uint) error
+
+	// Validation
+	CanStart(ctx context.Context, assessmentID uint, studentID uint) (bool, error)
+	GetAttemptCount(ctx context.Context, assessmentID uint, studentID uint) (int, error)
+	IsAttemptActive(ctx context.Context, attemptID uint) (bool, error)
+
+	// Statistics
+	GetStats(ctx context.Context, assessmentID uint, userID uint) (*repositories.AttemptStats, error)
+}
+
+type GradingService interface {
+	// Manual grading
+	GradeAnswer(ctx context.Context, answerID uint, score float64, feedback *string, graderID uint) (*GradingResult, error)
+	GradeAttempt(ctx context.Context, attemptID uint, graderID uint) (*AttemptGradingResult, error)
+	GradeMultipleAnswers(ctx context.Context, grades []repositories.AnswerGrade, graderID uint) ([]GradingResult, error)
+
+	// Auto grading
+	AutoGradeAnswer(ctx context.Context, answerID uint) (*GradingResult, error)
+	AutoGradeAttempt(ctx context.Context, attemptID uint) (*AttemptGradingResult, error)
+	AutoGradeAssessment(ctx context.Context, assessmentID uint) (map[uint]*AttemptGradingResult, error)
+
+	// Grading utilities
+	CalculateScore(ctx context.Context, questionType models.QuestionType, questionContent interface{}, studentAnswer interface{}) (float64, bool, error)
+	GenerateFeedback(ctx context.Context, questionType models.QuestionType, questionContent interface{}, studentAnswer interface{}, isCorrect bool) (*string, error)
+
+	// Bulk operations
+	ReGradeQuestion(ctx context.Context, questionID uint, userID uint) ([]GradingResult, error)
+	ReGradeAssessment(ctx context.Context, assessmentID uint, userID uint) (map[uint]*AttemptGradingResult, error)
+
+	// Statistics
+	GetGradingOverview(ctx context.Context, assessmentID uint, userID uint) (map[string]interface{}, error)
+}
+
+// ===== SERVICE MANAGER =====
+
+type ServiceManager interface {
+	// Core service getters
+	Assessment() AssessmentService
+	Question() QuestionService
+	Attempt() AttemptService
+	Grading() GradingService
+
+	// Additional service getters
+	ImportExport() ImportExportService
+	Notification() NotificationService
+	Analytics() AnalyticsService
+
+	// Health and lifecycle
+	Initialize(ctx context.Context) error
+	HealthCheck(ctx context.Context) error
+	Shutdown(ctx context.Context) error
+}
