@@ -43,6 +43,9 @@ type AssessmentRepository interface {
 	// Settings management
 	UpdateSettings(ctx context.Context, assessmentID uint, settings *models.AssessmentSettings) error
 	GetSettings(ctx context.Context, assessmentID uint) (*models.AssessmentSettings, error)
+
+	UpdateDuration(ctx context.Context, assessmentID uint, duration int) error
+	UpdateMaxAttempts(ctx context.Context, assessmentID uint, maxAttempts int) error
 }
 
 // AssessmentSettingsRepository interface for assessment settings operations
