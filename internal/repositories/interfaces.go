@@ -46,6 +46,8 @@ type AttemptFilters struct {
 	DateTo    *time.Time            `json:"date_to"`
 	Limit     int                   `json:"limit"`
 	Offset    int                   `json:"offset"`
+	SortBy    string                `json:"sort_by"`    // "created_at", "title", "due_date"
+	SortOrder string                `json:"sort_order"` // "asc", "desc"
 }
 
 type AnswerFilters struct {

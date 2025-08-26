@@ -18,7 +18,7 @@ type AttemptRepository interface {
 
 	// Query operations
 	List(ctx context.Context, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
-	GetByStudent(ctx context.Context, studentID uint, filters AttemptFilters) ([]*models.AssessmentAttempt, error)
+	GetByStudent(ctx context.Context, studentID uint, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
 	GetByAssessment(ctx context.Context, assessmentID uint, filters AttemptFilters) ([]*models.AssessmentAttempt, error)
 	GetByStudentAndAssessment(ctx context.Context, studentID, assessmentID uint) ([]*models.AssessmentAttempt, error)
 
