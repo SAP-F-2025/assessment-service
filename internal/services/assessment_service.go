@@ -9,17 +9,21 @@ import (
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"gorm.io/gorm"
 )
 
 type assessmentService struct {
-	repo      repositories.Repository
-	logger    *slog.Logger
-	validator *utils.Validator
+	repo            repositories.Repository
+	questionService QuestionService
+	db              *gorm.DB
+	logger          *slog.Logger
+	validator       *utils.Validator
 }
 
-func NewAssessmentService(repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) AssessmentService {
+func NewAssessmentService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *utils.Validator) AssessmentService {
 	return &assessmentService{
 		repo:      repo,
+		db:        db,
 		logger:    logger,
 		validator: validator,
 	}
@@ -49,55 +53,49 @@ func (s *assessmentService) Create(ctx context.Context, req *CreateAssessmentReq
 		return nil, err
 	}
 
-	// Begin transaction
-	txRepo, err := s.repo.(repositories.TransactionRepository).Begin(ctx)
+	// Use transaction for complex operation
+	var assessment *models.Assessment
+	err = s.withTx(ctx, func(tx *gorm.DB) error {
+		// Create assessment
+		assessment = &models.Assessment{
+			Title:        req.Title,
+			Description:  req.Description,
+			Duration:     req.Duration,
+			Status:       models.StatusDraft,
+			PassingScore: req.PassingScore,
+			MaxAttempts:  req.MaxAttempts,
+			TimeWarning:  300, // Default 5 minutes
+			DueDate:      req.DueDate,
+			CreatedBy:    creatorID,
+			Version:      1,
+		}
+
+		if req.TimeWarning != nil {
+			assessment.TimeWarning = *req.TimeWarning
+		}
+
+		if err := s.repo.Assessment().Create(ctx, tx, assessment); err != nil {
+			return fmt.Errorf("failed to create assessment: %w", err)
+		}
+
+		// Create settings
+		settings := s.buildAssessmentSettings(assessment.ID, req.Settings)
+		if err := s.repo.AssessmentSettings().Create(ctx, tx, settings); err != nil {
+			return fmt.Errorf("failed to create assessment settings: %w", err)
+		}
+
+		// Add questions if provided
+		if len(req.Questions) > 0 {
+			if err := s.addQuestionsToAssessment(ctx, tx, assessment.ID, req.Questions, creatorID); err != nil {
+				return fmt.Errorf("failed to add questions: %w", err)
+			}
+		}
+
+		return nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			txRepo.(repositories.TransactionRepository).Rollback(ctx)
-		}
-	}()
-
-	// Create assessment
-	assessment := &models.Assessment{
-		Title:        req.Title,
-		Description:  req.Description,
-		Duration:     req.Duration,
-		Status:       models.StatusDraft,
-		PassingScore: req.PassingScore,
-		MaxAttempts:  req.MaxAttempts,
-		TimeWarning:  300, // Default 5 minutes
-		DueDate:      req.DueDate,
-		CreatedBy:    creatorID,
-		Version:      1,
-	}
-
-	if req.TimeWarning != nil {
-		assessment.TimeWarning = *req.TimeWarning
-	}
-
-	if err = txRepo.Assessment().Create(ctx, assessment); err != nil {
-		return nil, fmt.Errorf("failed to create assessment: %w", err)
-	}
-
-	// Create settings
-	settings := s.buildAssessmentSettings(assessment.ID, req.Settings)
-	if err = txRepo.AssessmentSettings().Create(ctx, settings); err != nil {
-		return nil, fmt.Errorf("failed to create assessment settings: %w", err)
-	}
-
-	// Add questions if provided
-	if len(req.Questions) > 0 {
-		if err = s.addQuestionsToAssessment(ctx, txRepo, assessment.ID, req.Questions, creatorID); err != nil {
-			return nil, fmt.Errorf("failed to add questions: %w", err)
-		}
-	}
-
-	// Commit transaction
-	if err = txRepo.(repositories.TransactionRepository).Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, err
 	}
 
 	s.logger.Info("Assessment created successfully", "assessment_id", assessment.ID)
@@ -116,8 +114,8 @@ func (s *assessmentService) GetByID(ctx context.Context, id uint, userID uint) (
 		return nil, NewPermissionError(userID, id, "assessment", "read", "not owner or insufficient permissions")
 	}
 
-	// Get assessment
-	assessment, err := s.repo.Assessment().GetByID(ctx, id)
+	// Get assessment using wrapper
+	assessment, err := s.getAssessmentByID(ctx, id)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAssessmentNotFound
@@ -138,8 +136,8 @@ func (s *assessmentService) GetByIDWithDetails(ctx context.Context, id uint, use
 		return nil, NewPermissionError(userID, id, "assessment", "read", "not owner or insufficient permissions")
 	}
 
-	// Get assessment with details
-	assessment, err := s.repo.Assessment().GetByIDWithDetails(ctx, id)
+	// Get assessment with details using wrapper
+	assessment, err := s.getAssessmentWithDetails(ctx, id)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAssessmentNotFound
@@ -154,7 +152,7 @@ func (s *assessmentService) Update(ctx context.Context, id uint, req *UpdateAsse
 	s.logger.Info("Updating assessment", "assessment_id", id, "user_id", userID)
 
 	// Get current assessment for validation
-	assessment, err := s.repo.Assessment().GetByID(ctx, id)
+	assessment, err := s.repo.Assessment().GetByID(ctx, s.db, id)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAssessmentNotFound
@@ -181,42 +179,35 @@ func (s *assessmentService) Update(ctx context.Context, id uint, req *UpdateAsse
 		return nil, err
 	}
 
-	// Begin transaction
-	txRepo, err := s.repo.(repositories.TransactionRepository).Begin(ctx)
+	// Begin transaction at service layer
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Apply updates
+		s.applyAssessmentUpdates(assessment, req)
+
+		// Update assessment
+		if err := s.repo.Assessment().Update(ctx, tx, assessment); err != nil {
+			return fmt.Errorf("failed to update assessment: %w", err)
+		}
+
+		// Update settings if provided
+		if req.Settings != nil {
+			settings, err := s.repo.AssessmentSettings().GetByAssessmentID(ctx, tx, id)
+			if err != nil {
+				return fmt.Errorf("failed to get assessment settings: %w", err)
+			}
+
+			s.applySettingsUpdates(settings, req.Settings)
+
+			if err := s.repo.AssessmentSettings().Update(ctx, tx, settings); err != nil {
+				return fmt.Errorf("failed to update assessment settings: %w", err)
+			}
+		}
+
+		return nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			txRepo.(repositories.TransactionRepository).Rollback(ctx)
-		}
-	}()
-
-	// Apply updates
-	s.applyAssessmentUpdates(assessment, req)
-
-	// Update assessment
-	if err = txRepo.Assessment().Update(ctx, assessment); err != nil {
-		return nil, fmt.Errorf("failed to update assessment: %w", err)
-	}
-
-	// Update settings if provided
-	if req.Settings != nil {
-		settings, err := txRepo.AssessmentSettings().GetByAssessmentID(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get assessment settings: %w", err)
-		}
-
-		s.applySettingsUpdates(settings, req.Settings)
-
-		if err = txRepo.AssessmentSettings().Update(ctx, settings); err != nil {
-			return nil, fmt.Errorf("failed to update assessment settings: %w", err)
-		}
-	}
-
-	// Commit transaction
-	if err = txRepo.(repositories.TransactionRepository).Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, err
 	}
 
 	s.logger.Info("Assessment updated successfully", "assessment_id", id)
@@ -238,7 +229,7 @@ func (s *assessmentService) Delete(ctx context.Context, id uint, userID uint) er
 	}
 
 	// Soft delete
-	if err := s.repo.Assessment().Delete(ctx, id); err != nil {
+	if err := s.repo.Assessment().Delete(ctx, s.db, id); err != nil {
 		return fmt.Errorf("failed to delete assessment: %w", err)
 	}
 
@@ -259,7 +250,7 @@ func (s *assessmentService) List(ctx context.Context, filters repositories.Asses
 		filters.CreatedBy = &userID
 	}
 
-	assessments, total, err := s.repo.Assessment().List(ctx, filters)
+	assessments, total, err := s.repo.Assessment().List(ctx, s.db, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list assessments: %w", err)
 	}
@@ -283,7 +274,7 @@ func (s *assessmentService) GetByCreator(ctx context.Context, creatorID uint, fi
 	// Set creator filter
 	filters.CreatedBy = &creatorID
 
-	assessments, total, err := s.repo.Assessment().GetByCreator(ctx, creatorID, filters)
+	assessments, total, err := s.repo.Assessment().GetByCreator(ctx, s.db, creatorID, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get assessments by creator: %w", err)
 	}
@@ -314,7 +305,7 @@ func (s *assessmentService) Search(ctx context.Context, query string, filters re
 		filters.CreatedBy = &userID
 	}
 
-	assessments, total, err := s.repo.Assessment().Search(ctx, query, filters)
+	assessments, total, err := s.repo.Assessment().Search(ctx, nil, query, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search assessments: %w", err)
 	}
@@ -354,7 +345,7 @@ func (s *assessmentService) UpdateStatus(ctx context.Context, id uint, req *Upda
 	}
 
 	// Get current assessment
-	assessment, err := s.repo.Assessment().GetByID(ctx, id)
+	assessment, err := s.repo.Assessment().GetByID(ctx, s.db, id)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return ErrAssessmentNotFound
@@ -371,7 +362,7 @@ func (s *assessmentService) UpdateStatus(ctx context.Context, id uint, req *Upda
 	assessment.Status = req.Status
 	assessment.UpdatedAt = time.Now()
 
-	if err := s.repo.Assessment().Update(ctx, assessment); err != nil {
+	if err := s.repo.Assessment().Update(ctx, s.db, assessment); err != nil {
 		return fmt.Errorf("failed to update assessment status: %w", err)
 	}
 
@@ -416,8 +407,7 @@ func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, quest
 	}
 
 	// Verify question exists and user has access
-	questionService := NewQuestionService(s.repo, s.logger, s.validator)
-	canAccessQuestion, err := questionService.CanAccess(ctx, questionID, userID)
+	canAccessQuestion, err := s.questionService.CanAccess(ctx, questionID, userID)
 	if err != nil {
 		return err
 	}
@@ -426,7 +416,7 @@ func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, quest
 	}
 
 	// Add question to assessment
-	if err := s.repo.AssessmentQuestion().AddQuestion(ctx, assessmentID, questionID, order, points); err != nil {
+	if err := s.repo.AssessmentQuestion().AddQuestion(ctx, s.db, assessmentID, questionID, order, points); err != nil {
 		return fmt.Errorf("failed to add question to assessment: %w", err)
 	}
 
@@ -453,7 +443,7 @@ func (s *assessmentService) RemoveQuestion(ctx context.Context, assessmentID, qu
 	}
 
 	// Remove question from assessment
-	if err := s.repo.AssessmentQuestion().RemoveQuestion(ctx, assessmentID, questionID); err != nil {
+	if err := s.repo.AssessmentQuestion().RemoveQuestion(ctx, nil, assessmentID, questionID); err != nil {
 		return fmt.Errorf("failed to remove question from assessment: %w", err)
 	}
 
@@ -480,7 +470,7 @@ func (s *assessmentService) ReorderQuestions(ctx context.Context, assessmentID u
 	}
 
 	// Reorder questions
-	if err := s.repo.AssessmentQuestion().ReorderQuestions(ctx, assessmentID, orders); err != nil {
+	if err := s.repo.AssessmentQuestion().ReorderQuestions(ctx, nil, assessmentID, orders); err != nil {
 		return fmt.Errorf("failed to reorder questions: %w", err)
 	}
 
@@ -501,7 +491,7 @@ func (s *assessmentService) GetStats(ctx context.Context, id uint, userID uint) 
 		return nil, NewPermissionError(userID, id, "assessment", "view_stats", "not owner or insufficient permissions")
 	}
 
-	stats, err := s.repo.Assessment().GetStats(ctx, id)
+	stats, err := s.repo.Assessment().GetAssessmentStats(ctx, nil, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get assessment stats: %w", err)
 	}
@@ -510,12 +500,10 @@ func (s *assessmentService) GetStats(ctx context.Context, id uint, userID uint) 
 }
 
 func (s *assessmentService) GetCreatorStats(ctx context.Context, creatorID uint) (*repositories.CreatorStats, error) {
-	stats, err := s.repo.Assessment().GetCreatorStats(ctx, creatorID)
+	stats, err := s.repo.Assessment().GetCreatorStats(ctx, nil, creatorID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get creator stats: %w", err)
 	}
 
 	return stats, nil
 }
-
-// Continue in next part...

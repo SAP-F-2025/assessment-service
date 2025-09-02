@@ -234,14 +234,15 @@ func (bv *BusinessValidator) getErrorMessage(err validator.FieldError) string {
 
 // AssessmentCreateRequest represents the request structure for creating assessments
 type AssessmentCreateRequest struct {
-	Title        string                     `json:"title" validate:"required,assessment_title"`
-	Description  *string                    `json:"description" validate:"omitempty,assessment_description"`
-	Duration     int                        `json:"duration" validate:"required,assessment_duration"`
-	PassingScore int                        `json:"passing_score" validate:"required,passing_score"`
-	MaxAttempts  int                        `json:"max_attempts" validate:"required,max_attempts"`
-	TimeWarning  *int                       `json:"time_warning" validate:"omitempty,min=60,max=1800"`
-	DueDate      *time.Time                 `json:"due_date" validate:"omitempty,future_date"`
-	Settings     *AssessmentSettingsRequest `json:"settings"`
+	Title        string                      `json:"title" validate:"required,assessment_title"`
+	Description  *string                     `json:"description" validate:"omitempty,assessment_description"`
+	Duration     int                         `json:"duration" validate:"required,assessment_duration"`
+	PassingScore int                         `json:"passing_score" validate:"required,passing_score"`
+	MaxAttempts  int                         `json:"max_attempts" validate:"required,max_attempts"`
+	TimeWarning  *int                        `json:"time_warning" validate:"omitempty,min=60,max=1800"`
+	DueDate      *time.Time                  `json:"due_date" validate:"omitempty,future_date"`
+	Settings     *AssessmentSettingsRequest  `json:"settings"`
+	Questions    []AssessmentQuestionRequest `json:"questions"`
 }
 
 // AssessmentUpdateRequest represents the request structure for updating assessments

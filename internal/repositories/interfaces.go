@@ -40,14 +40,14 @@ type RandomQuestionFilters struct {
 }
 
 type AttemptFilters struct {
-	Status    *models.AttemptStatus `json:"status"`
-	StudentID *uint                 `json:"student_id"`
-	DateFrom  *time.Time            `json:"date_from"`
-	DateTo    *time.Time            `json:"date_to"`
-	Limit     int                   `json:"limit"`
-	Offset    int                   `json:"offset"`
-	SortBy    string                `json:"sort_by"`    // "created_at", "title", "due_date"
-	SortOrder string                `json:"sort_order"` // "asc", "desc"
+	Status    models.AttemptStatus `json:"status"`
+	StudentID *uint                `json:"student_id"`
+	DateFrom  *time.Time           `json:"date_from"`
+	DateTo    *time.Time           `json:"date_to"`
+	Limit     int                  `json:"limit"`
+	Offset    int                  `json:"offset"`
+	SortBy    string               `json:"sort_by"`    // "created_at", "title", "due_date"
+	SortOrder string               `json:"sort_order"` // "asc", "desc"
 }
 
 type AnswerFilters struct {
@@ -122,4 +122,13 @@ type AttemptStats struct {
 	AverageTimeSpent int                          `json:"average_time_spent"`
 	PassRate         float64                      `json:"pass_rate"`
 	CompletionRate   float64                      `json:"completion_rate"`
+}
+
+type GradingStats struct {
+	TotalAnswers   int     `json:"total_answers"`
+	GradedAnswers  int     `json:"graded_answers"`
+	PendingAnswers int     `json:"pending_answers"`
+	AutoGraded     int     `json:"auto_graded"`
+	ManualGraded   int     `json:"manual_graded"`
+	AverageScore   float64 `json:"average_score"`
 }

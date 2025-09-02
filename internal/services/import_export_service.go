@@ -32,7 +32,7 @@ type ImportExportService interface {
 	ExportAssessmentResults(ctx context.Context, assessmentID uint, userID uint) ([]byte, error)
 
 	// Job management
-	GetImportJob(ctx context.Context, jobID string) (*ImportJob, error)
+	GetImportJob(ctx context.Context, jobID string) (*models.ImportJob, error)
 	ProcessImportJobAsync(ctx context.Context, jobID string) error
 }
 
@@ -53,35 +53,14 @@ func NewImportExportService(repo repositories.Repository, logger *slog.Logger, v
 // ===== IMPORT OPERATIONS =====
 
 type ImportResult struct {
-	JobID         string                  `json:"job_id"`
-	TotalRows     int                     `json:"total_rows"`
-	ProcessedRows int                     `json:"processed_rows"`
-	SuccessCount  int                     `json:"success_count"`
-	ErrorCount    int                     `json:"error_count"`
-	Errors        []ImportValidationError `json:"errors"`
-	Questions     []*models.Question      `json:"questions,omitempty"`
-	Status        string                  `json:"status"`
-}
-
-type ImportValidationError struct {
-	Row     int    `json:"row"`
-	Column  string `json:"column"`
-	Message string `json:"message"`
-	Value   string `json:"value"`
-}
-
-type ImportJob struct {
-	ID            string                  `json:"id"`
-	AssessmentID  *uint                   `json:"assessment_id,omitempty"`
-	UserID        uint                    `json:"user_id"`
-	FileName      string                  `json:"file_name"`
-	Status        string                  `json:"status"`   // pending, processing, completed, failed
-	Progress      int                     `json:"progress"` // 0-100
-	TotalRows     int                     `json:"total_rows"`
-	ProcessedRows int                     `json:"processed_rows"`
-	Errors        []ImportValidationError `json:"errors"`
-	CreatedAt     time.Time               `json:"created_at"`
-	CompletedAt   *time.Time              `json:"completed_at,omitempty"`
+	JobID         string                         `json:"job_id"`
+	TotalRows     int                            `json:"total_rows"`
+	ProcessedRows int                            `json:"processed_rows"`
+	SuccessCount  int                            `json:"success_count"`
+	ErrorCount    int                            `json:"error_count"`
+	Errors        []models.ImportValidationError `json:"errors"`
+	Questions     []*models.Question             `json:"questions,omitempty"`
+	Status        models.ImportJobStatus         `json:"status"`
 }
 
 func (s *importExportService) ImportQuestionsFromFile(ctx context.Context, file multipart.File, filename string, creatorID uint) (*ImportResult, error) {
@@ -130,11 +109,11 @@ func (s *importExportService) ImportQuestionsFromCSV(ctx context.Context, reader
 
 	result := &ImportResult{
 		TotalRows: len(records) - 1, // Exclude header
-		Status:    "processing",
+		Status:    models.ImportProcessing,
 	}
 
 	var questions []*models.Question
-	var errors []ImportValidationError
+	var errors []models.ImportValidationError
 
 	// Process each data row
 	for rowIndex, record := range records[1:] {
@@ -158,7 +137,7 @@ func (s *importExportService) ImportQuestionsFromCSV(ctx context.Context, reader
 
 	result.Questions = questions
 	result.Errors = errors
-	result.Status = "completed"
+	result.Status = models.ImportCompleted
 
 	s.logger.Info("CSV import completed",
 		"total_rows", result.TotalRows,
@@ -207,11 +186,11 @@ func (s *importExportService) ImportQuestionsFromExcel(ctx context.Context, read
 
 	result := &ImportResult{
 		TotalRows: len(rows) - 1,
-		Status:    "processing",
+		Status:    models.ImportProcessing,
 	}
 
 	var questions []*models.Question
-	var errors []ImportValidationError
+	var errors []models.ImportValidationError
 
 	// Process each data row
 	for rowIndex, row := range rows[1:] {
@@ -235,7 +214,7 @@ func (s *importExportService) ImportQuestionsFromExcel(ctx context.Context, read
 
 	result.Questions = questions
 	result.Errors = errors
-	result.Status = "completed"
+	result.Status = models.ImportCompleted
 
 	s.logger.Info("Excel import completed",
 		"total_rows", result.TotalRows,

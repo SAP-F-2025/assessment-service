@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
@@ -45,18 +46,16 @@ type StartAttemptRequest struct {
 }
 
 type SubmitAnswerRequest struct {
-	QuestionID   uint        `json:"question_id" validate:"required"`
-	AnswerData   interface{} `json:"answer_data" validate:"required"`
-	TimeSpent    *int        `json:"time_spent"`
-	IsSkipped    bool        `json:"is_skipped"`
-	IsBookmarked bool        `json:"is_bookmarked"`
+	QuestionID uint        `json:"question_id" validate:"required"`
+	AnswerData interface{} `json:"answer_data" validate:"required"`
+	TimeSpent  *int        `json:"time_spent"`
 }
 
 type SubmitAttemptRequest struct {
-	AttemptID uint                    `json:"attempt_id" validate:"required"`
-	Answers   []SubmitAnswerRequest   `json:"answers" validate:"required,dive"`
-	TimeSpent *int                    `json:"time_spent"`
-	EndReason models.AttemptEndReason `json:"end_reason"`
+	AttemptID uint                  `json:"attempt_id" validate:"required"`
+	Answers   []SubmitAnswerRequest `json:"answers" validate:"required,dive"`
+	TimeSpent *int                  `json:"time_spent"`
+	EndReason string                `json:"end_reason"`
 }
 
 type AttemptResponse struct {
@@ -68,11 +67,8 @@ type AttemptResponse struct {
 
 type QuestionForAttempt struct {
 	*models.Question
-	Order          int                   `json:"order"`
-	Points         int                   `json:"points"`
-	ExistingAnswer *models.StudentAnswer `json:"existing_answer,omitempty"`
-	IsLast         bool                  `json:"is_last"`
-	IsFirst        bool                  `json:"is_first"`
+	IsLast  bool `json:"is_last"`
+	IsFirst bool `json:"is_first"`
 }
 
 // ===== QUESTION RELATED DTOs =====
@@ -243,15 +239,15 @@ type GradingService interface {
 	AutoGradeAssessment(ctx context.Context, assessmentID uint) (map[uint]*AttemptGradingResult, error)
 
 	// Grading utilities
-	CalculateScore(ctx context.Context, questionType models.QuestionType, questionContent interface{}, studentAnswer interface{}) (float64, bool, error)
-	GenerateFeedback(ctx context.Context, questionType models.QuestionType, questionContent interface{}, studentAnswer interface{}, isCorrect bool) (*string, error)
+	CalculateScore(ctx context.Context, questionType models.QuestionType, questionContent json.RawMessage, studentAnswer json.RawMessage) (float64, bool, error)
+	GenerateFeedback(ctx context.Context, questionType models.QuestionType, questionContent json.RawMessage, studentAnswer json.RawMessage, isCorrect bool) (*string, error)
 
 	// Bulk operations
 	ReGradeQuestion(ctx context.Context, questionID uint, userID uint) ([]GradingResult, error)
 	ReGradeAssessment(ctx context.Context, assessmentID uint, userID uint) (map[uint]*AttemptGradingResult, error)
 
 	// Statistics
-	GetGradingOverview(ctx context.Context, assessmentID uint, userID uint) (map[string]interface{}, error)
+	GetGradingOverview(ctx context.Context, assessmentID uint, userID uint) (*repositories.GradingStats, error)
 }
 
 // ===== SERVICE MANAGER =====
@@ -266,7 +262,7 @@ type ServiceManager interface {
 	// Additional service getters
 	ImportExport() ImportExportService
 	Notification() NotificationService
-	Analytics() AnalyticsService
+	// Analytics() AnalyticsService
 
 	// Health and lifecycle
 	Initialize(ctx context.Context) error

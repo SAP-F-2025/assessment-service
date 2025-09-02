@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
@@ -31,7 +30,7 @@ func (s *questionService) GetStats(ctx context.Context, questionID uint, userID 
 }
 
 func (s *questionService) GetUsageStats(ctx context.Context, creatorID uint) (*repositories.QuestionUsageStats, error) {
-	stats, err := s.repo.Question().GetUsageStats(ctx, creatorID)
+	stats, err := s.repo.Question().GetUsageStats(ctx, nil, creatorID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get usage stats: %w", err)
 	}
@@ -54,7 +53,7 @@ func (s *questionService) CanAccess(ctx context.Context, questionID uint, userID
 	}
 
 	// Get question to check ownership
-	question, err := s.repo.Question().GetByID(ctx, questionID)
+	question, err := s.repo.Question().GetByID(ctx, nil, questionID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return false, nil
@@ -92,7 +91,7 @@ func (s *questionService) CanEdit(ctx context.Context, questionID uint, userID u
 	}
 
 	// Get question
-	question, err := s.repo.Question().GetByID(ctx, questionID)
+	question, err := s.repo.Question().GetByID(ctx, nil, questionID)
 	if err != nil {
 		return false, err
 	}
@@ -123,7 +122,7 @@ func (s *questionService) CanDelete(ctx context.Context, questionID uint, userID
 	}
 
 	// Get question
-	question, err := s.repo.Question().GetByID(ctx, questionID)
+	question, err := s.repo.Question().GetByID(ctx, nil, questionID)
 	if err != nil {
 		return false, err
 	}
@@ -288,7 +287,7 @@ func (s *questionService) applyQuestionUpdates(question *models.Question, req *U
 
 func (s *questionService) validateCategoryAccess(ctx context.Context, categoryID uint, userID uint) error {
 	// Get category
-	category, err := s.repo.QuestionCategory().GetByID(ctx, categoryID)
+	category, err := s.repo.QuestionCategory().GetByID(ctx, nil, categoryID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return NewValidationError("category_id", "category not found", categoryID)

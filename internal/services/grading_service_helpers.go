@@ -22,19 +22,19 @@ func (s *gradingService) CalculateScore(ctx context.Context, questionType models
 	}
 
 	switch questionType {
-	case models.QuestionTypeMultipleChoice:
+	case models.MultipleChoice:
 		return s.gradeMultipleChoice(questionContent, studentAnswer)
-	case models.QuestionTypeTrueFalse:
+	case models.TrueFalse:
 		return s.gradeTrueFalse(questionContent, studentAnswer)
-	case models.QuestionTypeFillBlank:
+	case models.FillInBlank:
 		return s.gradeFillBlank(questionContent, studentAnswer)
-	case models.QuestionTypeShortAnswer:
+	case models.ShortAnswer:
 		return s.gradeShortAnswer(questionContent, studentAnswer)
-	case models.QuestionTypeMatching:
+	case models.Matching:
 		return s.gradeMatching(questionContent, studentAnswer)
-	case models.QuestionTypeOrdering:
+	case models.Ordering:
 		return s.gradeOrdering(questionContent, studentAnswer)
-	case models.QuestionTypeEssay:
+	case models.Essay:
 		// Essays require manual grading
 		return 0.0, false, ErrGradingNotAllowed
 	default:
@@ -46,17 +46,17 @@ func (s *gradingService) GenerateFeedback(ctx context.Context, questionType mode
 	var feedback string
 
 	switch questionType {
-	case models.QuestionTypeMultipleChoice:
+	case models.MultipleChoice:
 		feedback = s.generateMultipleChoiceFeedback(questionContent, studentAnswer, isCorrect)
-	case models.QuestionTypeTrueFalse:
+	case models.TrueFalse:
 		feedback = s.generateTrueFalseFeedback(questionContent, studentAnswer, isCorrect)
-	case models.QuestionTypeFillBlank:
+	case models.FillInBlank:
 		feedback = s.generateFillBlankFeedback(questionContent, studentAnswer, isCorrect)
-	case models.QuestionTypeShortAnswer:
+	case models.ShortAnswer:
 		feedback = s.generateShortAnswerFeedback(questionContent, studentAnswer, isCorrect)
-	case models.QuestionTypeMatching:
+	case models.Matching:
 		feedback = s.generateMatchingFeedback(questionContent, studentAnswer, isCorrect)
-	case models.QuestionTypeOrdering:
+	case models.Ordering:
 		feedback = s.generateOrderingFeedback(questionContent, studentAnswer, isCorrect)
 	default:
 		if isCorrect {
@@ -75,7 +75,7 @@ func (s *gradingService) ReGradeQuestion(ctx context.Context, questionID uint, u
 	s.logger.Info("Re-grading all answers for question", "question_id", questionID, "user_id", userID)
 
 	// Check permission to regrade (must be able to access question)
-	questionService := NewQuestionService(s.repo, s.logger, s.validator)
+	questionService := NewQuestionService(s.repo, s.db, s.logger, s.validator)
 	canAccess, err := questionService.CanAccess(ctx, questionID, userID)
 	if err != nil {
 		return nil, err
@@ -85,7 +85,7 @@ func (s *gradingService) ReGradeQuestion(ctx context.Context, questionID uint, u
 	}
 
 	// Get all answers for this question
-	answers, err := s.repo.Answer().GetByQuestion(ctx, questionID)
+	answers, err := s.repo.Answer().GetByQuestion(ctx, nil, questionID, repositories.AnswerFilters{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get answers for question: %w", err)
 	}
@@ -113,7 +113,7 @@ func (s *gradingService) ReGradeAssessment(ctx context.Context, assessmentID uin
 	s.logger.Info("Re-grading all attempts for assessment", "assessment_id", assessmentID, "user_id", userID)
 
 	// Check permission
-	assessmentService := NewAssessmentService(s.repo, s.logger, s.validator)
+	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)
 	if err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func (s *gradingService) ReGradeAssessment(ctx context.Context, assessmentID uin
 	}
 
 	// Get all attempts for assessment
-	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, assessmentID, repositories.AttemptFilters{})
+	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, nil, assessmentID, repositories.AttemptFilters{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get assessment attempts: %w", err)
 	}
@@ -132,7 +132,7 @@ func (s *gradingService) ReGradeAssessment(ctx context.Context, assessmentID uin
 
 	// Re-grade each attempt
 	for _, attempt := range attempts {
-		if attempt.Status == models.AttemptStatusSubmitted || attempt.Status == models.AttemptStatusTimedOut {
+		if attempt.Status == models.AttemptCompleted || attempt.Status == models.AttemptTimeOut {
 			result, err := s.AutoGradeAttempt(ctx, attempt.ID)
 			if err != nil {
 				s.logger.Error("Failed to re-grade attempt", "attempt_id", attempt.ID, "error", err)
@@ -151,9 +151,9 @@ func (s *gradingService) ReGradeAssessment(ctx context.Context, assessmentID uin
 
 // ===== STATISTICS =====
 
-func (s *gradingService) GetGradingOverview(ctx context.Context, assessmentID uint, userID uint) (map[string]interface{}, error) {
+func (s *gradingService) GetGradingOverview(ctx context.Context, assessmentID uint, userID uint) (*repositories.GradingStats, error) {
 	// Check permission
-	assessmentService := NewAssessmentService(s.repo, s.logger, s.validator)
+	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)
 	if err != nil {
 		return nil, err
@@ -163,25 +163,12 @@ func (s *gradingService) GetGradingOverview(ctx context.Context, assessmentID ui
 	}
 
 	// Get grading stats
-	stats, err := s.repo.Assessment().GetGradingStats(ctx, assessmentID)
+	stats, err := s.repo.Answer().GetGradingStats(ctx, nil, assessmentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get grading stats: %w", err)
 	}
 
-	overview := map[string]interface{}{
-		"assessment_id":          assessmentID,
-		"total_attempts":         stats["total_attempts"],
-		"graded_attempts":        stats["graded_attempts"],
-		"pending_manual_grading": stats["pending_manual_grading"],
-		"auto_gradeable":         stats["auto_gradeable"],
-		"average_score":          stats["average_score"],
-		"passing_rate":           stats["passing_rate"],
-		"grade_distribution":     stats["grade_distribution"],
-		"question_difficulty":    stats["question_difficulty"],
-		"completion_rate":        stats["completion_rate"],
-	}
-
-	return overview, nil
+	return stats, nil
 }
 
 // ===== QUESTION TYPE SPECIFIC GRADING =====
@@ -192,23 +179,23 @@ func (s *gradingService) gradeMultipleChoice(questionContent json.RawMessage, st
 		return 0.0, false, fmt.Errorf("failed to unmarshal question content: %w", err)
 	}
 
-	var answer []int
+	var answer []string
 	if err := json.Unmarshal(studentAnswer, &answer); err != nil {
 		return 0.0, false, fmt.Errorf("failed to unmarshal student answer: %w", err)
 	}
 
 	// Handle single answer format
 	if len(answer) == 0 {
-		var singleAnswer int
+		var singleAnswer string
 		if err := json.Unmarshal(studentAnswer, &singleAnswer); err == nil {
-			answer = []int{singleAnswer}
+			answer = []string{singleAnswer}
 		}
 	}
 
 	correctAnswers := content.CorrectAnswers
 
 	// Perfect match scoring
-	if reflect.DeepEqual(sortInts(answer), sortInts(correctAnswers)) {
+	if reflect.DeepEqual(sortStrings(answer), sortStrings(correctAnswers)) {
 		return 1.0, true, nil
 	}
 
@@ -217,12 +204,12 @@ func (s *gradingService) gradeMultipleChoice(questionContent json.RawMessage, st
 		correct := 0
 		incorrect := 0
 
-		answerSet := make(map[int]bool)
+		answerSet := make(map[string]bool)
 		for _, a := range answer {
 			answerSet[a] = true
 		}
 
-		correctSet := make(map[int]bool)
+		correctSet := make(map[string]bool)
 		for _, c := range correctAnswers {
 			correctSet[c] = true
 		}
@@ -263,7 +250,7 @@ func (s *gradingService) gradeTrueFalse(questionContent json.RawMessage, student
 		return 0.0, false, fmt.Errorf("failed to unmarshal student answer: %w", err)
 	}
 
-	if content.CorrectAnswer != nil && answer == *content.CorrectAnswer {
+	if answer == content.CorrectAnswer {
 		return 1.0, true, nil
 	}
 
@@ -368,12 +355,12 @@ func (s *gradingService) gradeMatching(questionContent json.RawMessage, studentA
 
 	// Build correct mappings
 	correctMappings := make(map[string]string)
-	for _, pair := range content.Pairs {
-		correctMappings[pair.Left] = pair.Right
+	for _, pair := range content.CorrectPairs {
+		correctMappings[pair.LeftID] = pair.RightID
 	}
 
 	correct := 0
-	total := len(content.Pairs)
+	total := len(content.CorrectPairs)
 
 	for left, expectedRight := range correctMappings {
 		if studentRight, exists := answers[left]; exists && studentRight == expectedRight {
@@ -400,17 +387,7 @@ func (s *gradingService) gradeOrdering(questionContent json.RawMessage, studentA
 		return 0.0, false, fmt.Errorf("failed to unmarshal student answer: %w", err)
 	}
 
-	// Build correct order map
-	correctOrder := make(map[string]int)
-	for _, item := range content.Items {
-		correctOrder[item.ID] = item.CorrectOrder
-	}
-
-	// Build expected order
-	expectedOrder := make([]string, len(content.Items))
-	for _, item := range content.Items {
-		expectedOrder[item.CorrectOrder-1] = item.ID
-	}
+	expectedOrder := content.CorrectOrder
 
 	// Perfect match
 	if reflect.DeepEqual(answer, expectedOrder) {
@@ -443,7 +420,7 @@ func (s *gradingService) generateMultipleChoiceFeedback(questionContent json.Raw
 
 	// Generate feedback showing correct options
 	correctOptions := make([]string, 0)
-	for _, correctIndex := range content.CorrectAnswers {
+	for correctIndex := range content.CorrectAnswers {
 		if correctIndex < len(content.Options) {
 			correctOptions = append(correctOptions, content.Options[correctIndex].Text)
 		}
@@ -466,15 +443,11 @@ func (s *gradingService) generateTrueFalseFeedback(questionContent json.RawMessa
 		return "Incorrect answer."
 	}
 
-	if content.CorrectAnswer != nil {
-		correctText := "True"
-		if !*content.CorrectAnswer {
-			correctText = "False"
-		}
-		return fmt.Sprintf("Incorrect. The correct answer is: %s", correctText)
+	correctText := "True"
+	if !content.CorrectAnswer {
+		correctText = "False"
 	}
-
-	return "Incorrect answer."
+	return fmt.Sprintf("Incorrect. The correct answer is: %s", correctText)
 }
 
 func (s *gradingService) generateFillBlankFeedback(questionContent json.RawMessage, studentAnswer json.RawMessage, isCorrect bool) string {
@@ -520,7 +493,7 @@ func (s *gradingService) checkGradingPermission(ctx context.Context, answer *mod
 	}
 
 	// Check if grader has access to the assessment
-	assessmentService := NewAssessmentService(s.repo, s.logger, s.validator)
+	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, answer.Attempt.AssessmentID, graderID)
 	if err != nil {
 		return err
@@ -542,13 +515,13 @@ func (s *gradingService) getUserRole(ctx context.Context, userID uint) (models.U
 
 func (s *gradingService) isAutoGradeable(questionType models.QuestionType) bool {
 	autoGradeableTypes := map[models.QuestionType]bool{
-		models.QuestionTypeMultipleChoice: true,
-		models.QuestionTypeTrueFalse:      true,
-		models.QuestionTypeFillBlank:      true,
-		models.QuestionTypeShortAnswer:    true,
-		models.QuestionTypeMatching:       true,
-		models.QuestionTypeOrdering:       true,
-		models.QuestionTypeEssay:          false, // Requires manual grading
+		models.MultipleChoice: true,
+		models.TrueFalse:      true,
+		models.FillInBlank:    true,
+		models.ShortAnswer:    true,
+		models.Matching:       true,
+		models.Ordering:       true,
+		models.Essay:          false, // Requires manual grading
 	}
 
 	return autoGradeableTypes[questionType]
@@ -586,20 +559,20 @@ func (s *gradingService) calculateLetterGrade(percentage float64) string {
 
 func (s *gradingService) gradeAnswerInTransaction(ctx context.Context, txRepo repositories.Repository, answerID uint, score float64, feedback *string, graderID uint) (*GradingResult, error) {
 	// Get answer
-	answer, err := txRepo.Answer().GetByIDWithDetails(ctx, answerID)
+	answer, err := txRepo.Answer().GetByIDWithDetails(ctx, nil, answerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get answer: %w", err)
 	}
 
 	// Update with grade
 	maxScore := float64(answer.Question.Points)
-	answer.Score = &score
+	answer.Score = score
 	answer.Feedback = feedback
 	answer.GradedBy = &graderID
 	answer.GradedAt = timePtr(time.Now())
 	answer.IsGraded = true
 
-	if err := txRepo.Answer().Update(ctx, answer); err != nil {
+	if err := txRepo.Answer().Update(ctx, nil, answer); err != nil {
 		return nil, fmt.Errorf("failed to update answer: %w", err)
 	}
 
@@ -620,7 +593,7 @@ func (s *gradingService) updateAttemptGradeIfComplete(attemptID uint) {
 	ctx := context.Background()
 
 	// Check if all answers are graded
-	allGraded, err := s.repo.Answer().AreAllAnswersGraded(ctx, attemptID)
+	allGraded, err := s.repo.Answer().AreAllAnswersGraded(ctx, nil, attemptID)
 	if err != nil {
 		s.logger.Error("Failed to check if all answers graded", "attempt_id", attemptID, "error", err)
 		return
@@ -696,10 +669,10 @@ func levenshteinDistance(s1, s2 string) int {
 	return matrix[len(s1)][len(s2)]
 }
 
-func sortInts(arr []int) []int {
-	sorted := make([]int, len(arr))
+func sortStrings(arr []string) []string {
+	sorted := make([]string, len(arr))
 	copy(sorted, arr)
-	sort.Ints(sorted)
+	sort.Strings(sorted)
 	return sorted
 }
 

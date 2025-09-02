@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -9,17 +10,20 @@ import (
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"gorm.io/gorm"
 )
 
 type attemptService struct {
 	repo      repositories.Repository
+	db        *gorm.DB
 	logger    *slog.Logger
 	validator *utils.Validator
 }
 
-func NewAttemptService(repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) AttemptService {
+func NewAttemptService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *utils.Validator) AttemptService {
 	return &attemptService{
 		repo:      repo,
+		db:        db,
 		logger:    logger,
 		validator: validator,
 	}
@@ -47,7 +51,7 @@ func (s *attemptService) Start(ctx context.Context, req *StartAttemptRequest, st
 	}
 
 	// Get assessment details
-	assessment, err := s.repo.Assessment().GetByIDWithDetails(ctx, req.AssessmentID)
+	assessment, err := s.repo.Assessment().GetByIDWithDetails(ctx, s.db, req.AssessmentID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAssessmentNotFound
@@ -57,51 +61,46 @@ func (s *attemptService) Start(ctx context.Context, req *StartAttemptRequest, st
 
 	// Check if student already has an active attempt
 	currentAttempt, err := s.GetCurrentAttempt(ctx, req.AssessmentID, studentID)
-	if err != nil && err != ErrAttemptNotFound {
+	if err != nil && !errors.Is(err, ErrAttemptNotFound) {
 		return nil, err
 	}
 
-	if currentAttempt != nil && currentAttempt.Status == models.AttemptStatusInProgress {
+	if currentAttempt != nil && currentAttempt.Status == models.AttemptInProgress {
 		s.logger.Info("Resuming existing attempt", "attempt_id", currentAttempt.ID)
 		return currentAttempt, nil
 	}
 
 	// Begin transaction
-	txRepo, err := s.repo.(repositories.TransactionRepository).Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			txRepo.(repositories.TransactionRepository).Rollback(ctx)
+	var attempt *models.AssessmentAttempt
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// Create new attempt
+		currentTime := time.Now()
+		attempt = &models.AssessmentAttempt{
+			AssessmentID:  req.AssessmentID,
+			StudentID:     studentID,
+			Status:        models.AttemptInProgress,
+			StartedAt:     &currentTime,
+			TimeRemaining: assessment.Duration * 60, // Convert minutes to seconds
 		}
-	}()
 
-	// Create new attempt
-	attempt := &models.AssessmentAttempt{
-		AssessmentID: req.AssessmentID,
-		StudentID:    studentID,
-		Status:       models.AttemptStatusInProgress,
-		StartedAt:    time.Now(),
-		TimeLimit:    assessment.Duration * 60, // Convert minutes to seconds
-	}
+		// Calculate end time
+		endTime := attempt.StartedAt.Add(time.Duration(assessment.Duration) * time.Second)
+		attempt.EndedAt = &endTime
 
-	// Calculate end time
-	endTime := attempt.StartedAt.Add(time.Duration(attempt.TimeLimit) * time.Second)
-	attempt.EndTime = &endTime
+		if err = s.repo.Attempt().Create(ctx, tx, attempt); err != nil {
+			return fmt.Errorf("failed to create attempt: %w", err)
+		}
 
-	if err = txRepo.Attempt().Create(ctx, attempt); err != nil {
-		return nil, fmt.Errorf("failed to create attempt: %w", err)
-	}
+		// Initialize answers for all questions
+		if err = s.initializeAttemptAnswers(ctx, tx, attempt, assessment); err != nil {
+			return fmt.Errorf("failed to initialize answers: %w", err)
+		}
 
-	// Initialize answers for all questions
-	if err = s.initializeAttemptAnswers(ctx, txRepo, attempt, assessment); err != nil {
-		return nil, fmt.Errorf("failed to initialize answers: %w", err)
-	}
+		return nil
+	})
 
-	// Commit transaction
-	if err = txRepo.(repositories.TransactionRepository).Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start attempt transaction: %w", err)
 	}
 
 	s.logger.Info("Assessment attempt started successfully",
@@ -119,7 +118,7 @@ func (s *attemptService) Resume(ctx context.Context, attemptID uint, studentID u
 		"student_id", studentID)
 
 	// Check if attempt exists and belongs to student
-	attempt, err := s.repo.Attempt().GetByID(ctx, attemptID)
+	attempt, err := s.repo.Attempt().GetByID(ctx, s.db, attemptID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAttemptNotFound
@@ -133,12 +132,12 @@ func (s *attemptService) Resume(ctx context.Context, attemptID uint, studentID u
 	}
 
 	// Check if attempt can be resumed
-	if attempt.Status != models.AttemptStatusInProgress {
+	if attempt.Status != models.AttemptInProgress {
 		return nil, ErrAttemptNotActive
 	}
 
 	// Check if attempt has expired
-	if attempt.EndTime != nil && time.Now().After(*attempt.EndTime) {
+	if attempt.EndedAt != nil && time.Now().After(*attempt.EndedAt) {
 		// Auto-submit expired attempt
 		if err := s.HandleTimeout(ctx, attemptID); err != nil {
 			s.logger.Error("Failed to handle timeout", "attempt_id", attemptID, "error", err)
@@ -164,7 +163,7 @@ func (s *attemptService) Submit(ctx context.Context, req *SubmitAttemptRequest, 
 	}
 
 	// Get attempt
-	attempt, err := s.repo.Attempt().GetByID(ctx, req.AttemptID)
+	attempt, err := s.repo.Attempt().GetByID(ctx, s.db, req.AttemptID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAttemptNotFound
@@ -178,45 +177,38 @@ func (s *attemptService) Submit(ctx context.Context, req *SubmitAttemptRequest, 
 	}
 
 	// Check if already submitted
-	if attempt.Status == models.AttemptStatusSubmitted {
+	if attempt.Status == models.AttemptCompleted {
 		return nil, ErrAttemptAlreadySubmitted
 	}
 
 	// Begin transaction
-	txRepo, err := s.repo.(repositories.TransactionRepository).Begin(ctx)
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// Update all answers
+		for _, answerReq := range req.Answers {
+			if err := s.updateAttemptAnswer(ctx, tx, req.AttemptID, answerReq, studentID); err != nil {
+				return fmt.Errorf("failed to update answer for question %d: %w", answerReq.QuestionID, err)
+			}
+		}
+
+		// Update attempt status
+		attempt.Status = models.AttemptCompleted
+		attempt.CompletedAt = timePtr(time.Now())
+		if req.TimeSpent != nil {
+			attempt.TimeSpent = *req.TimeSpent
+		}
+		if req.EndReason != "" {
+			attempt.EndReason = &req.EndReason
+		}
+
+		if err = s.repo.Attempt().Update(ctx, tx, attempt); err != nil {
+			return fmt.Errorf("failed to update attempt: %w", err)
+		}
+
+		return nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			txRepo.(repositories.TransactionRepository).Rollback(ctx)
-		}
-	}()
-
-	// Update all answers
-	for _, answerReq := range req.Answers {
-		if err := s.updateAttemptAnswer(ctx, txRepo, req.AttemptID, answerReq, studentID); err != nil {
-			return nil, fmt.Errorf("failed to update answer for question %d: %w", answerReq.QuestionID, err)
-		}
-	}
-
-	// Update attempt status
-	attempt.Status = models.AttemptStatusSubmitted
-	attempt.SubmittedAt = timePtr(time.Now())
-	if req.TimeSpent != nil {
-		attempt.TimeSpent = req.TimeSpent
-	}
-	if req.EndReason != "" {
-		attempt.EndReason = &req.EndReason
-	}
-
-	if err = txRepo.Attempt().Update(ctx, attempt); err != nil {
-		return nil, fmt.Errorf("failed to update attempt: %w", err)
-	}
-
-	// Commit transaction
-	if err = txRepo.(repositories.TransactionRepository).Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("failed to submit attempt transaction: %w", err)
 	}
 
 	s.logger.Info("Assessment attempt submitted successfully",
@@ -225,7 +217,7 @@ func (s *attemptService) Submit(ctx context.Context, req *SubmitAttemptRequest, 
 
 	// Auto-grade if possible
 	go func() {
-		gradingService := NewGradingService(s.repo, s.logger, s.validator)
+		gradingService := NewGradingService(s.db, s.repo, s.logger, s.validator)
 		if _, err := gradingService.AutoGradeAttempt(context.Background(), req.AttemptID); err != nil {
 			s.logger.Error("Failed to auto-grade attempt", "attempt_id", req.AttemptID, "error", err)
 		}
@@ -247,7 +239,7 @@ func (s *attemptService) SubmitAnswer(ctx context.Context, attemptID uint, req *
 	}
 
 	// Get attempt
-	attempt, err := s.repo.Attempt().GetByID(ctx, attemptID)
+	attempt, err := s.repo.Attempt().GetByID(ctx, s.db, attemptID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return ErrAttemptNotFound
@@ -261,17 +253,17 @@ func (s *attemptService) SubmitAnswer(ctx context.Context, attemptID uint, req *
 	}
 
 	// Check if attempt is active
-	if attempt.Status != models.AttemptStatusInProgress {
+	if attempt.Status != models.AttemptInProgress {
 		return ErrAttemptNotActive
 	}
 
 	// Check if attempt has expired
-	if attempt.EndTime != nil && time.Now().After(*attempt.EndTime) {
+	if attempt.EndedAt != nil && time.Now().After(*attempt.EndedAt) {
 		return ErrAttemptTimeExpired
 	}
 
 	// Update answer
-	if err := s.updateAttemptAnswer(ctx, s.repo, attemptID, *req, studentID); err != nil {
+	if err := s.updateAttemptAnswer(ctx, s.db, attemptID, *req, studentID); err != nil {
 		return fmt.Errorf("failed to update answer: %w", err)
 	}
 
@@ -286,7 +278,7 @@ func (s *attemptService) SubmitAnswer(ctx context.Context, attemptID uint, req *
 
 func (s *attemptService) GetByID(ctx context.Context, id uint, userID uint) (*AttemptResponse, error) {
 	// Get attempt
-	attempt, err := s.repo.Attempt().GetByID(ctx, id)
+	attempt, err := s.repo.Attempt().GetByID(ctx, s.db, id)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAttemptNotFound
@@ -308,7 +300,7 @@ func (s *attemptService) GetByID(ctx context.Context, id uint, userID uint) (*At
 
 func (s *attemptService) GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*AttemptResponse, error) {
 	// Get attempt with details
-	attempt, err := s.repo.Attempt().GetByIDWithDetails(ctx, id)
+	attempt, err := s.repo.Attempt().GetByIDWithDetails(ctx, s.db, id)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAttemptNotFound
@@ -330,7 +322,7 @@ func (s *attemptService) GetByIDWithDetails(ctx context.Context, id uint, userID
 
 func (s *attemptService) GetCurrentAttempt(ctx context.Context, assessmentID uint, studentID uint) (*AttemptResponse, error) {
 	// Get current attempt for student
-	attempt, err := s.repo.Attempt().GetCurrentAttempt(ctx, assessmentID, studentID)
+	attempt, err := s.repo.Attempt().GetActiveAttempt(ctx, nil, assessmentID, studentID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAttemptNotFound
@@ -355,7 +347,7 @@ func (s *attemptService) List(ctx context.Context, filters repositories.AttemptF
 		filters.StudentID = &userID
 	}
 
-	attempts, total, err := s.repo.Attempt().List(ctx, filters)
+	attempts, total, err := s.repo.Attempt().List(ctx, s.db, filters)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list attempts: %w", err)
 	}
@@ -373,7 +365,7 @@ func (s *attemptService) GetByStudent(ctx context.Context, studentID uint, filte
 	// Set student filter
 	filters.StudentID = &studentID
 
-	attempts, total, err := s.repo.Attempt().GetByStudent(ctx, studentID, filters)
+	attempts, total, err := s.repo.Attempt().GetByStudent(ctx, s.db, studentID, filters)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get attempts by student: %w", err)
 	}
@@ -389,7 +381,7 @@ func (s *attemptService) GetByStudent(ctx context.Context, studentID uint, filte
 
 func (s *attemptService) GetByAssessment(ctx context.Context, assessmentID uint, filters repositories.AttemptFilters, userID uint) ([]*AttemptResponse, int64, error) {
 	// Check if user can access assessment attempts
-	assessmentService := NewAssessmentService(s.repo, s.logger, s.validator)
+	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)
 	if err != nil {
 		return nil, 0, err
@@ -398,7 +390,7 @@ func (s *attemptService) GetByAssessment(ctx context.Context, assessmentID uint,
 		return nil, 0, NewPermissionError(userID, assessmentID, "assessment", "view_attempts", "not owner or insufficient permissions")
 	}
 
-	attempts, total, err := s.repo.Attempt().GetByAssessment(ctx, assessmentID, filters)
+	attempts, total, err := s.repo.Attempt().GetByAssessment(ctx, s.db, assessmentID, filters)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get attempts by assessment: %w", err)
 	}
@@ -411,5 +403,3 @@ func (s *attemptService) GetByAssessment(ctx context.Context, assessmentID uint,
 
 	return responses, total, nil
 }
-
-// Continue in next part...

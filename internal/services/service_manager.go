@@ -9,6 +9,7 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"gorm.io/gorm"
 )
 
 // ServiceManagerConfig holds configuration for the service manager
@@ -56,6 +57,7 @@ type RateLimit struct {
 // serviceManager implements ServiceManager interface
 type serviceManager struct {
 	// Dependencies
+	db        *gorm.DB
 	repo      repositories.Repository
 	logger    *slog.Logger
 	validator *utils.Validator
@@ -68,11 +70,11 @@ type serviceManager struct {
 	gradingService      GradingService
 	importExportService ImportExportService
 	notificationService NotificationService
-	analyticsService    AnalyticsService
+	//analyticsService    AnalyticsService
 
 	// Utilities
-	validationService *ValidationService
-	serviceLoggers    map[string]*ServiceLogger
+	//validationService *ValidationService
+	serviceLoggers map[string]*ServiceLogger
 
 	// Lifecycle management
 	initialized bool
@@ -81,8 +83,9 @@ type serviceManager struct {
 }
 
 // NewServiceManager creates a new service manager with all dependencies
-func NewServiceManager(repo repositories.Repository, logger *slog.Logger, validator *utils.Validator, config ServiceManagerConfig) ServiceManager {
+func NewServiceManager(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *utils.Validator, config ServiceManagerConfig) ServiceManager {
 	return &serviceManager{
+		db:             db,
 		repo:           repo,
 		logger:         logger,
 		validator:      validator,
@@ -92,7 +95,7 @@ func NewServiceManager(repo repositories.Repository, logger *slog.Logger, valida
 }
 
 // NewDefaultServiceManager creates a service manager with default configuration
-func NewDefaultServiceManager(repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) ServiceManager {
+func NewDefaultServiceManager(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) ServiceManager {
 	config := ServiceManagerConfig{
 		EnableDebugLogging: false,
 		EnableMetrics:      true,
@@ -137,7 +140,7 @@ func NewDefaultServiceManager(repo repositories.Repository, logger *slog.Logger,
 		RateLimitingRules: make(map[string]RateLimit),
 	}
 
-	return NewServiceManager(repo, logger, validator, config)
+	return NewServiceManager(db, repo, logger, validator, config)
 }
 
 // Initialize sets up all services and their dependencies
@@ -150,9 +153,6 @@ func (sm *serviceManager) Initialize(ctx context.Context) error {
 	}
 
 	sm.logger.Info("Initializing service manager")
-
-	// Initialize validation service first (used by all other services)
-	sm.validationService = NewValidationService(sm.repo)
 
 	// Initialize service loggers
 	if err := sm.initializeServiceLoggers(); err != nil {
@@ -197,25 +197,25 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 
 	// Initialize AssessmentService
 	if sm.config.Assessment.Enabled {
-		sm.assessmentService = NewAssessmentService(sm.repo, sm.logger, sm.validator)
+		sm.assessmentService = NewAssessmentService(sm.repo, sm.db, sm.logger, sm.validator)
 		sm.logger.Info("Assessment service initialized")
 	}
 
 	// Initialize QuestionService
 	if sm.config.Question.Enabled {
-		sm.questionService = NewQuestionService(sm.repo, sm.logger, sm.validator)
+		sm.questionService = NewQuestionService(sm.repo, sm.db, sm.logger, sm.validator)
 		sm.logger.Info("Question service initialized")
 	}
 
 	// Initialize AttemptService
 	if sm.config.Attempt.Enabled {
-		sm.attemptService = NewAttemptService(sm.repo, sm.logger, sm.validator)
+		sm.attemptService = NewAttemptService(sm.repo, sm.db, sm.logger, sm.validator)
 		sm.logger.Info("Attempt service initialized")
 	}
 
 	// Initialize GradingService
 	if sm.config.Grading.Enabled {
-		sm.gradingService = NewGradingService(sm.repo, sm.logger, sm.validator)
+		sm.gradingService = NewGradingService(sm.db, sm.repo, sm.logger, sm.validator)
 		sm.logger.Info("Grading service initialized")
 	}
 
@@ -226,10 +226,6 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 	// Initialize NotificationService
 	sm.notificationService = NewNotificationService(sm.repo, sm.logger, sm.validator)
 	sm.logger.Info("Notification service initialized")
-
-	// Initialize AnalyticsService
-	sm.analyticsService = NewAnalyticsService(sm.repo, sm.logger, sm.validator)
-	sm.logger.Info("Analytics service initialized")
 
 	if len(initErrors) > 0 {
 		return fmt.Errorf("service initialization failed with %d errors", len(initErrors))
@@ -341,21 +337,6 @@ func (sm *serviceManager) Notification() NotificationService {
 	panic("notification service not initialized")
 }
 
-func (sm *serviceManager) Analytics() AnalyticsService {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	if !sm.initialized {
-		panic("service manager not initialized")
-	}
-
-	if sm.analyticsService != nil {
-		return sm.analyticsService
-	}
-
-	panic("analytics service not initialized")
-}
-
 // Health and lifecycle
 func (sm *serviceManager) HealthCheck(ctx context.Context) error {
 	sm.mu.RLock()
@@ -410,18 +391,6 @@ func (sm *serviceManager) Shutdown(ctx context.Context) error {
 }
 
 // ===== UTILITY METHODS =====
-
-// GetValidationService returns the centralized validation service
-func (sm *serviceManager) GetValidationService() *ValidationService {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	if !sm.initialized {
-		panic("service manager not initialized")
-	}
-
-	return sm.validationService
-}
 
 // GetServiceLogger returns a logger for a specific service
 func (sm *serviceManager) GetServiceLogger(serviceName string) *ServiceLogger {
@@ -594,7 +563,7 @@ func (sc *ServiceConfig) validate(serviceName string) error {
 // ===== FACTORY FUNCTIONS =====
 
 // CreateProductionServiceManager creates a service manager configured for production
-func CreateProductionServiceManager(repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) ServiceManager {
+func CreateProductionServiceManager(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) ServiceManager {
 	config := ServiceManagerConfig{
 		EnableDebugLogging: false,
 		EnableMetrics:      true,
@@ -643,11 +612,11 @@ func CreateProductionServiceManager(repo repositories.Repository, logger *slog.L
 		},
 	}
 
-	return NewServiceManager(repo, logger, validator, config)
+	return NewServiceManager(db, repo, logger, validator, config)
 }
 
 // CreateDevelopmentServiceManager creates a service manager configured for development
-func CreateDevelopmentServiceManager(repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) ServiceManager {
+func CreateDevelopmentServiceManager(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) ServiceManager {
 	config := ServiceManagerConfig{
 		EnableDebugLogging: true,
 		EnableMetrics:      false,
@@ -692,5 +661,5 @@ func CreateDevelopmentServiceManager(repo repositories.Repository, logger *slog.
 		RateLimitingRules: make(map[string]RateLimit),
 	}
 
-	return NewServiceManager(repo, logger, validator, config)
+	return NewServiceManager(db, repo, logger, validator, config)
 }

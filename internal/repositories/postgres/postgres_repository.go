@@ -61,7 +61,7 @@ func NewPostgreSQLRepository(config RepositoryConfig) repositories.Repository {
 	// repo.assessmentSettings = NewAssessmentSettingsPostgreSQL(config.DB, config.RedisClient)
 	// repo.questionCategory = NewQuestionCategoryPostgreSQL(config.DB, config.RedisClient)
 	// repo.questionAttachment = NewQuestionAttachmentPostgreSQL(config.DB, config.RedisClient)
-	// repo.answer = NewAnswerPostgreSQL(config.DB, config.RedisClient)
+	repo.answer = NewAnswerPostgreSQL(config.DB, config.RedisClient)
 
 	return repo
 }

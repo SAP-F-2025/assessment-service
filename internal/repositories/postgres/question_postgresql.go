@@ -31,8 +31,9 @@ func NewQuestionPostgreSQL(db *gorm.DB, redisClient *redis.Client) repositories.
 // ===== BASIC CRUD OPERATIONS =====
 
 // Create creates a new question and invalidates cache
-func (q *QuestionPostgreSQL) Create(ctx context.Context, question *models.Question) error {
-	if err := q.db.WithContext(ctx).Create(question).Error; err != nil {
+func (q *QuestionPostgreSQL) Create(ctx context.Context, tx *gorm.DB, question *models.Question) error {
+	db := q.getDB(tx)
+	if err := db.WithContext(ctx).Create(question).Error; err != nil {
 		return fmt.Errorf("failed to create question: %w", err)
 	}
 
@@ -44,14 +45,15 @@ func (q *QuestionPostgreSQL) Create(ctx context.Context, question *models.Questi
 }
 
 // GetByID retrieves a question by ID with caching
-func (q *QuestionPostgreSQL) GetByID(ctx context.Context, id uint) (*models.Question, error) {
+func (q *QuestionPostgreSQL) GetByID(ctx context.Context, tx *gorm.DB, id uint) (*models.Question, error) {
+	db := q.getDB(tx)
 	// Try cache first for performance
 	cacheKey := fmt.Sprintf("id:%d", id)
 	var question models.Question
 
 	err := q.cacheManager.Question.CacheOrExecute(ctx, cacheKey, &question, cache.QuestionCacheConfig.TTL, func() (interface{}, error) {
 		var dbQuestion models.Question
-		if err := q.db.WithContext(ctx).First(&dbQuestion, id).Error; err != nil {
+		if err := db.WithContext(ctx).First(&dbQuestion, id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil, fmt.Errorf("question not found with ID %d", id)
 			}
@@ -68,9 +70,10 @@ func (q *QuestionPostgreSQL) GetByID(ctx context.Context, id uint) (*models.Ques
 }
 
 // GetByIDWithDetails retrieves a question with all related data
-func (q *QuestionPostgreSQL) GetByIDWithDetails(ctx context.Context, id uint) (*models.Question, error) {
+func (q *QuestionPostgreSQL) GetByIDWithDetails(ctx context.Context, tx *gorm.DB, id uint) (*models.Question, error) {
+	db := q.getDB(tx)
 	var question models.Question
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Preload("Category").
 		Preload("Attachments").
 		Preload("Creator", func(db *gorm.DB) *gorm.DB {
@@ -86,8 +89,9 @@ func (q *QuestionPostgreSQL) GetByIDWithDetails(ctx context.Context, id uint) (*
 }
 
 // Update updates a question
-func (q *QuestionPostgreSQL) Update(ctx context.Context, question *models.Question) error {
-	if err := q.db.WithContext(ctx).Save(question).Error; err != nil {
+func (q *QuestionPostgreSQL) Update(ctx context.Context, tx *gorm.DB, question *models.Question) error {
+	db := q.getDB(tx)
+	if err := db.WithContext(ctx).Save(question).Error; err != nil {
 		return fmt.Errorf("failed to update question: %w", err)
 	}
 
@@ -95,8 +99,9 @@ func (q *QuestionPostgreSQL) Update(ctx context.Context, question *models.Questi
 }
 
 // Delete soft deletes a question
-func (q *QuestionPostgreSQL) Delete(ctx context.Context, id uint) error {
-	if err := q.db.WithContext(ctx).Delete(&models.Question{}, id).Error; err != nil {
+func (q *QuestionPostgreSQL) Delete(ctx context.Context, tx *gorm.DB, id uint) error {
+	db := q.getDB(tx)
+	if err := db.WithContext(ctx).Delete(&models.Question{}, id).Error; err != nil {
 		return fmt.Errorf("failed to delete question: %w", err)
 	}
 
@@ -106,42 +111,40 @@ func (q *QuestionPostgreSQL) Delete(ctx context.Context, id uint) error {
 // ===== BULK OPERATIONS =====
 
 // CreateBatch creates multiple questions in a batch
-func (q *QuestionPostgreSQL) CreateBatch(ctx context.Context, questions []*models.Question) error {
+func (q *QuestionPostgreSQL) CreateBatch(ctx context.Context, tx *gorm.DB, questions []*models.Question) error {
 	if len(questions) == 0 {
 		return nil
 	}
 
-	// Use transaction for batch creation
-	return q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.CreateInBatches(questions, 100).Error; err != nil {
-			return fmt.Errorf("failed to create questions batch: %w", err)
-		}
-		return nil
-	})
+	db := q.getDB(tx)
+	if err := db.WithContext(ctx).CreateInBatches(questions, 100).Error; err != nil {
+		return fmt.Errorf("failed to create questions batch: %w", err)
+	}
+	return nil
 }
 
 // UpdateBatch updates multiple questions in a batch
-func (q *QuestionPostgreSQL) UpdateBatch(ctx context.Context, questions []*models.Question) error {
+func (q *QuestionPostgreSQL) UpdateBatch(ctx context.Context, tx *gorm.DB, questions []*models.Question) error {
 	if len(questions) == 0 {
 		return nil
 	}
 
-	return q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(questions).Error; err != nil {
-			return fmt.Errorf("failed to update questions: %w", err)
-		}
-		return nil
-	})
+	db := q.getDB(tx)
+	if err := db.WithContext(ctx).Save(questions).Error; err != nil {
+		return fmt.Errorf("failed to update questions: %w", err)
+	}
+	return nil
 }
 
 // GetByIDs retrieves multiple questions by their IDs
-func (q *QuestionPostgreSQL) GetByIDs(ctx context.Context, ids []uint) ([]*models.Question, error) {
+func (q *QuestionPostgreSQL) GetByIDs(ctx context.Context, tx *gorm.DB, ids []uint) ([]*models.Question, error) {
 	if len(ids) == 0 {
 		return []*models.Question{}, nil
 	}
 
+	db := q.getDB(tx)
 	var questions []*models.Question
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Where("id IN ?", ids).
 		Find(&questions).Error; err != nil {
 		return nil, fmt.Errorf("failed to get questions by IDs: %w", err)
@@ -151,12 +154,13 @@ func (q *QuestionPostgreSQL) GetByIDs(ctx context.Context, ids []uint) ([]*model
 }
 
 // DeleteBatch soft deletes multiple questions
-func (q *QuestionPostgreSQL) DeleteBatch(ctx context.Context, ids []uint) error {
+func (q *QuestionPostgreSQL) DeleteBatch(ctx context.Context, tx *gorm.DB, ids []uint) error {
 	if len(ids) == 0 {
 		return nil
 	}
 
-	if err := q.db.WithContext(ctx).Delete(&models.Question{}, ids).Error; err != nil {
+	db := q.getDB(tx)
+	if err := db.WithContext(ctx).Delete(&models.Question{}, ids).Error; err != nil {
 		return fmt.Errorf("failed to delete questions batch: %w", err)
 	}
 
@@ -166,8 +170,9 @@ func (q *QuestionPostgreSQL) DeleteBatch(ctx context.Context, ids []uint) error 
 // ===== QUERY OPERATIONS =====
 
 // List retrieves questions with filtering and pagination
-func (q *QuestionPostgreSQL) List(ctx context.Context, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
-	query := q.db.WithContext(ctx).Model(&models.Question{})
+func (q *QuestionPostgreSQL) List(ctx context.Context, tx *gorm.DB, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
+	db := q.getDB(tx)
+	query := db.WithContext(ctx).Model(&models.Question{})
 
 	// Apply filters
 	query = q.applyQuestionFilters(query, filters)
@@ -190,29 +195,30 @@ func (q *QuestionPostgreSQL) List(ctx context.Context, filters repositories.Ques
 }
 
 // GetByCreator retrieves questions created by a specific user
-func (q *QuestionPostgreSQL) GetByCreator(ctx context.Context, creatorID uint, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
+func (q *QuestionPostgreSQL) GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
 	filters.CreatedBy = &creatorID
-	return q.List(ctx, filters)
+	return q.List(ctx, tx, filters)
 }
 
 // GetByCategory retrieves questions by category
-func (q *QuestionPostgreSQL) GetByCategory(ctx context.Context, categoryID uint, filters repositories.QuestionFilters) ([]*models.Question, error) {
+func (q *QuestionPostgreSQL) GetByCategory(ctx context.Context, tx *gorm.DB, categoryID uint, filters repositories.QuestionFilters) ([]*models.Question, error) {
 	filters.CategoryID = &categoryID
-	questions, _, err := q.List(ctx, filters)
+	questions, _, err := q.List(ctx, tx, filters)
 	return questions, err
 }
 
 // GetByType retrieves questions by type
-func (q *QuestionPostgreSQL) GetByType(ctx context.Context, questionType models.QuestionType, filters repositories.QuestionFilters) ([]*models.Question, error) {
+func (q *QuestionPostgreSQL) GetByType(ctx context.Context, tx *gorm.DB, questionType models.QuestionType, filters repositories.QuestionFilters) ([]*models.Question, error) {
 	filters.Type = &questionType
-	questions, _, err := q.List(ctx, filters)
+	questions, _, err := q.List(ctx, tx, filters)
 	return questions, err
 }
 
 // GetByDifficulty retrieves questions by difficulty level
-func (q *QuestionPostgreSQL) GetByDifficulty(ctx context.Context, difficulty models.DifficultyLevel, limit, offset int) ([]*models.Question, error) {
+func (q *QuestionPostgreSQL) GetByDifficulty(ctx context.Context, tx *gorm.DB, difficulty models.DifficultyLevel, limit, offset int) ([]*models.Question, error) {
+	db := q.getDB(tx)
 	var questions []*models.Question
-	query := q.db.WithContext(ctx).Where("difficulty = ?", difficulty)
+	query := db.WithContext(ctx).Where("difficulty = ?", difficulty)
 
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -229,8 +235,9 @@ func (q *QuestionPostgreSQL) GetByDifficulty(ctx context.Context, difficulty mod
 }
 
 // Search performs full-text search on questions
-func (q *QuestionPostgreSQL) Search(ctx context.Context, query string, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
-	dbQuery := q.db.WithContext(ctx).Model(&models.Question{})
+func (q *QuestionPostgreSQL) Search(ctx context.Context, tx *gorm.DB, query string, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
+	db := q.getDB(tx)
+	dbQuery := db.WithContext(ctx).Model(&models.Question{})
 
 	// Apply text search
 	if query != "" {
@@ -261,14 +268,15 @@ func (q *QuestionPostgreSQL) Search(ctx context.Context, query string, filters r
 // ===== ASSESSMENT-SPECIFIC QUERIES =====
 
 // GetByAssessment retrieves questions for a specific assessment with caching
-func (q *QuestionPostgreSQL) GetByAssessment(ctx context.Context, assessmentID uint) ([]*models.Question, error) {
+func (q *QuestionPostgreSQL) GetByAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint) ([]*models.Question, error) {
+	db := q.getDB(tx)
 	// Cache frequently accessed assessment questions
 	cacheKey := fmt.Sprintf("assessment:%d", assessmentID)
 	var questions []*models.Question
 
 	err := q.cacheManager.Question.CacheOrExecute(ctx, cacheKey, &questions, cache.QuestionCacheConfig.TTL, func() (interface{}, error) {
 		var dbQuestions []*models.Question
-		if err := q.db.WithContext(ctx).
+		if err := db.WithContext(ctx).
 			Joins("JOIN assessment_questions aq ON aq.question_id = questions.id").
 			Where("aq.assessment_id = ?", assessmentID).
 			Order("aq.order ASC").
@@ -282,8 +290,9 @@ func (q *QuestionPostgreSQL) GetByAssessment(ctx context.Context, assessmentID u
 }
 
 // GetRandomQuestions retrieves random questions based on filters
-func (q *QuestionPostgreSQL) GetRandomQuestions(ctx context.Context, filters repositories.RandomQuestionFilters) ([]*models.Question, error) {
-	query := q.db.WithContext(ctx).Model(&models.Question{})
+func (q *QuestionPostgreSQL) GetRandomQuestions(ctx context.Context, tx *gorm.DB, filters repositories.RandomQuestionFilters) ([]*models.Question, error) {
+	db := q.getDB(tx)
+	query := db.WithContext(ctx).Model(&models.Question{})
 
 	// Apply filters
 	if filters.CategoryID != nil {
@@ -311,8 +320,9 @@ func (q *QuestionPostgreSQL) GetRandomQuestions(ctx context.Context, filters rep
 }
 
 // GetQuestionBank retrieves questions for question bank
-func (q *QuestionPostgreSQL) GetQuestionBank(ctx context.Context, creatorID uint, filters repositories.QuestionBankFilters) ([]*models.Question, int64, error) {
-	query := q.db.WithContext(ctx).Model(&models.Question{}).Where("created_by = ?", creatorID)
+func (q *QuestionPostgreSQL) GetQuestionBank(ctx context.Context, tx *gorm.DB, creatorID uint, filters repositories.QuestionBankFilters) ([]*models.Question, int64, error) {
+	db := q.getDB(tx)
+	query := db.WithContext(ctx).Model(&models.Question{}).Where("created_by = ?", creatorID)
 
 	// Apply bank-specific filters
 	if filters.CategoryID != nil {
@@ -350,8 +360,9 @@ func (q *QuestionPostgreSQL) GetQuestionBank(ctx context.Context, creatorID uint
 // ===== ADVANCED FILTERING =====
 
 // GetByTags retrieves questions by tags
-func (q *QuestionPostgreSQL) GetByTags(ctx context.Context, tags []string, filters repositories.QuestionFilters) ([]*models.Question, error) {
-	query := q.db.WithContext(ctx).Model(&models.Question{})
+func (q *QuestionPostgreSQL) GetByTags(ctx context.Context, tx *gorm.DB, tags []string, filters repositories.QuestionFilters) ([]*models.Question, error) {
+	db := q.getDB(tx)
+	query := db.WithContext(ctx).Model(&models.Question{})
 
 	// Apply tag filters using JSONB operations
 	for _, tag := range tags {
@@ -373,9 +384,10 @@ func (q *QuestionPostgreSQL) GetByTags(ctx context.Context, tags []string, filte
 }
 
 // GetSimilarQuestions finds similar questions based on text similarity
-func (q *QuestionPostgreSQL) GetSimilarQuestions(ctx context.Context, questionID uint, limit int) ([]*models.Question, error) {
+func (q *QuestionPostgreSQL) GetSimilarQuestions(ctx context.Context, tx *gorm.DB, questionID uint, limit int) ([]*models.Question, error) {
+	db := q.getDB(tx)
 	// Get the base question first
-	baseQuestion, err := q.GetByID(ctx, questionID)
+	baseQuestion, err := q.GetByID(ctx, tx, questionID)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +412,7 @@ func (q *QuestionPostgreSQL) GetSimilarQuestions(ctx context.Context, questionID
 	whereClause := fmt.Sprintf("(%s) AND id != ?", strings.Join(likeConditions, " OR "))
 
 	var questions []*models.Question
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Where(whereClause, args...).
 		Where("type = ? AND created_by = ?", baseQuestion.Type, baseQuestion.CreatedBy).
 		Limit(limit).
@@ -414,12 +426,13 @@ func (q *QuestionPostgreSQL) GetSimilarQuestions(ctx context.Context, questionID
 // ===== STATISTICS AND ANALYTICS =====
 
 // GetQuestionStats retrieves basic statistics for a question
-func (q *QuestionPostgreSQL) GetQuestionStats(ctx context.Context, id uint) (*repositories.QuestionStats, error) {
+func (q *QuestionPostgreSQL) GetQuestionStats(ctx context.Context, tx *gorm.DB, id uint) (*repositories.QuestionStats, error) {
+	db := q.getDB(tx)
 	stats := &repositories.QuestionStats{}
 
 	// Get usage count from assessment_questions table
 	var usageCount int64
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Table("assessment_questions").
 		Where("question_id = ?", id).
 		Count(&usageCount).Error; err != nil {
@@ -429,12 +442,12 @@ func (q *QuestionPostgreSQL) GetQuestionStats(ctx context.Context, id uint) (*re
 
 	// Get performance statistics from answers table if exists
 	var correctAnswers, totalAnswers int64
-	err := q.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Table("answers").
 		Where("question_id = ?", id).
 		Count(&totalAnswers).Error
 	if err == nil && totalAnswers > 0 {
-		q.db.WithContext(ctx).
+		db.WithContext(ctx).
 			Table("answers").
 			Where("question_id = ? AND score > 0", id).
 			Count(&correctAnswers)
@@ -446,7 +459,8 @@ func (q *QuestionPostgreSQL) GetQuestionStats(ctx context.Context, id uint) (*re
 }
 
 // GetUsageStats retrieves usage statistics for a creator
-func (q *QuestionPostgreSQL) GetUsageStats(ctx context.Context, creatorID uint) (*repositories.QuestionUsageStats, error) {
+func (q *QuestionPostgreSQL) GetUsageStats(ctx context.Context, tx *gorm.DB, creatorID uint) (*repositories.QuestionUsageStats, error) {
+	db := q.getDB(tx)
 	stats := &repositories.QuestionUsageStats{
 		QuestionsByType: make(map[models.QuestionType]int),
 		QuestionsByDiff: make(map[models.DifficultyLevel]int),
@@ -454,7 +468,7 @@ func (q *QuestionPostgreSQL) GetUsageStats(ctx context.Context, creatorID uint) 
 
 	// Get total questions count
 	var totalCount int64
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Model(&models.Question{}).
 		Where("created_by = ?", creatorID).
 		Count(&totalCount).Error; err != nil {
@@ -467,7 +481,7 @@ func (q *QuestionPostgreSQL) GetUsageStats(ctx context.Context, creatorID uint) 
 		Type  models.QuestionType
 		Count int
 	}
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Model(&models.Question{}).
 		Select("type, COUNT(*) as count").
 		Where("created_by = ?", creatorID).
@@ -484,7 +498,7 @@ func (q *QuestionPostgreSQL) GetUsageStats(ctx context.Context, creatorID uint) 
 		Difficulty models.DifficultyLevel
 		Count      int
 	}
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Model(&models.Question{}).
 		Select("difficulty, COUNT(*) as count").
 		Where("created_by = ?", creatorID).
@@ -500,7 +514,7 @@ func (q *QuestionPostgreSQL) GetUsageStats(ctx context.Context, creatorID uint) 
 }
 
 // GetPerformanceStats retrieves detailed performance statistics for a question
-func (q *QuestionPostgreSQL) GetPerformanceStats(ctx context.Context, questionID uint) (*repositories.QuestionPerformanceStats, error) {
+func (q *QuestionPostgreSQL) GetPerformanceStats(ctx context.Context, tx *gorm.DB, questionID uint) (*repositories.QuestionPerformanceStats, error) {
 	stats := &repositories.QuestionPerformanceStats{
 		AnswerDistribution: make(map[string]int),
 	}
@@ -514,8 +528,9 @@ func (q *QuestionPostgreSQL) GetPerformanceStats(ctx context.Context, questionID
 // ===== VALIDATION AND CHECKS =====
 
 // ExistsByText checks if a question with the same text exists for the creator
-func (q *QuestionPostgreSQL) ExistsByText(ctx context.Context, text string, creatorID uint, excludeID *uint) (bool, error) {
-	query := q.db.WithContext(ctx).
+func (q *QuestionPostgreSQL) ExistsByText(ctx context.Context, tx *gorm.DB, text string, creatorID uint, excludeID *uint) (bool, error) {
+	db := q.getDB(tx)
+	query := db.WithContext(ctx).
 		Model(&models.Question{}).
 		Where("text = ? AND created_by = ?", text, creatorID)
 
@@ -532,9 +547,10 @@ func (q *QuestionPostgreSQL) ExistsByText(ctx context.Context, text string, crea
 }
 
 // IsUsedInAssessments checks if a question is used in any assessments
-func (q *QuestionPostgreSQL) IsUsedInAssessments(ctx context.Context, id uint) (bool, error) {
+func (q *QuestionPostgreSQL) IsUsedInAssessments(ctx context.Context, tx *gorm.DB, id uint) (bool, error) {
+	db := q.getDB(tx)
 	var count int64
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Table("assessment_questions").
 		Where("question_id = ?", id).
 		Count(&count).Error; err != nil {
@@ -545,9 +561,10 @@ func (q *QuestionPostgreSQL) IsUsedInAssessments(ctx context.Context, id uint) (
 }
 
 // GetUsageCount returns how many times a question has been used
-func (q *QuestionPostgreSQL) GetUsageCount(ctx context.Context, id uint) (int, error) {
+func (q *QuestionPostgreSQL) GetUsageCount(ctx context.Context, tx *gorm.DB, id uint) (int, error) {
+	db := q.getDB(tx)
 	var count int64
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Table("assessment_questions").
 		Where("question_id = ?", id).
 		Count(&count).Error; err != nil {
@@ -560,14 +577,15 @@ func (q *QuestionPostgreSQL) GetUsageCount(ctx context.Context, id uint) (int, e
 // ===== CONTENT MANAGEMENT =====
 
 // UpdateContent updates only the content field of a question
-func (q *QuestionPostgreSQL) UpdateContent(ctx context.Context, id uint, content interface{}) error {
+func (q *QuestionPostgreSQL) UpdateContent(ctx context.Context, tx *gorm.DB, id uint, content interface{}) error {
+	db := q.getDB(tx)
 	// Validate content structure
 	contentBytes, err := json.Marshal(content)
 	if err != nil {
 		return fmt.Errorf("failed to marshal content: %w", err)
 	}
 
-	if err := q.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Model(&models.Question{}).
 		Where("id = ?", id).
 		Update("content", contentBytes).Error; err != nil {
@@ -600,6 +618,14 @@ func (q *QuestionPostgreSQL) applyQuestionFilters(query *gorm.DB, filters reposi
 	}
 
 	return query
+}
+
+// getDB returns the transaction DB if provided, otherwise returns the default DB
+func (q *QuestionPostgreSQL) getDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return q.db
 }
 
 // min returns the minimum of two integers

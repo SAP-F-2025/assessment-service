@@ -7,6 +7,7 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
+	"gorm.io/gorm"
 )
 
 // ===== PERMISSION CHECKS =====
@@ -24,7 +25,7 @@ func (s *assessmentService) CanAccess(ctx context.Context, assessmentID uint, us
 	}
 
 	// Get assessment to check ownership
-	assessment, err := s.repo.Assessment().GetByID(ctx, assessmentID)
+	assessment, err := s.repo.Assessment().GetByID(ctx, s.db, assessmentID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return false, nil
@@ -55,7 +56,7 @@ func (s *assessmentService) CanEdit(ctx context.Context, assessmentID uint, user
 	}
 
 	// Get assessment
-	assessment, err := s.repo.Assessment().GetByID(ctx, assessmentID)
+	assessment, err := s.repo.Assessment().GetByID(ctx, s.db, assessmentID)
 	if err != nil {
 		return false, err
 	}
@@ -91,7 +92,7 @@ func (s *assessmentService) CanDelete(ctx context.Context, assessmentID uint, us
 	}
 
 	// Get assessment
-	assessment, err := s.repo.Assessment().GetByID(ctx, assessmentID)
+	assessment, err := s.repo.Assessment().GetByID(ctx, s.db, assessmentID)
 	if err != nil {
 		return false, err
 	}
@@ -102,7 +103,7 @@ func (s *assessmentService) CanDelete(ctx context.Context, assessmentID uint, us
 	}
 
 	// Check if assessment has attempts
-	hasAttempts, err := s.repo.Assessment().HasAttempts(ctx, assessmentID)
+	hasAttempts, err := s.repo.Assessment().HasAttempts(ctx, s.db, assessmentID)
 	if err != nil {
 		return false, err
 	}
@@ -128,7 +129,7 @@ func (s *assessmentService) CanTake(ctx context.Context, assessmentID uint, user
 	}
 
 	// Get assessment
-	assessment, err := s.repo.Assessment().GetByIDWithDetails(ctx, assessmentID)
+	assessment, err := s.repo.Assessment().GetByIDWithDetails(ctx, s.db, assessmentID)
 	if err != nil {
 		return false, err
 	}
@@ -144,7 +145,7 @@ func (s *assessmentService) CanTake(ctx context.Context, assessmentID uint, user
 	}
 
 	// Check attempt limits
-	attemptCount, err := s.repo.Attempt().GetStudentAttemptCount(ctx, assessmentID, userID)
+	attemptCount, err := s.repo.Attempt().GetAttemptCount(ctx, s.db, assessmentID, userID)
 	if err != nil {
 		return false, err
 	}
@@ -318,20 +319,10 @@ func (s *assessmentService) applySettingsUpdates(settings *models.AssessmentSett
 	}
 }
 
-func (s *assessmentService) addQuestionsToAssessment(ctx context.Context, txRepo repositories.Repository, assessmentID uint, questions []AssessmentQuestionRequest, userID uint) error {
+func (s *assessmentService) addQuestionsToAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint, questions []AssessmentQuestionRequest, userID uint) error {
 	for _, qReq := range questions {
-		// Validate question exists and user has access
-		questionService := NewQuestionService(s.repo, s.logger, s.validator)
-		canAccess, err := questionService.CanAccess(ctx, qReq.QuestionID, userID)
-		if err != nil {
-			return fmt.Errorf("failed to check question access: %w", err)
-		}
-		if !canAccess {
-			return NewPermissionError(userID, qReq.QuestionID, "question", "access", "question not found or access denied")
-		}
-
 		// Add question to assessment
-		if err := txRepo.AssessmentQuestion().AddQuestion(ctx, assessmentID, qReq.QuestionID, qReq.Order, qReq.Points); err != nil {
+		if err := s.repo.AssessmentQuestion().AddQuestion(ctx, tx, assessmentID, qReq.QuestionID, qReq.Order, qReq.Points); err != nil {
 			return fmt.Errorf("failed to add question %d to assessment: %w", qReq.QuestionID, err)
 		}
 	}
@@ -345,11 +336,11 @@ func (s *assessmentService) validateCreateRequest(ctx context.Context, req *Crea
 	var errors ValidationErrors
 
 	// Check title uniqueness
-	existing, err := s.repo.Assessment().GetByTitleAndCreator(ctx, req.Title, creatorID)
+	existing, err := s.repo.Assessment().ExistsByTitle(ctx, s.db, req.Title, creatorID, nil)
 	if err != nil && !repositories.IsNotFoundError(err) {
 		return fmt.Errorf("failed to check title uniqueness: %w", err)
 	}
-	if existing != nil {
+	if existing {
 		errors = append(errors, *NewValidationError("title", "already exists", req.Title))
 	}
 
@@ -369,7 +360,7 @@ func (s *assessmentService) validateCreateRequest(ctx context.Context, req *Crea
 			orderMap[q.Order] = true
 
 			// Validate question exists
-			_, err := s.repo.Question().GetByID(ctx, q.QuestionID)
+			_, err := s.repo.Question().GetByID(ctx, nil, q.QuestionID)
 			if err != nil {
 				if repositories.IsNotFoundError(err) {
 					errors = append(errors, *NewValidationError(fmt.Sprintf("questions[%d].question_id", i), "question not found", q.QuestionID))
@@ -392,11 +383,11 @@ func (s *assessmentService) validateUpdateRequest(ctx context.Context, req *Upda
 
 	// Check title uniqueness if title is being updated
 	if req.Title != nil && *req.Title != assessment.Title {
-		existing, err := s.repo.Assessment().GetByTitleAndCreator(ctx, *req.Title, assessment.CreatedBy)
+		existing, err := s.repo.Assessment().ExistsByTitle(ctx, s.db, *req.Title, assessment.CreatedBy, &assessment.ID)
 		if err != nil && !repositories.IsNotFoundError(err) {
 			return fmt.Errorf("failed to check title uniqueness: %w", err)
 		}
-		if existing != nil {
+		if existing {
 			errors = append(errors, *NewValidationError("title", "already exists", *req.Title))
 		}
 	}
@@ -408,7 +399,7 @@ func (s *assessmentService) validateUpdateRequest(ctx context.Context, req *Upda
 
 	// Business rule: Cannot change certain fields if assessment has attempts
 	if assessment.Status != models.StatusDraft {
-		hasAttempts, err := s.repo.Assessment().HasAttempts(ctx, assessment.ID)
+		hasAttempts, err := s.repo.Assessment().HasAttempts(ctx, s.db, assessment.ID)
 		if err != nil {
 			return fmt.Errorf("failed to check attempts: %w", err)
 		}
@@ -474,7 +465,7 @@ func (s *assessmentService) validateStatusTransition(ctx context.Context, assess
 
 func (s *assessmentService) validateAssessmentReadyForPublish(ctx context.Context, assessment *models.Assessment) error {
 	// Must have at least one question
-	questionCount, err := s.repo.AssessmentQuestion().GetQuestionCount(ctx, assessment.ID)
+	questionCount, err := s.repo.AssessmentQuestion().GetQuestionCount(ctx, nil, assessment.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get question count: %w", err)
 	}
@@ -504,15 +495,38 @@ func (s *assessmentService) validateAssessmentReadyForPublish(ctx context.Contex
 	return nil
 }
 
-// ===== UTILITY FUNCTIONS =====
-
-func stringPtr(s string) *string {
-	return &s
-}
-
 func max(a, b int) int {
 	if a > b {
 		return a
 	}
 	return b
+}
+
+// withDB executes a function with the service's database instance
+// Use this for non-transactional operations
+func (s *assessmentService) withDB(fn func(tx *gorm.DB) error) error {
+	return fn(s.db)
+}
+
+// withTx executes a function within a transaction
+// Use this for operations that require transaction management
+func (s *assessmentService) withTx(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	return s.db.WithContext(ctx).Transaction(fn)
+}
+
+// ===== REPOSITORY WRAPPERS FOR NON-TRANSACTIONAL OPERATIONS =====
+
+// getAssessmentByID is a wrapper for simple assessment retrieval
+func (s *assessmentService) getAssessmentByID(ctx context.Context, id uint) (*models.Assessment, error) {
+	return s.repo.Assessment().GetByID(ctx, s.db, id)
+}
+
+// getAssessmentWithDetails is a wrapper for detailed assessment retrieval
+func (s *assessmentService) getAssessmentWithDetails(ctx context.Context, id uint) (*models.Assessment, error) {
+	return s.repo.Assessment().GetByIDWithDetails(ctx, s.db, id)
+}
+
+// listAssessments is a wrapper for assessment listing
+func (s *assessmentService) listAssessments(ctx context.Context, filters repositories.AssessmentFilters) ([]*models.Assessment, int64, error) {
+	return s.repo.Assessment().List(ctx, s.db, filters)
 }

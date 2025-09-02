@@ -5,23 +5,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
-	"strings"
 	"time"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"gorm.io/gorm"
 )
 
 type gradingService struct {
+	db        *gorm.DB
 	repo      repositories.Repository
 	logger    *slog.Logger
 	validator *utils.Validator
 }
 
-func NewGradingService(repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) GradingService {
+func NewGradingService(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) GradingService {
 	return &gradingService{
+		db:        db,
 		repo:      repo,
 		logger:    logger,
 		validator: validator,
@@ -37,7 +38,7 @@ func (s *gradingService) GradeAnswer(ctx context.Context, answerID uint, score f
 		"grader_id", graderID)
 
 	// Get answer with question details
-	answer, err := s.repo.Answer().GetByIDWithDetails(ctx, answerID)
+	answer, err := s.repo.Answer().GetByIDWithDetails(ctx, nil, answerID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, fmt.Errorf("answer not found")
@@ -57,13 +58,13 @@ func (s *gradingService) GradeAnswer(ctx context.Context, answerID uint, score f
 	}
 
 	// Update answer with grade
-	answer.Score = &score
+	answer.Score = score
 	answer.Feedback = feedback
 	answer.GradedBy = &graderID
 	answer.GradedAt = timePtr(time.Now())
 	answer.IsGraded = true
 
-	if err := s.repo.Answer().Update(ctx, answer); err != nil {
+	if err := s.repo.Answer().Update(ctx, nil, answer); err != nil {
 		return nil, fmt.Errorf("failed to update answer grade: %w", err)
 	}
 
@@ -96,7 +97,7 @@ func (s *gradingService) GradeAttempt(ctx context.Context, attemptID uint, grade
 		"grader_id", graderID)
 
 	// Get attempt with details
-	attempt, err := s.repo.Attempt().GetByIDWithDetails(ctx, attemptID)
+	attempt, err := s.repo.Attempt().GetByIDWithDetails(ctx, nil, attemptID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, fmt.Errorf("attempt not found")
@@ -105,7 +106,7 @@ func (s *gradingService) GradeAttempt(ctx context.Context, attemptID uint, grade
 	}
 
 	// Check grading permissions
-	assessmentService := NewAssessmentService(s.repo, s.logger, s.validator)
+	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, attempt.AssessmentID, graderID)
 	if err != nil {
 		return nil, err
@@ -115,7 +116,7 @@ func (s *gradingService) GradeAttempt(ctx context.Context, attemptID uint, grade
 	}
 
 	// Get all answers for attempt
-	answers, err := s.repo.Answer().GetByAttempt(ctx, attemptID)
+	answers, err := s.repo.Answer().GetByAttempt(ctx, nil, attemptID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get attempt answers: %w", err)
 	}
@@ -149,10 +150,10 @@ func (s *gradingService) GradeAttempt(ctx context.Context, attemptID uint, grade
 			result = &GradingResult{
 				AnswerID:      answer.ID,
 				QuestionID:    answer.QuestionID,
-				Score:         *answer.Score,
+				Score:         answer.Score,
 				MaxScore:      float64(answer.Question.Points),
-				IsCorrect:     *answer.Score == float64(answer.Question.Points),
-				PartialCredit: *answer.Score > 0 && *answer.Score < float64(answer.Question.Points),
+				IsCorrect:     answer.Score == float64(answer.Question.Points),
+				PartialCredit: answer.Score > 0 && answer.Score < float64(answer.Question.Points),
 				Feedback:      answer.Feedback,
 				GradedAt:      *answer.GradedAt,
 				GradedBy:      answer.GradedBy,
@@ -171,7 +172,7 @@ func (s *gradingService) GradeAttempt(ctx context.Context, attemptID uint, grade
 	}
 
 	// Get assessment to check passing score
-	assessment, err := s.repo.Assessment().GetByID(ctx, attempt.AssessmentID)
+	assessment, err := s.repo.Assessment().GetByID(ctx, nil, attempt.AssessmentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get assessment: %w", err)
 	}
@@ -180,14 +181,11 @@ func (s *gradingService) GradeAttempt(ctx context.Context, attemptID uint, grade
 	grade := s.calculateLetterGrade(percentage)
 
 	// Update attempt with final grade
-	attempt.TotalScore = &totalScore
-	attempt.Percentage = &percentage
-	attempt.IsPassing = &isPassing
-	attempt.Grade = &grade
-	attempt.GradedBy = &graderID
-	attempt.GradedAt = timePtr(time.Now())
+	attempt.Score = totalScore
+	attempt.Percentage = percentage
+	attempt.Passed = isPassing
 
-	if err := s.repo.Attempt().Update(ctx, attempt); err != nil {
+	if err := s.repo.Attempt().Update(ctx, nil, attempt); err != nil {
 		return nil, fmt.Errorf("failed to update attempt grade: %w", err)
 	}
 
@@ -255,7 +253,7 @@ func (s *gradingService) AutoGradeAnswer(ctx context.Context, answerID uint) (*G
 	s.logger.Debug("Auto-grading answer", "answer_id", answerID)
 
 	// Get answer with question details
-	answer, err := s.repo.Answer().GetByIDWithDetails(ctx, answerID)
+	answer, err := s.repo.Answer().GetByIDWithDetails(ctx, nil, answerID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, fmt.Errorf("answer not found")
@@ -268,10 +266,10 @@ func (s *gradingService) AutoGradeAnswer(ctx context.Context, answerID uint) (*G
 		return &GradingResult{
 			AnswerID:      answerID,
 			QuestionID:    answer.QuestionID,
-			Score:         *answer.Score,
+			Score:         answer.Score,
 			MaxScore:      float64(answer.Question.Points),
-			IsCorrect:     *answer.Score == float64(answer.Question.Points),
-			PartialCredit: *answer.Score > 0 && *answer.Score < float64(answer.Question.Points),
+			IsCorrect:     answer.Score == float64(answer.Question.Points),
+			PartialCredit: answer.Score > 0 && answer.Score < float64(answer.Question.Points),
 			Feedback:      answer.Feedback,
 			GradedAt:      *answer.GradedAt,
 			GradedBy:      answer.GradedBy,
@@ -279,26 +277,26 @@ func (s *gradingService) AutoGradeAnswer(ctx context.Context, answerID uint) (*G
 	}
 
 	// Calculate score based on question type
-	score, isCorrect, err := s.CalculateScore(ctx, answer.Question.Type, answer.Question.Content, answer.AnswerData)
+	score, isCorrect, err := s.CalculateScore(ctx, answer.Question.Type, json.RawMessage(answer.Question.Content), json.RawMessage(answer.Answer))
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate score: %w", err)
 	}
 
 	// Generate feedback
-	feedback, err := s.GenerateFeedback(ctx, answer.Question.Type, answer.Question.Content, answer.AnswerData, isCorrect)
+	feedback, err := s.GenerateFeedback(ctx, answer.Question.Type, json.RawMessage(answer.Question.Content), json.RawMessage(answer.Answer), isCorrect)
 	if err != nil {
 		s.logger.Warn("Failed to generate feedback", "answer_id", answerID, "error", err)
 	}
 
 	// Update answer with auto-grade
 	finalScore := score * float64(answer.Question.Points)
-	answer.Score = &finalScore
+	answer.Score = finalScore
 	answer.Feedback = feedback
 	answer.GradedAt = timePtr(time.Now())
 	answer.IsGraded = true
 	// Note: GradedBy is nil for auto-graded answers
 
-	if err := s.repo.Answer().Update(ctx, answer); err != nil {
+	if err := s.repo.Answer().Update(ctx, nil, answer); err != nil {
 		return nil, fmt.Errorf("failed to update answer with auto-grade: %w", err)
 	}
 
@@ -326,7 +324,7 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 	s.logger.Info("Auto-grading attempt", "attempt_id", attemptID)
 
 	// Get attempt with details
-	attempt, err := s.repo.Attempt().GetByIDWithDetails(ctx, attemptID)
+	attempt, err := s.repo.Attempt().GetByIDWithDetails(ctx, nil, attemptID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, fmt.Errorf("attempt not found")
@@ -335,7 +333,7 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 	}
 
 	// Get all answers for attempt
-	answers, err := s.repo.Answer().GetByAttempt(ctx, attemptID)
+	answers, err := s.repo.Answer().GetByAttempt(ctx, nil, attemptID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get attempt answers: %w", err)
 	}
@@ -367,10 +365,10 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 			result = &GradingResult{
 				AnswerID:      answer.ID,
 				QuestionID:    answer.QuestionID,
-				Score:         *answer.Score,
+				Score:         answer.Score,
 				MaxScore:      float64(answer.Question.Points),
-				IsCorrect:     *answer.Score == float64(answer.Question.Points),
-				PartialCredit: *answer.Score > 0 && *answer.Score < float64(answer.Question.Points),
+				IsCorrect:     answer.Score == float64(answer.Question.Points),
+				PartialCredit: answer.Score > 0 && answer.Score < float64(answer.Question.Points),
 				Feedback:      answer.Feedback,
 				GradedAt:      *answer.GradedAt,
 				GradedBy:      answer.GradedBy,
@@ -389,7 +387,7 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 	}
 
 	// Get assessment to check passing score
-	assessment, err := s.repo.Assessment().GetByID(ctx, attempt.AssessmentID)
+	assessment, err := s.repo.Assessment().GetByID(ctx, nil, attempt.AssessmentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get assessment: %w", err)
 	}
@@ -399,14 +397,12 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 
 	// Update attempt only if fully graded
 	if !hasManualGrading {
-		attempt.TotalScore = &totalScore
-		attempt.Percentage = &percentage
-		attempt.IsPassing = &isPassing
-		attempt.Grade = &grade
-		attempt.GradedAt = timePtr(time.Now())
+		attempt.Score = totalScore
+		attempt.Percentage = percentage
+		attempt.Passed = isPassing
 		// GradedBy is nil for auto-graded attempts
 
-		if err := s.repo.Attempt().Update(ctx, attempt); err != nil {
+		if err := s.repo.Attempt().Update(ctx, nil, attempt); err != nil {
 			return nil, fmt.Errorf("failed to update attempt grade: %w", err)
 		}
 	}
@@ -436,10 +432,10 @@ func (s *gradingService) AutoGradeAssessment(ctx context.Context, assessmentID u
 
 	// Get all submitted attempts for assessment
 	filters := repositories.AttemptFilters{
-		Status: &models.AttemptStatusSubmitted,
+		Status: models.AttemptCompleted,
 	}
 
-	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, assessmentID, filters)
+	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, nil, assessmentID, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get assessment attempts: %w", err)
 	}
@@ -462,5 +458,3 @@ func (s *gradingService) AutoGradeAssessment(ctx context.Context, assessmentID u
 
 	return results, nil
 }
-
-// Continue in next part...

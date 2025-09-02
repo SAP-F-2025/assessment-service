@@ -100,6 +100,10 @@ func (pe *PermissionError) Error() string {
 		pe.UserID, pe.Action, pe.Resource, pe.ResourceID, pe.Reason)
 }
 
+func (pe *ValidationError) Error() string {
+	return fmt.Sprintf("validation error on field '%s': %s", pe.Field, pe.Message)
+}
+
 // ===== ERROR HELPERS =====
 
 func NewValidationError(field, message string, value interface{}) *ValidationError {

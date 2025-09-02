@@ -9,17 +9,21 @@ import (
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 type questionService struct {
 	repo      repositories.Repository
+	db        *gorm.DB
 	logger    *slog.Logger
 	validator *utils.Validator
 }
 
-func NewQuestionService(repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) QuestionService {
+func NewQuestionService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *utils.Validator) QuestionService {
 	return &questionService{
 		repo:      repo,
+		db:        db,
 		logger:    logger,
 		validator: validator,
 	}
@@ -62,6 +66,16 @@ func (s *questionService) Create(ctx context.Context, req *CreateQuestionRequest
 		return nil, fmt.Errorf("failed to marshal content: %w", err)
 	}
 
+	// Convert tag strings to JSON
+	if req.Tags == nil {
+		req.Tags = []string{}
+	}
+
+	tagsBytes, err := json.Marshal(req.Tags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tags: %w", err)
+	}
+
 	// Create question
 	question := &models.Question{
 		Type:        req.Type,
@@ -71,13 +85,12 @@ func (s *questionService) Create(ctx context.Context, req *CreateQuestionRequest
 		TimeLimit:   req.TimeLimit,
 		Difficulty:  req.Difficulty,
 		CategoryID:  req.CategoryID,
-		Tags:        req.Tags,
+		Tags:        datatypes.JSON(tagsBytes),
 		Explanation: req.Explanation,
 		CreatedBy:   creatorID,
-		Version:     1,
 	}
 
-	if err = s.repo.Question().Create(ctx, question); err != nil {
+	if err = s.repo.Question().Create(ctx, nil, question); err != nil {
 		return nil, fmt.Errorf("failed to create question: %w", err)
 	}
 
@@ -98,7 +111,7 @@ func (s *questionService) GetByID(ctx context.Context, id uint, userID uint) (*Q
 	}
 
 	// Get question
-	question, err := s.repo.Question().GetByID(ctx, id)
+	question, err := s.repo.Question().GetByID(ctx, nil, id)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrQuestionNotFound
@@ -120,7 +133,7 @@ func (s *questionService) GetByIDWithDetails(ctx context.Context, id uint, userI
 	}
 
 	// Get question with details
-	question, err := s.repo.Question().GetByIDWithDetails(ctx, id)
+	question, err := s.repo.Question().GetByIDWithDetails(ctx, nil, id)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrQuestionNotFound
@@ -149,7 +162,7 @@ func (s *questionService) Update(ctx context.Context, id uint, req *UpdateQuesti
 	}
 
 	// Get current question
-	question, err := s.repo.Question().GetByID(ctx, id)
+	question, err := s.repo.Question().GetByID(ctx, nil, id)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrQuestionNotFound
@@ -178,7 +191,7 @@ func (s *questionService) Update(ctx context.Context, id uint, req *UpdateQuesti
 	}
 
 	// Update question
-	if err = s.repo.Question().Update(ctx, question); err != nil {
+	if err = s.repo.Question().Update(ctx, nil, question); err != nil {
 		return nil, fmt.Errorf("failed to update question: %w", err)
 	}
 
@@ -201,7 +214,7 @@ func (s *questionService) Delete(ctx context.Context, id uint, userID uint) erro
 	}
 
 	// Soft delete
-	if err := s.repo.Question().Delete(ctx, id); err != nil {
+	if err := s.repo.Question().Delete(ctx, nil, id); err != nil {
 		return fmt.Errorf("failed to delete question: %w", err)
 	}
 
@@ -222,7 +235,7 @@ func (s *questionService) List(ctx context.Context, filters repositories.Questio
 		filters.CreatedBy = &userID
 	}
 
-	questions, total, err := s.repo.Question().List(ctx, filters)
+	questions, total, err := s.repo.Question().List(ctx, nil, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list questions: %w", err)
 	}
@@ -246,7 +259,7 @@ func (s *questionService) GetByCreator(ctx context.Context, creatorID uint, filt
 	// Set creator filter
 	filters.CreatedBy = &creatorID
 
-	questions, total, err := s.repo.Question().GetByCreator(ctx, creatorID, filters)
+	questions, total, err := s.repo.Question().GetByCreator(ctx, nil, creatorID, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get questions by creator: %w", err)
 	}
@@ -277,7 +290,7 @@ func (s *questionService) Search(ctx context.Context, query string, filters repo
 		filters.CreatedBy = &userID
 	}
 
-	questions, total, err := s.repo.Question().Search(ctx, query, filters)
+	questions, total, err := s.repo.Question().Search(ctx, nil, query, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search questions: %w", err)
 	}
@@ -299,14 +312,14 @@ func (s *questionService) Search(ctx context.Context, query string, filters repo
 
 func (s *questionService) GetRandomQuestions(ctx context.Context, filters repositories.RandomQuestionFilters, userID uint) ([]*models.Question, error) {
 	// For non-admin users, add permission filter
-	userRole, err := s.getUserRole(ctx, userID)
+	_, err := s.getUserRole(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO: Add permission filtering for random questions based on user role
 
-	questions, err := s.repo.Question().GetRandomQuestions(ctx, filters)
+	questions, err := s.repo.Question().GetRandomQuestions(ctx, nil, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get random questions: %w", err)
 	}

@@ -29,18 +29,28 @@ func NewAssessmentQuestionPostgreSQL(db *gorm.DB, redisClient *redis.Client) rep
 
 // ===== BASIC OPERATIONS =====
 
+// getDB returns the transaction DB if provided, otherwise returns the default DB
+func (aq *AssessmentQuestionPostgreSQL) getDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return aq.db
+}
+
 // Create creates a new assessment-question relationship
-func (aq *AssessmentQuestionPostgreSQL) Create(ctx context.Context, assessmentQuestion *models.AssessmentQuestion) error {
-	if err := aq.db.WithContext(ctx).Create(assessmentQuestion).Error; err != nil {
+func (aq *AssessmentQuestionPostgreSQL) Create(ctx context.Context, tx *gorm.DB, assessmentQuestion *models.AssessmentQuestion) error {
+	db := aq.getDB(tx)
+	if err := db.WithContext(ctx).Create(assessmentQuestion).Error; err != nil {
 		return fmt.Errorf("failed to create assessment question: %w", err)
 	}
 	return nil
 }
 
 // GetByID retrieves an assessment-question relationship by ID
-func (aq *AssessmentQuestionPostgreSQL) GetByID(ctx context.Context, id uint) (*models.AssessmentQuestion, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetByID(ctx context.Context, tx *gorm.DB, id uint) (*models.AssessmentQuestion, error) {
+	db := aq.getDB(tx)
 	var assessmentQuestion models.AssessmentQuestion
-	if err := aq.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Preload("Assessment").
 		Preload("Question").
 		First(&assessmentQuestion, id).Error; err != nil {
@@ -53,16 +63,18 @@ func (aq *AssessmentQuestionPostgreSQL) GetByID(ctx context.Context, id uint) (*
 }
 
 // Update updates an assessment-question relationship
-func (aq *AssessmentQuestionPostgreSQL) Update(ctx context.Context, assessmentQuestion *models.AssessmentQuestion) error {
-	if err := aq.db.WithContext(ctx).Save(assessmentQuestion).Error; err != nil {
+func (aq *AssessmentQuestionPostgreSQL) Update(ctx context.Context, tx *gorm.DB, assessmentQuestion *models.AssessmentQuestion) error {
+	db := aq.getDB(tx)
+	if err := db.WithContext(ctx).Save(assessmentQuestion).Error; err != nil {
 		return fmt.Errorf("failed to update assessment question: %w", err)
 	}
 	return nil
 }
 
 // Delete removes an assessment-question relationship
-func (aq *AssessmentQuestionPostgreSQL) Delete(ctx context.Context, id uint) error {
-	if err := aq.db.WithContext(ctx).Delete(&models.AssessmentQuestion{}, id).Error; err != nil {
+func (aq *AssessmentQuestionPostgreSQL) Delete(ctx context.Context, tx *gorm.DB, id uint) error {
+	db := aq.getDB(tx)
+	if err := db.WithContext(ctx).Delete(&models.AssessmentQuestion{}, id).Error; err != nil {
 		return fmt.Errorf("failed to delete assessment question: %w", err)
 	}
 	return nil
@@ -71,9 +83,9 @@ func (aq *AssessmentQuestionPostgreSQL) Delete(ctx context.Context, id uint) err
 // ===== RELATIONSHIP MANAGEMENT =====
 
 // AddQuestion adds a question to an assessment with specified order and points
-func (aq *AssessmentQuestionPostgreSQL) AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points *int) error {
+func (aq *AssessmentQuestionPostgreSQL) AddQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, order int, points *int) error {
 	// Check if relationship already exists
-	exists, err := aq.Exists(ctx, assessmentID, questionID)
+	exists, err := aq.Exists(ctx, tx, assessmentID, questionID)
 	if err != nil {
 		return fmt.Errorf("failed to check if relationship exists: %w", err)
 	}
@@ -83,7 +95,7 @@ func (aq *AssessmentQuestionPostgreSQL) AddQuestion(ctx context.Context, assessm
 
 	// If order is 0, get next order
 	if order == 0 {
-		order, err = aq.GetNextOrder(ctx, assessmentID)
+		order, err = aq.GetNextOrder(ctx, tx, assessmentID)
 		if err != nil {
 			return fmt.Errorf("failed to get next order: %w", err)
 		}
@@ -97,12 +109,13 @@ func (aq *AssessmentQuestionPostgreSQL) AddQuestion(ctx context.Context, assessm
 		Required:     true,
 	}
 
-	return aq.Create(ctx, assessmentQuestion)
+	return aq.Create(ctx, tx, assessmentQuestion)
 }
 
 // RemoveQuestion removes a question from an assessment
-func (aq *AssessmentQuestionPostgreSQL) RemoveQuestion(ctx context.Context, assessmentID, questionID uint) error {
-	result := aq.db.WithContext(ctx).
+func (aq *AssessmentQuestionPostgreSQL) RemoveQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint) error {
+	db := aq.getDB(tx)
+	result := db.WithContext(ctx).
 		Where("assessment_id = ? AND question_id = ?", assessmentID, questionID).
 		Delete(&models.AssessmentQuestion{})
 
@@ -118,14 +131,15 @@ func (aq *AssessmentQuestionPostgreSQL) RemoveQuestion(ctx context.Context, asse
 }
 
 // AddQuestions adds multiple questions to an assessment
-func (aq *AssessmentQuestionPostgreSQL) AddQuestions(ctx context.Context, assessmentID uint, questionIDs []uint) error {
+func (aq *AssessmentQuestionPostgreSQL) AddQuestions(ctx context.Context, tx *gorm.DB, assessmentID uint, questionIDs []uint) error {
 	if len(questionIDs) == 0 {
 		return nil
 	}
 
-	return aq.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	db := aq.getDB(tx)
+	return db.WithContext(ctx).Transaction(func(txInner *gorm.DB) error {
 		// Get next order
-		nextOrder, err := aq.GetNextOrder(ctx, assessmentID)
+		nextOrder, err := aq.GetNextOrder(ctx, txInner, assessmentID)
 		if err != nil {
 			return fmt.Errorf("failed to get next order: %w", err)
 		}
@@ -134,7 +148,7 @@ func (aq *AssessmentQuestionPostgreSQL) AddQuestions(ctx context.Context, assess
 		assessmentQuestions := make([]*models.AssessmentQuestion, len(questionIDs))
 		for i, questionID := range questionIDs {
 			// Check if relationship already exists
-			exists, err := aq.Exists(ctx, assessmentID, questionID)
+			exists, err := aq.Exists(ctx, txInner, assessmentID, questionID)
 			if err != nil {
 				return fmt.Errorf("failed to check if relationship exists for question %d: %w", questionID, err)
 			}
@@ -150,17 +164,18 @@ func (aq *AssessmentQuestionPostgreSQL) AddQuestions(ctx context.Context, assess
 			}
 		}
 
-		return aq.CreateBatch(ctx, assessmentQuestions)
+		return aq.CreateBatch(ctx, txInner, assessmentQuestions)
 	})
 }
 
 // RemoveQuestions removes multiple questions from an assessment
-func (aq *AssessmentQuestionPostgreSQL) RemoveQuestions(ctx context.Context, assessmentID uint, questionIDs []uint) error {
+func (aq *AssessmentQuestionPostgreSQL) RemoveQuestions(ctx context.Context, tx *gorm.DB, assessmentID uint, questionIDs []uint) error {
 	if len(questionIDs) == 0 {
 		return nil
 	}
 
-	result := aq.db.WithContext(ctx).
+	db := aq.getDB(tx)
+	result := db.WithContext(ctx).
 		Where("assessment_id = ? AND question_id IN ?", assessmentID, questionIDs).
 		Delete(&models.AssessmentQuestion{})
 
@@ -174,14 +189,15 @@ func (aq *AssessmentQuestionPostgreSQL) RemoveQuestions(ctx context.Context, ass
 // ===== ORDER MANAGEMENT =====
 
 // UpdateOrder updates the order of questions in an assessment
-func (aq *AssessmentQuestionPostgreSQL) UpdateOrder(ctx context.Context, assessmentID uint, questionOrders []repositories.QuestionOrder) error {
+func (aq *AssessmentQuestionPostgreSQL) UpdateOrder(ctx context.Context, tx *gorm.DB, assessmentID uint, questionOrders []repositories.QuestionOrder) error {
 	if len(questionOrders) == 0 {
 		return nil
 	}
 
-	return aq.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	db := aq.getDB(tx)
+	return db.WithContext(ctx).Transaction(func(txInner *gorm.DB) error {
 		for _, qo := range questionOrders {
-			result := tx.Model(&models.AssessmentQuestion{}).
+			result := txInner.Model(&models.AssessmentQuestion{}).
 				Where("assessment_id = ? AND question_id = ?", assessmentID, qo.QuestionID).
 				Update("order", qo.Order)
 
@@ -198,21 +214,21 @@ func (aq *AssessmentQuestionPostgreSQL) UpdateOrder(ctx context.Context, assessm
 }
 
 // ReorderQuestions reorders questions based on provided order
-func (aq *AssessmentQuestionPostgreSQL) ReorderQuestions(ctx context.Context, assessmentID uint, questionIDs []uint) error {
-	questionOrders := make([]repositories.QuestionOrder, len(questionIDs))
-	for i, questionID := range questionIDs {
+func (aq *AssessmentQuestionPostgreSQL) ReorderQuestions(ctx context.Context, tx *gorm.DB, assessmentID uint, questions []repositories.QuestionOrder) error {
+	questionOrders := make([]repositories.QuestionOrder, len(questions))
+	for i, question := range questions {
 		questionOrders[i] = repositories.QuestionOrder{
-			QuestionID: questionID,
+			QuestionID: question.QuestionID,
 			Order:      i + 1,
 		}
 	}
-	return aq.UpdateOrder(ctx, assessmentID, questionOrders)
+	return aq.UpdateOrder(ctx, tx, assessmentID, questionOrders)
 }
 
 // GetMaxOrder gets the maximum order value for questions in an assessment
-func (aq *AssessmentQuestionPostgreSQL) GetMaxOrder(ctx context.Context, assessmentID uint) (int, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetMaxOrder(ctx context.Context, tx *gorm.DB, assessmentID uint) (int, error) {
 	var maxOrder int
-	err := aq.db.WithContext(ctx).
+	err := tx.WithContext(ctx).
 		Model(&models.AssessmentQuestion{}).
 		Where("assessment_id = ?", assessmentID).
 		Select("COALESCE(MAX(\"order\"), 0)").
@@ -226,8 +242,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetMaxOrder(ctx context.Context, assessm
 }
 
 // GetNextOrder gets the next order value for adding a question
-func (aq *AssessmentQuestionPostgreSQL) GetNextOrder(ctx context.Context, assessmentID uint) (int, error) {
-	maxOrder, err := aq.GetMaxOrder(ctx, assessmentID)
+func (aq *AssessmentQuestionPostgreSQL) GetNextOrder(ctx context.Context, tx *gorm.DB, assessmentID uint) (int, error) {
+	maxOrder, err := aq.GetMaxOrder(ctx, tx, assessmentID)
 	if err != nil {
 		return 0, err
 	}
@@ -237,9 +253,9 @@ func (aq *AssessmentQuestionPostgreSQL) GetNextOrder(ctx context.Context, assess
 // ===== QUERY OPERATIONS =====
 
 // GetByAssessment retrieves all assessment-question relationships for an assessment
-func (aq *AssessmentQuestionPostgreSQL) GetByAssessment(ctx context.Context, assessmentID uint) ([]*models.AssessmentQuestion, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetByAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint) ([]*models.AssessmentQuestion, error) {
 	var assessmentQuestions []*models.AssessmentQuestion
-	if err := aq.db.WithContext(ctx).
+	if err := tx.WithContext(ctx).
 		Where("assessment_id = ?", assessmentID).
 		Find(&assessmentQuestions).Error; err != nil {
 		return nil, fmt.Errorf("failed to get assessment questions: %w", err)
@@ -248,9 +264,10 @@ func (aq *AssessmentQuestionPostgreSQL) GetByAssessment(ctx context.Context, ass
 }
 
 // GetByAssessmentOrdered retrieves assessment-question relationships ordered by order field
-func (aq *AssessmentQuestionPostgreSQL) GetByAssessmentOrdered(ctx context.Context, assessmentID uint) ([]*models.AssessmentQuestion, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetByAssessmentOrdered(ctx context.Context, tx *gorm.DB, assessmentID uint) ([]*models.AssessmentQuestion, error) {
+	db := aq.getDB(tx)
 	var assessmentQuestions []*models.AssessmentQuestion
-	if err := aq.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Where("assessment_id = ?", assessmentID).
 		Order("\"order\" ASC").
 		Find(&assessmentQuestions).Error; err != nil {
@@ -260,9 +277,10 @@ func (aq *AssessmentQuestionPostgreSQL) GetByAssessmentOrdered(ctx context.Conte
 }
 
 // GetByQuestion retrieves all assessment-question relationships for a question
-func (aq *AssessmentQuestionPostgreSQL) GetByQuestion(ctx context.Context, questionID uint) ([]*models.AssessmentQuestion, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetByQuestion(ctx context.Context, tx *gorm.DB, questionID uint) ([]*models.AssessmentQuestion, error) {
+	db := aq.getDB(tx)
 	var assessmentQuestions []*models.AssessmentQuestion
-	if err := aq.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Where("question_id = ?", questionID).
 		Find(&assessmentQuestions).Error; err != nil {
 		return nil, fmt.Errorf("failed to get assessment questions by question: %w", err)
@@ -271,9 +289,10 @@ func (aq *AssessmentQuestionPostgreSQL) GetByQuestion(ctx context.Context, quest
 }
 
 // GetQuestionsForAssessment retrieves all questions for an assessment in order
-func (aq *AssessmentQuestionPostgreSQL) GetQuestionsForAssessment(ctx context.Context, assessmentID uint) ([]*models.Question, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetQuestionsForAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint) ([]*models.Question, error) {
+	db := aq.getDB(tx)
 	var questions []*models.Question
-	if err := aq.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Table("questions").
 		Joins("JOIN assessment_questions aq ON aq.question_id = questions.id").
 		Where("aq.assessment_id = ?", assessmentID).
@@ -285,9 +304,10 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionsForAssessment(ctx context.Co
 }
 
 // GetAssessmentsForQuestion retrieves all assessments that use a question
-func (aq *AssessmentQuestionPostgreSQL) GetAssessmentsForQuestion(ctx context.Context, questionID uint) ([]*models.Assessment, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetAssessmentsForQuestion(ctx context.Context, tx *gorm.DB, questionID uint) ([]*models.Assessment, error) {
+	db := aq.getDB(tx)
 	var assessments []*models.Assessment
-	if err := aq.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Table("assessments").
 		Joins("JOIN assessment_questions aq ON aq.assessment_id = assessments.id").
 		Where("aq.question_id = ?", questionID).
@@ -300,26 +320,27 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentsForQuestion(ctx context.Co
 // ===== BULK OPERATIONS =====
 
 // CreateBatch creates multiple assessment-question relationships
-func (aq *AssessmentQuestionPostgreSQL) CreateBatch(ctx context.Context, assessmentQuestions []*models.AssessmentQuestion) error {
+func (aq *AssessmentQuestionPostgreSQL) CreateBatch(ctx context.Context, tx *gorm.DB, assessmentQuestions []*models.AssessmentQuestion) error {
 	if len(assessmentQuestions) == 0 {
 		return nil
 	}
 
-	if err := aq.db.WithContext(ctx).CreateInBatches(assessmentQuestions, 100).Error; err != nil {
+	if err := tx.WithContext(ctx).CreateInBatches(assessmentQuestions, 100).Error; err != nil {
 		return fmt.Errorf("failed to create assessment questions batch: %w", err)
 	}
 	return nil
 }
 
 // UpdateBatch updates multiple assessment-question relationships
-func (aq *AssessmentQuestionPostgreSQL) UpdateBatch(ctx context.Context, assessmentQuestions []*models.AssessmentQuestion) error {
+func (aq *AssessmentQuestionPostgreSQL) UpdateBatch(ctx context.Context, tx *gorm.DB, assessmentQuestions []*models.AssessmentQuestion) error {
 	if len(assessmentQuestions) == 0 {
 		return nil
 	}
 
-	return aq.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	db := aq.getDB(tx)
+	return db.WithContext(ctx).Transaction(func(txInner *gorm.DB) error {
 		for _, assessmentQuestion := range assessmentQuestions {
-			if err := tx.Save(assessmentQuestion).Error; err != nil {
+			if err := txInner.Save(assessmentQuestion).Error; err != nil {
 				return fmt.Errorf("failed to update assessment question ID %d: %w", assessmentQuestion.ID, err)
 			}
 		}
@@ -328,8 +349,9 @@ func (aq *AssessmentQuestionPostgreSQL) UpdateBatch(ctx context.Context, assessm
 }
 
 // DeleteByAssessment removes all questions from an assessment
-func (aq *AssessmentQuestionPostgreSQL) DeleteByAssessment(ctx context.Context, assessmentID uint) error {
-	if err := aq.db.WithContext(ctx).
+func (aq *AssessmentQuestionPostgreSQL) DeleteByAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint) error {
+	db := aq.getDB(tx)
+	if err := db.WithContext(ctx).
 		Where("assessment_id = ?", assessmentID).
 		Delete(&models.AssessmentQuestion{}).Error; err != nil {
 		return fmt.Errorf("failed to delete assessment questions by assessment: %w", err)
@@ -338,8 +360,9 @@ func (aq *AssessmentQuestionPostgreSQL) DeleteByAssessment(ctx context.Context, 
 }
 
 // DeleteByQuestion removes a question from all assessments
-func (aq *AssessmentQuestionPostgreSQL) DeleteByQuestion(ctx context.Context, questionID uint) error {
-	if err := aq.db.WithContext(ctx).
+func (aq *AssessmentQuestionPostgreSQL) DeleteByQuestion(ctx context.Context, tx *gorm.DB, questionID uint) error {
+	db := aq.getDB(tx)
+	if err := db.WithContext(ctx).
 		Where("question_id = ?", questionID).
 		Delete(&models.AssessmentQuestion{}).Error; err != nil {
 		return fmt.Errorf("failed to delete assessment questions by question: %w", err)
@@ -350,9 +373,9 @@ func (aq *AssessmentQuestionPostgreSQL) DeleteByQuestion(ctx context.Context, qu
 // ===== VALIDATION AND CHECKS =====
 
 // Exists checks if an assessment-question relationship exists
-func (aq *AssessmentQuestionPostgreSQL) Exists(ctx context.Context, assessmentID, questionID uint) (bool, error) {
+func (aq *AssessmentQuestionPostgreSQL) Exists(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint) (bool, error) {
 	var count int64
-	err := aq.db.WithContext(ctx).
+	err := tx.WithContext(ctx).
 		Model(&models.AssessmentQuestion{}).
 		Where("assessment_id = ? AND question_id = ?", assessmentID, questionID).
 		Count(&count).Error
@@ -365,9 +388,10 @@ func (aq *AssessmentQuestionPostgreSQL) Exists(ctx context.Context, assessmentID
 }
 
 // GetQuestionCount gets the number of questions in an assessment
-func (aq *AssessmentQuestionPostgreSQL) GetQuestionCount(ctx context.Context, assessmentID uint) (int, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetQuestionCount(ctx context.Context, tx *gorm.DB, assessmentID uint) (int, error) {
+	db := aq.getDB(tx)
 	var count int64
-	err := aq.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Model(&models.AssessmentQuestion{}).
 		Where("assessment_id = ?", assessmentID).
 		Count(&count).Error
@@ -380,9 +404,10 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionCount(ctx context.Context, as
 }
 
 // GetAssessmentCount gets the number of assessments using a question
-func (aq *AssessmentQuestionPostgreSQL) GetAssessmentCount(ctx context.Context, questionID uint) (int, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetAssessmentCount(ctx context.Context, tx *gorm.DB, questionID uint) (int, error) {
+	db := aq.getDB(tx)
 	var count int64
-	err := aq.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Model(&models.AssessmentQuestion{}).
 		Where("question_id = ?", questionID).
 		Count(&count).Error
@@ -397,8 +422,9 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentCount(ctx context.Context, 
 // ===== POINTS MANAGEMENT =====
 
 // UpdatePoints updates the points for a specific question in an assessment
-func (aq *AssessmentQuestionPostgreSQL) UpdatePoints(ctx context.Context, assessmentID, questionID uint, points int) error {
-	result := aq.db.WithContext(ctx).
+func (aq *AssessmentQuestionPostgreSQL) UpdatePoints(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, points int) error {
+	db := aq.getDB(tx)
+	result := db.WithContext(ctx).
 		Model(&models.AssessmentQuestion{}).
 		Where("assessment_id = ? AND question_id = ?", assessmentID, questionID).
 		Update("points", points)
@@ -415,11 +441,12 @@ func (aq *AssessmentQuestionPostgreSQL) UpdatePoints(ctx context.Context, assess
 }
 
 // GetTotalPoints calculates the total points for all questions in an assessment
-func (aq *AssessmentQuestionPostgreSQL) GetTotalPoints(ctx context.Context, assessmentID uint) (int, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint) (int, error) {
+	db := aq.getDB(tx)
 	var totalPoints int
 
 	// Use COALESCE to handle NULL points (use question default points)
-	err := aq.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Table("assessment_questions aq").
 		Joins("JOIN questions q ON q.id = aq.question_id").
 		Where("aq.assessment_id = ?", assessmentID).
@@ -434,13 +461,14 @@ func (aq *AssessmentQuestionPostgreSQL) GetTotalPoints(ctx context.Context, asse
 }
 
 // GetPointsDistribution returns the distribution of points across questions
-func (aq *AssessmentQuestionPostgreSQL) GetPointsDistribution(ctx context.Context, assessmentID uint) (map[uint]int, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetPointsDistribution(ctx context.Context, tx *gorm.DB, assessmentID uint) (map[uint]int, error) {
+	db := aq.getDB(tx)
 	var results []struct {
 		QuestionID uint `json:"question_id"`
 		Points     int  `json:"points"`
 	}
 
-	err := aq.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Table("assessment_questions aq").
 		Joins("JOIN questions q ON q.id = aq.question_id").
 		Where("aq.assessment_id = ?", assessmentID).
@@ -462,9 +490,10 @@ func (aq *AssessmentQuestionPostgreSQL) GetPointsDistribution(ctx context.Contex
 // ===== ADVANCED QUERIES =====
 
 // GetQuestionsByType retrieves questions of a specific type from an assessment
-func (aq *AssessmentQuestionPostgreSQL) GetQuestionsByType(ctx context.Context, assessmentID uint, questionType models.QuestionType) ([]*models.Question, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetQuestionsByType(ctx context.Context, tx *gorm.DB, assessmentID uint, questionType models.QuestionType) ([]*models.Question, error) {
+	db := aq.getDB(tx)
 	var questions []*models.Question
-	if err := aq.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Table("questions").
 		Joins("JOIN assessment_questions aq ON aq.question_id = questions.id").
 		Where("aq.assessment_id = ? AND questions.type = ?", assessmentID, questionType).
@@ -476,9 +505,10 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionsByType(ctx context.Context, 
 }
 
 // GetQuestionsByDifficulty retrieves questions of a specific difficulty from an assessment
-func (aq *AssessmentQuestionPostgreSQL) GetQuestionsByDifficulty(ctx context.Context, assessmentID uint, difficulty models.DifficultyLevel) ([]*models.Question, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetQuestionsByDifficulty(ctx context.Context, tx *gorm.DB, assessmentID uint, difficulty models.DifficultyLevel) ([]*models.Question, error) {
+	db := aq.getDB(tx)
 	var questions []*models.Question
-	if err := aq.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Table("questions").
 		Joins("JOIN assessment_questions aq ON aq.question_id = questions.id").
 		Where("aq.assessment_id = ? AND questions.difficulty = ?", assessmentID, difficulty).
@@ -490,8 +520,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionsByDifficulty(ctx context.Con
 }
 
 // GetRandomizedQuestions retrieves questions in randomized order using provided seed
-func (aq *AssessmentQuestionPostgreSQL) GetRandomizedQuestions(ctx context.Context, assessmentID uint, seed int64) ([]*models.Question, error) {
-	questions, err := aq.GetQuestionsForAssessment(ctx, assessmentID)
+func (aq *AssessmentQuestionPostgreSQL) GetRandomizedQuestions(ctx context.Context, tx *gorm.DB, assessmentID uint, seed int64) ([]*models.Question, error) {
+	questions, err := aq.GetQuestionsForAssessment(ctx, tx, assessmentID)
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +538,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetRandomizedQuestions(ctx context.Conte
 // ===== STATISTICS =====
 
 // GetAssessmentQuestionStats retrieves comprehensive statistics for an assessment
-func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.Context, assessmentID uint) (*repositories.AssessmentQuestionStats, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.Context, tx *gorm.DB, assessmentID uint) (*repositories.AssessmentQuestionStats, error) {
+	db := aq.getDB(tx)
 	stats := &repositories.AssessmentQuestionStats{
 		AssessmentID:       assessmentID,
 		QuestionsByType:    make(map[models.QuestionType]int),
@@ -517,13 +548,13 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.C
 	}
 
 	// Get total questions and points
-	questionCount, err := aq.GetQuestionCount(ctx, assessmentID)
+	questionCount, err := aq.GetQuestionCount(ctx, tx, assessmentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get question count: %w", err)
 	}
 	stats.TotalQuestions = questionCount
 
-	totalPoints, err := aq.GetTotalPoints(ctx, assessmentID)
+	totalPoints, err := aq.GetTotalPoints(ctx, tx, assessmentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get total points: %w", err)
 	}
@@ -538,7 +569,7 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.C
 		Type  models.QuestionType `json:"type"`
 		Count int                 `json:"count"`
 	}
-	err = aq.db.WithContext(ctx).
+	err = db.WithContext(ctx).
 		Table("questions q").
 		Joins("JOIN assessment_questions aq ON aq.question_id = q.id").
 		Where("aq.assessment_id = ?", assessmentID).
@@ -557,7 +588,7 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.C
 		Difficulty models.DifficultyLevel `json:"difficulty"`
 		Count      int                    `json:"count"`
 	}
-	err = aq.db.WithContext(ctx).
+	err = db.WithContext(ctx).
 		Table("questions q").
 		Joins("JOIN assessment_questions aq ON aq.question_id = q.id").
 		Where("aq.assessment_id = ?", assessmentID).
@@ -576,7 +607,7 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.C
 		Points int `json:"points"`
 		Count  int `json:"count"`
 	}
-	err = aq.db.WithContext(ctx).
+	err = db.WithContext(ctx).
 		Table("assessment_questions aq").
 		Joins("JOIN questions q ON q.id = aq.question_id").
 		Where("aq.assessment_id = ?", assessmentID).
@@ -594,13 +625,14 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.C
 }
 
 // GetQuestionUsageInAssessments retrieves usage statistics for a question across assessments
-func (aq *AssessmentQuestionPostgreSQL) GetQuestionUsageInAssessments(ctx context.Context, questionID uint) (*repositories.QuestionAssessmentUsage, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetQuestionUsageInAssessments(ctx context.Context, tx *gorm.DB, questionID uint) (*repositories.QuestionAssessmentUsage, error) {
+	db := aq.getDB(tx)
 	usage := &repositories.QuestionAssessmentUsage{
 		QuestionID: questionID,
 	}
 
 	// Get usage count
-	usageCount, err := aq.GetAssessmentCount(ctx, questionID)
+	usageCount, err := aq.GetAssessmentCount(ctx, tx, questionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get usage count: %w", err)
 	}
@@ -608,7 +640,7 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionUsageInAssessments(ctx contex
 
 	// Get assessment titles
 	var titles []string
-	err = aq.db.WithContext(ctx).
+	err = db.WithContext(ctx).
 		Table("assessments a").
 		Joins("JOIN assessment_questions aq ON aq.assessment_id = a.id").
 		Where("aq.question_id = ?", questionID).
