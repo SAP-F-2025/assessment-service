@@ -227,6 +227,10 @@ func (s *attemptService) Submit(ctx context.Context, req *SubmitAttemptRequest, 
 	return s.GetByIDWithDetails(ctx, req.AttemptID, studentID)
 }
 
+func timePtr(now time.Time) *time.Time {
+	return &now
+}
+
 func (s *attemptService) SubmitAnswer(ctx context.Context, attemptID uint, req *SubmitAnswerRequest, studentID uint) error {
 	s.logger.Info("Submitting answer",
 		"attempt_id", attemptID,

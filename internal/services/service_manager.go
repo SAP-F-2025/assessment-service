@@ -20,10 +20,11 @@ type ServiceManagerConfig struct {
 	LogLevel           slog.Level
 
 	// Service-specific configurations
-	Assessment ServiceConfig
-	Question   ServiceConfig
-	Attempt    ServiceConfig
-	Grading    ServiceConfig
+	Assessment   ServiceConfig
+	Question     ServiceConfig
+	QuestionBank ServiceConfig
+	Attempt      ServiceConfig
+	Grading      ServiceConfig
 
 	// Global settings
 	DefaultTimeout    time.Duration
@@ -66,15 +67,15 @@ type serviceManager struct {
 	// Service instances
 	assessmentService   AssessmentService
 	questionService     QuestionService
+	questionBankService QuestionBankService
 	attemptService      AttemptService
 	gradingService      GradingService
 	importExportService ImportExportService
-	notificationService NotificationService
+	// notificationService NotificationService
 	//analyticsService    AnalyticsService
 
 	// Utilities
 	//validationService *ValidationService
-	serviceLoggers map[string]*ServiceLogger
 
 	// Lifecycle management
 	initialized bool
@@ -85,12 +86,11 @@ type serviceManager struct {
 // NewServiceManager creates a new service manager with all dependencies
 func NewServiceManager(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *utils.Validator, config ServiceManagerConfig) ServiceManager {
 	return &serviceManager{
-		db:             db,
-		repo:           repo,
-		logger:         logger,
-		validator:      validator,
-		config:         config,
-		serviceLoggers: make(map[string]*ServiceLogger),
+		db:        db,
+		repo:      repo,
+		logger:    logger,
+		validator: validator,
+		config:    config,
 	}
 }
 
@@ -154,11 +154,6 @@ func (sm *serviceManager) Initialize(ctx context.Context) error {
 
 	sm.logger.Info("Initializing service manager")
 
-	// Initialize service loggers
-	if err := sm.initializeServiceLoggers(); err != nil {
-		return fmt.Errorf("failed to initialize service loggers: %w", err)
-	}
-
 	// Initialize individual services
 	if err := sm.initializeServices(ctx); err != nil {
 		return fmt.Errorf("failed to initialize services: %w", err)
@@ -171,23 +166,6 @@ func (sm *serviceManager) Initialize(ctx context.Context) error {
 
 	sm.initialized = true
 	sm.logger.Info("Service manager initialized successfully")
-
-	return nil
-}
-
-func (sm *serviceManager) initializeServiceLoggers() error {
-	services := []string{"assessment", "question", "attempt", "grading"}
-
-	for _, serviceName := range services {
-		config := LogConfig{
-			Service:       serviceName,
-			Component:     "service",
-			EnableMetrics: sm.config.EnableMetrics,
-			EnableDebug:   sm.config.EnableDebugLogging,
-		}
-
-		sm.serviceLoggers[serviceName] = NewServiceLogger(sm.logger, config)
-	}
 
 	return nil
 }
@@ -207,6 +185,12 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 		sm.logger.Info("Question service initialized")
 	}
 
+	// Initialize QuestionBankService
+	if sm.config.QuestionBank.Enabled {
+		sm.questionBankService = NewQuestionBankService(sm.repo, sm.db, sm.logger, sm.validator)
+		sm.logger.Info("QuestionBank service initialized")
+	}
+
 	// Initialize AttemptService
 	if sm.config.Attempt.Enabled {
 		sm.attemptService = NewAttemptService(sm.repo, sm.db, sm.logger, sm.validator)
@@ -224,7 +208,7 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 	sm.logger.Info("ImportExport service initialized")
 
 	// Initialize NotificationService
-	sm.notificationService = NewNotificationService(sm.repo, sm.logger, sm.validator)
+	//sm.notificationService = NewNotificationService(sm.repo, sm.logger, sm.validator)
 	sm.logger.Info("Notification service initialized")
 
 	if len(initErrors) > 0 {
@@ -277,6 +261,21 @@ func (sm *serviceManager) Question() QuestionService {
 	panic("question service not enabled or not initialized")
 }
 
+func (sm *serviceManager) QuestionBank() QuestionBankService {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if !sm.initialized {
+		panic("service manager not initialized")
+	}
+
+	if sm.config.QuestionBank.Enabled && sm.questionBankService != nil {
+		return sm.questionBankService
+	}
+
+	panic("question bank service not enabled or not initialized")
+}
+
 func (sm *serviceManager) Attempt() AttemptService {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -322,20 +321,20 @@ func (sm *serviceManager) ImportExport() ImportExportService {
 	panic("import/export service not initialized")
 }
 
-func (sm *serviceManager) Notification() NotificationService {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	if !sm.initialized {
-		panic("service manager not initialized")
-	}
-
-	if sm.notificationService != nil {
-		return sm.notificationService
-	}
-
-	panic("notification service not initialized")
-}
+//func (sm *serviceManager) Notification() NotificationService {
+//	sm.mu.RLock()
+//	defer sm.mu.RUnlock()
+//
+//	if !sm.initialized {
+//		panic("service manager not initialized")
+//	}
+//
+//	if sm.notificationService != nil {
+//		return sm.notificationService
+//	}
+//
+//	panic("notification service not initialized")
+//}
 
 // Health and lifecycle
 func (sm *serviceManager) HealthCheck(ctx context.Context) error {
@@ -391,26 +390,6 @@ func (sm *serviceManager) Shutdown(ctx context.Context) error {
 }
 
 // ===== UTILITY METHODS =====
-
-// GetServiceLogger returns a logger for a specific service
-func (sm *serviceManager) GetServiceLogger(serviceName string) *ServiceLogger {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	if logger, exists := sm.serviceLoggers[serviceName]; exists {
-		return logger
-	}
-
-	// Return a default logger if specific one doesn't exist
-	config := LogConfig{
-		Service:       serviceName,
-		Component:     "service",
-		EnableMetrics: sm.config.EnableMetrics,
-		EnableDebug:   sm.config.EnableDebugLogging,
-	}
-
-	return NewServiceLogger(sm.logger, config)
-}
 
 // GetConfig returns the service manager configuration
 func (sm *serviceManager) GetConfig() ServiceManagerConfig {

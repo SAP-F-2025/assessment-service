@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
@@ -307,7 +306,7 @@ func (s *importExportService) ExportQuestionsToExcel(ctx context.Context, questi
 
 func (s *importExportService) ExportAssessmentResults(ctx context.Context, assessmentID uint, userID uint) ([]byte, error) {
 	// Check permission
-	assessmentService := NewAssessmentService(s.repo, s.logger, s.validator)
+	assessmentService := NewAssessmentService(s.repo, nil, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)
 	if err != nil {
 		return nil, err
@@ -317,7 +316,7 @@ func (s *importExportService) ExportAssessmentResults(ctx context.Context, asses
 	}
 
 	// Get assessment attempts with results
-	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, assessmentID, repositories.AttemptFilters{})
+	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, nil, assessmentID, repositories.AttemptFilters{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get assessment attempts: %w", err)
 	}
@@ -346,47 +345,31 @@ func (s *importExportService) ExportAssessmentResults(ctx context.Context, asses
 	for rowIndex, attempt := range attempts {
 		row := []interface{}{
 			attempt.StudentID,
-			"", // TODO: Get student name
+			attempt.Student.FullName,
 			attempt.AttemptNumber,
 			string(attempt.Status),
 			attempt.StartedAt.Format("2006-01-02 15:04:05"),
 		}
 
-		if attempt.SubmittedAt != nil {
-			row = append(row, attempt.SubmittedAt.Format("2006-01-02 15:04:05"))
+		if attempt.CompletedAt != nil {
+			row = append(row, attempt.CompletedAt.Format("2006-01-02 15:04:05"))
 		} else {
 			row = append(row, "")
 		}
 
-		if attempt.TotalScore != nil {
-			row = append(row, *attempt.TotalScore)
+		row = append(row, attempt.Score)
+
+		row = append(row, attempt.Percentage)
+
+		if attempt.Passed {
+			row = append(row, "Pass")
 		} else {
-			row = append(row, "")
+			row = append(row, "Fail")
 		}
 
-		if attempt.Percentage != nil {
-			row = append(row, *attempt.Percentage)
-		} else {
-			row = append(row, "")
-		}
+		// Skip IsPassing field as it doesn't exist
 
-		if attempt.Grade != nil {
-			row = append(row, *attempt.Grade)
-		} else {
-			row = append(row, "")
-		}
-
-		if attempt.IsPassing != nil {
-			row = append(row, *attempt.IsPassing)
-		} else {
-			row = append(row, "")
-		}
-
-		if attempt.TimeSpent != nil {
-			row = append(row, *attempt.TimeSpent/60) // Convert seconds to minutes
-		} else {
-			row = append(row, "")
-		}
+		row = append(row, attempt.TimeSpent/60) // Convert seconds to minutes
 
 		for colIndex, value := range row {
 			cell := fmt.Sprintf("%c%d", 'A'+colIndex, rowIndex+2)
@@ -404,10 +387,10 @@ func (s *importExportService) ExportAssessmentResults(ctx context.Context, asses
 
 // ===== JOB MANAGEMENT =====
 
-func (s *importExportService) GetImportJob(ctx context.Context, jobID string) (*ImportJob, error) {
+func (s *importExportService) GetImportJob(ctx context.Context, jobID string) (*models.ImportJob, error) {
 	// TODO: Implement job storage and retrieval
 	// For now, return a placeholder
-	return &ImportJob{
+	return &models.ImportJob{
 		ID:     jobID,
 		Status: "completed",
 	}, nil
@@ -425,8 +408,8 @@ func (s *importExportService) ProcessImportJobAsync(ctx context.Context, jobID s
 
 // ===== HELPER FUNCTIONS =====
 
-func (s *importExportService) parseCSVRow(record []string, headerMap map[string]int, rowNum int, creatorID uint) (*models.Question, []ImportValidationError) {
-	var errors []ImportValidationError
+func (s *importExportService) parseCSVRow(record []string, headerMap map[string]int, rowNum int, creatorID uint) (*models.Question, []models.ImportValidationError) {
+	var errors []models.ImportValidationError
 
 	// Helper function to get column value
 	getColumn := func(name string) string {
@@ -439,7 +422,7 @@ func (s *importExportService) parseCSVRow(record []string, headerMap map[string]
 	// Parse question type
 	questionTypeStr := getColumn("question_type")
 	if questionTypeStr == "" {
-		errors = append(errors, ImportValidationError{
+		errors = append(errors, models.ImportValidationError{
 			Row: rowNum, Column: "question_type", Message: "required field", Value: questionTypeStr,
 		})
 		return nil, errors
@@ -450,7 +433,7 @@ func (s *importExportService) parseCSVRow(record []string, headerMap map[string]
 	// Parse question text
 	questionText := getColumn("question_text")
 	if questionText == "" {
-		errors = append(errors, ImportValidationError{
+		errors = append(errors, models.ImportValidationError{
 			Row: rowNum, Column: "question_text", Message: "required field", Value: questionText,
 		})
 		return nil, errors
@@ -488,7 +471,7 @@ func (s *importExportService) parseCSVRow(record []string, headerMap map[string]
 
 	contentBytes, err := json.Marshal(content)
 	if err != nil {
-		errors = append(errors, ImportValidationError{
+		errors = append(errors, models.ImportValidationError{
 			Row: rowNum, Column: "content", Message: "failed to serialize content", Value: "",
 		})
 		return nil, errors
@@ -511,28 +494,29 @@ func (s *importExportService) parseCSVRow(record []string, headerMap map[string]
 		explanationPtr = &explanation
 	}
 
+	tagsJson, _ := json.Marshal(tags)
+
 	question := &models.Question{
 		Type:        questionType,
 		Text:        questionText,
 		Content:     contentBytes,
 		Points:      points,
 		Difficulty:  difficulty,
-		Tags:        tags,
+		Tags:        tagsJson,
 		Explanation: explanationPtr,
 		CreatedBy:   creatorID,
-		Version:     1,
 	}
 
 	return question, errors
 }
 
-func (s *importExportService) parseExcelRow(record []string, headerMap map[string]int, rowNum int, creatorID uint) (*models.Question, []ImportValidationError) {
+func (s *importExportService) parseExcelRow(record []string, headerMap map[string]int, rowNum int, creatorID uint) (*models.Question, []models.ImportValidationError) {
 	// Excel parsing is similar to CSV, just different input format
 	return s.parseCSVRow(record, headerMap, rowNum, creatorID)
 }
 
-func (s *importExportService) parseQuestionContent(questionType models.QuestionType, record []string, headerMap map[string]int, rowNum int) (interface{}, []ImportValidationError) {
-	var errors []ImportValidationError
+func (s *importExportService) parseQuestionContent(questionType models.QuestionType, record []string, headerMap map[string]int, rowNum int) (interface{}, []models.ImportValidationError) {
+	var errors []models.ImportValidationError
 
 	getColumn := func(name string) string {
 		if index, exists := headerMap[name]; exists && index < len(record) {
@@ -542,30 +526,30 @@ func (s *importExportService) parseQuestionContent(questionType models.QuestionT
 	}
 
 	switch questionType {
-	case models.QuestionTypeMultipleChoice:
+	case models.MultipleChoice:
 		return s.parseMultipleChoiceContent(record, headerMap, rowNum)
-	case models.QuestionTypeTrueFalse:
+	case models.TrueFalse:
 		correctAnswer := strings.ToLower(getColumn("correct_answer"))
 		if correctAnswer != "true" && correctAnswer != "false" {
-			errors = append(errors, ImportValidationError{
+			errors = append(errors, models.ImportValidationError{
 				Row: rowNum, Column: "correct_answer", Message: "must be 'true' or 'false'", Value: correctAnswer,
 			})
 			return nil, errors
 		}
 		isTrue := correctAnswer == "true"
-		return models.TrueFalseContent{CorrectAnswer: &isTrue}, nil
-	case models.QuestionTypeEssay:
+		return models.TrueFalseContent{CorrectAnswer: isTrue}, nil
+	case models.Essay:
 		return models.EssayContent{}, nil
 	default:
-		errors = append(errors, ImportValidationError{
+		errors = append(errors, models.ImportValidationError{
 			Row: rowNum, Column: "question_type", Message: "unsupported question type", Value: string(questionType),
 		})
 		return nil, errors
 	}
 }
 
-func (s *importExportService) parseMultipleChoiceContent(record []string, headerMap map[string]int, rowNum int) (interface{}, []ImportValidationError) {
-	var errors []ImportValidationError
+func (s *importExportService) parseMultipleChoiceContent(record []string, headerMap map[string]int, rowNum int) (interface{}, []models.ImportValidationError) {
+	var errors []models.ImportValidationError
 
 	getColumn := func(name string) string {
 		if index, exists := headerMap[name]; exists && index < len(record) {
@@ -575,21 +559,22 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 	}
 
 	// Get options
-	var options []models.Option
+	var options []models.MCOption
 	optionColumns := []string{"option_a", "option_b", "option_c", "option_d"}
 
 	for i, colName := range optionColumns {
 		optionText := getColumn(colName)
 		if optionText != "" {
-			options = append(options, models.Option{
-				ID:   fmt.Sprintf("%d", i),
-				Text: optionText,
+			options = append(options, models.MCOption{
+				ID:    fmt.Sprintf("%d", i),
+				Text:  optionText,
+				Order: i,
 			})
 		}
 	}
 
 	if len(options) < 2 {
-		errors = append(errors, ImportValidationError{
+		errors = append(errors, models.ImportValidationError{
 			Row: rowNum, Column: "options", Message: "must have at least 2 options", Value: "",
 		})
 		return nil, errors
@@ -597,7 +582,7 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 
 	// Parse correct answer
 	correctAnswerStr := strings.ToUpper(getColumn("correct_answer"))
-	var correctAnswers []int
+	var correctAnswers []string
 
 	if correctAnswerStr != "" {
 		// Handle multiple correct answers (e.g., "A,C" or "A")
@@ -607,14 +592,14 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 			if len(part) == 1 && part >= "A" && part <= "D" {
 				index := int(part[0] - 'A')
 				if index < len(options) {
-					correctAnswers = append(correctAnswers, index)
+					correctAnswers = append(correctAnswers, fmt.Sprintf("%d", index))
 				}
 			}
 		}
 	}
 
 	if len(correctAnswers) == 0 {
-		errors = append(errors, ImportValidationError{
+		errors = append(errors, models.ImportValidationError{
 			Row: rowNum, Column: "correct_answer", Message: "must specify at least one correct answer (A, B, C, or D)", Value: correctAnswerStr,
 		})
 		return nil, errors
@@ -641,7 +626,7 @@ func (s *importExportService) saveImportedQuestions(ctx context.Context, questio
 
 	// Save questions
 	for _, question := range questions {
-		if err := txRepo.Question().Create(ctx, question); err != nil {
+		if err := txRepo.Question().Create(ctx, nil, question); err != nil {
 			return fmt.Errorf("failed to create question: %w", err)
 		}
 	}
@@ -658,7 +643,7 @@ func (s *importExportService) getQuestionsForExport(ctx context.Context, questio
 	var questions []*models.Question
 
 	for _, questionID := range questionIDs {
-		question, err := s.repo.Question().GetByIDWithDetails(ctx, questionID)
+		question, err := s.repo.Question().GetByIDWithDetails(ctx, nil, questionID)
 		if err != nil {
 			if repositories.IsNotFoundError(err) {
 				continue // Skip missing questions
@@ -667,7 +652,7 @@ func (s *importExportService) getQuestionsForExport(ctx context.Context, questio
 		}
 
 		// Check access permission
-		questionService := NewQuestionService(s.repo, s.logger, s.validator)
+		questionService := NewQuestionService(s.repo, nil, s.logger, s.validator)
 		canAccess, err := questionService.CanAccess(ctx, questionID, userID)
 		if err != nil {
 			return nil, err
@@ -689,7 +674,7 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 	row[1] = question.Text
 
 	// Parse content for options and correct answer
-	if question.Type == models.QuestionTypeMultipleChoice {
+	if question.Type == models.MultipleChoice {
 		var content models.MultipleChoiceContent
 		if err := json.Unmarshal(question.Content, &content); err == nil {
 			// Fill options
@@ -701,17 +686,18 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 
 			// Fill correct answer
 			var correctLetters []string
-			for _, index := range content.CorrectAnswers {
-				if index < 4 {
-					correctLetters = append(correctLetters, string('A'+index))
+			for _, optionID := range content.CorrectAnswers {
+				// Convert option ID (string) to index
+				if idx, err := strconv.Atoi(optionID); err == nil && idx < 4 {
+					correctLetters = append(correctLetters, string('A'+rune(idx)))
 				}
 			}
 			row[6] = strings.Join(correctLetters, ",")
 		}
-	} else if question.Type == models.QuestionTypeTrueFalse {
+	} else if question.Type == models.TrueFalse {
 		var content models.TrueFalseContent
-		if err := json.Unmarshal(question.Content, &content); err == nil && content.CorrectAnswer != nil {
-			if *content.CorrectAnswer {
+		if err := json.Unmarshal(question.Content, &content); err == nil {
+			if content.CorrectAnswer {
 				row[6] = "True"
 			} else {
 				row[6] = "False"
@@ -726,7 +712,14 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 	}
 
 	row[9] = string(question.Difficulty)
-	row[10] = strings.Join(question.Tags, ",")
+
+	// Handle tags
+	var tags []string
+	if err := json.Unmarshal(question.Tags, &tags); err == nil {
+		row[10] = strings.Join(tags, ",")
+	} else {
+		row[10] = ""
+	}
 
 	if question.Explanation != nil {
 		row[11] = *question.Explanation

@@ -35,6 +35,14 @@ var (
 	ErrQuestionNotDeletable   = errors.New("question cannot be deleted - in use by assessments")
 	ErrQuestionDuplicateOrder = errors.New("question order already exists in assessment")
 
+	// Question Bank specific errors
+	ErrQuestionBankNotFound      = errors.New("question bank not found")
+	ErrQuestionBankAccessDenied  = errors.New("access denied to question bank")
+	ErrQuestionBankNotDeletable  = errors.New("question bank cannot be deleted - has existing questions")
+	ErrQuestionBankDuplicateName = errors.New("question bank name already exists for this user")
+	ErrQuestionBankShareExists   = errors.New("question bank already shared with this user")
+	ErrQuestionBankNotShared     = errors.New("question bank is not shared with this user")
+
 	// Attempt specific errors
 	ErrAttemptNotFound         = errors.New("attempt not found")
 	ErrAttemptAccessDenied     = errors.New("access denied to attempt")

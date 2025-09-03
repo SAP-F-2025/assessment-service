@@ -12,6 +12,7 @@ type Config struct {
 	RedisURL    string
 	JWTSecret   string
 	Environment string
+	Events      EventConfig
 }
 
 func LoadConfig() (*Config, error) {
@@ -26,6 +27,12 @@ func LoadConfig() (*Config, error) {
 		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
 		JWTSecret:   getEnv("JWT_SECRET", "supersecretkey"),
 		Environment: getEnv("ENVIRONMENT", "development"),
+		Events: EventConfig{
+			Enabled:           getEnv("EVENTS_ENABLED", "true") == "true",
+			Publisher:         getEnv("EVENTS_PUBLISHER", "kafka"),
+			KafkaBrokers:      getEnv("KAFKA_BROKERS", "localhost:9092"),
+			NotificationTopic: getEnv("NOTIFICATION_TOPIC", "notifications"),
+		},
 	}, nil
 }
 

@@ -381,6 +381,10 @@ func (s *assessmentService) Publish(ctx context.Context, id uint, userID uint) e
 	}, userID)
 }
 
+func stringPtr(s string) *string {
+	return &s
+}
+
 func (s *assessmentService) Archive(ctx context.Context, id uint, userID uint) error {
 	return s.UpdateStatus(ctx, id, &UpdateStatusRequest{
 		Status: models.StatusArchived,

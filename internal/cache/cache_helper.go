@@ -351,7 +351,7 @@ func (cm *CacheManager) ClearAll(ctx context.Context) error {
 func (cm *CacheManager) InvalidateAssessment(ctx context.Context, assessmentID uint) error {
 	patterns := []string{
 		fmt.Sprintf("assessment:id:%d*", assessmentID),
-		fmt.Sprintf("assessment:creator:*", assessmentID),
+		fmt.Sprintf("assessment:creator:%d*", assessmentID),
 		fmt.Sprintf("stats:assessment:%d*", assessmentID),
 		"assessment:list:*",
 	}

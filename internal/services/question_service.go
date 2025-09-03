@@ -459,5 +459,3 @@ func (s *questionService) RemoveFromBank(ctx context.Context, questionID, bankID
 	s.logger.Info("Question removed from bank successfully", "question_id", questionID, "bank_id", bankID)
 	return nil
 }
-
-// Continue in next part...

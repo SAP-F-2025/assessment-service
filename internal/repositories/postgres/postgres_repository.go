@@ -25,6 +25,7 @@ type PostgreSQLRepository struct {
 	question           repositories.QuestionRepository
 	questionCategory   repositories.QuestionCategoryRepository
 	questionAttachment repositories.QuestionAttachmentRepository
+	questionBank       repositories.QuestionBankRepository
 	assessmentQuestion repositories.AssessmentQuestionRepository
 	attempt            repositories.AttemptRepository
 	answer             repositories.AnswerRepository
@@ -51,6 +52,7 @@ func NewPostgreSQLRepository(config RepositoryConfig) repositories.Repository {
 	// Initialize sub-repositories with caching
 	repo.assessment = NewAssessmentPostgreSQL(config.DB, config.RedisClient)
 	repo.question = NewQuestionPostgreSQL(config.DB, config.RedisClient)
+	repo.questionBank = NewQuestionBankRepository(config.DB)
 	repo.assessmentQuestion = NewAssessmentQuestionPostgreSQL(config.DB, config.RedisClient)
 	repo.attempt = NewAttemptPostgreSQL(config.DB, config.RedisClient)
 
@@ -91,6 +93,11 @@ func (r *PostgreSQLRepository) QuestionAttachment() repositories.QuestionAttachm
 	return r.questionAttachment
 }
 
+// QuestionBank returns the question bank repository
+func (r *PostgreSQLRepository) QuestionBank() repositories.QuestionBankRepository {
+	return r.questionBank
+}
+
 // AssessmentQuestion returns the assessment-question repository
 func (r *PostgreSQLRepository) AssessmentQuestion() repositories.AssessmentQuestionRepository {
 	return r.assessmentQuestion
@@ -124,6 +131,7 @@ func (r *PostgreSQLRepository) WithTransaction(ctx context.Context, fn func(repo
 		// Initialize sub-repositories with transaction
 		txRepo.assessment = NewAssessmentPostgreSQL(tx, r.redisClient)
 		txRepo.question = NewQuestionPostgreSQL(tx, r.redisClient)
+		txRepo.questionBank = NewQuestionBankRepository(tx)
 		txRepo.assessmentQuestion = NewAssessmentQuestionPostgreSQL(tx, r.redisClient)
 		txRepo.attempt = NewAttemptPostgreSQL(tx, r.redisClient)
 

@@ -8,6 +8,7 @@ import (
 )
 
 type UserRole string
+type Role = UserRole // Alias for compatibility
 
 const (
 	RoleStudent UserRole = "student"

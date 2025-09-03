@@ -161,8 +161,8 @@ type TrueFalseContent struct {
 }
 
 type EssayContent struct {
-	MinWords        int      `json:"min_words"`
-	MaxWords        int      `json:"max_words"`
+	MinWords        *int     `json:"min_words"`
+	MaxWords        *int     `json:"max_words"`
 	SuggestedLength string   `json:"suggested_length"` // "2-3 paragraphs"
 	RubricCriteria  []string `json:"rubric_criteria"`
 	SampleAnswer    *string  `json:"sample_answer"`

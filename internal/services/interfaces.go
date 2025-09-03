@@ -127,6 +127,54 @@ type AttemptGradingResult struct {
 	GradedBy   uint            `json:"graded_by"`
 }
 
+// ===== QUESTION BANK RELATED DTOs =====
+
+type CreateQuestionBankRequest struct {
+	Name        string  `json:"name" validate:"required,max=200"`
+	Description *string `json:"description" validate:"omitempty,max=2000"`
+	IsPublic    bool    `json:"is_public"`
+	IsShared    bool    `json:"is_shared"`
+}
+
+type UpdateQuestionBankRequest struct {
+	Name        *string `json:"name" validate:"omitempty,max=200"`
+	Description *string `json:"description" validate:"omitempty,max=2000"`
+	IsPublic    *bool   `json:"is_public"`
+	IsShared    *bool   `json:"is_shared"`
+}
+
+type ShareQuestionBankRequest struct {
+	UserID    uint `json:"user_id" validate:"required"`
+	CanEdit   bool `json:"can_edit"`
+	CanDelete bool `json:"can_delete"`
+}
+
+type QuestionBankResponse struct {
+	*models.QuestionBank
+	CanEdit       bool   `json:"can_edit"`
+	CanDelete     bool   `json:"can_delete"`
+	QuestionCount int    `json:"question_count"`
+	ShareCount    int    `json:"share_count"`
+	IsOwner       bool   `json:"is_owner"`
+	AccessLevel   string `json:"access_level"` // "owner", "editor", "viewer"
+}
+
+type QuestionBankListResponse struct {
+	Banks []*QuestionBankResponse `json:"banks"`
+	Total int64                   `json:"total"`
+	Page  int                     `json:"page"`
+	Size  int                     `json:"size"`
+}
+
+type QuestionBankShareResponse struct {
+	*models.QuestionBankShare
+	CanModify bool `json:"can_modify"`
+}
+
+type AddQuestionsTobankRequest struct {
+	QuestionIDs []uint `json:"question_ids" validate:"required,min=1"`
+}
+
 // ===== SERVICE INTERFACES =====
 
 type AssessmentService interface {
@@ -196,6 +244,43 @@ type QuestionService interface {
 	CanDelete(ctx context.Context, questionID uint, userID uint) (bool, error)
 }
 
+type QuestionBankService interface {
+	// Core CRUD operations
+	Create(ctx context.Context, req *CreateQuestionBankRequest, creatorID uint) (*QuestionBankResponse, error)
+	GetByID(ctx context.Context, id uint, userID uint) (*QuestionBankResponse, error)
+	GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*QuestionBankResponse, error)
+	Update(ctx context.Context, id uint, req *UpdateQuestionBankRequest, userID uint) (*QuestionBankResponse, error)
+	Delete(ctx context.Context, id uint, userID uint) error
+
+	// List and search operations
+	List(ctx context.Context, filters repositories.QuestionBankFilters, userID uint) (*QuestionBankListResponse, error)
+	GetByCreator(ctx context.Context, creatorID uint, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error)
+	GetPublic(ctx context.Context, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error)
+	GetSharedWithUser(ctx context.Context, userID uint, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error)
+	Search(ctx context.Context, query string, filters repositories.QuestionBankFilters, userID uint) (*QuestionBankListResponse, error)
+
+	// Sharing operations
+	ShareBank(ctx context.Context, bankID uint, req *ShareQuestionBankRequest, sharerID uint) error
+	UnshareBank(ctx context.Context, bankID, userID uint, sharerID uint) error
+	UpdateSharePermissions(ctx context.Context, bankID, userID uint, canEdit, canDelete bool, sharerID uint) error
+	GetBankShares(ctx context.Context, bankID uint, userID uint) ([]*QuestionBankShareResponse, error)
+	GetUserShares(ctx context.Context, userID uint, filters repositories.QuestionBankShareFilters) ([]*QuestionBankShareResponse, int64, error)
+
+	// Question management
+	AddQuestions(ctx context.Context, bankID uint, req *AddQuestionsTobankRequest, userID uint) error
+	RemoveQuestions(ctx context.Context, bankID uint, questionIDs []uint, userID uint) error
+	GetBankQuestions(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error)
+
+	// Statistics
+	GetStats(ctx context.Context, bankID uint, userID uint) (*repositories.QuestionBankStats, error)
+
+	// Permission checks
+	CanAccess(ctx context.Context, bankID, userID uint) (bool, error)
+	CanEdit(ctx context.Context, bankID, userID uint) (bool, error)
+	CanDelete(ctx context.Context, bankID, userID uint) (bool, error)
+	IsOwner(ctx context.Context, bankID, userID uint) (bool, error)
+}
+
 type AttemptService interface {
 	// Core attempt operations
 	Start(ctx context.Context, req *StartAttemptRequest, studentID uint) (*AttemptResponse, error)
@@ -256,12 +341,13 @@ type ServiceManager interface {
 	// Core service getters
 	Assessment() AssessmentService
 	Question() QuestionService
+	QuestionBank() QuestionBankService
 	Attempt() AttemptService
 	Grading() GradingService
 
 	// Additional service getters
 	ImportExport() ImportExportService
-	Notification() NotificationService
+	// Notification() NotificationService
 	// Analytics() AnalyticsService
 
 	// Health and lifecycle

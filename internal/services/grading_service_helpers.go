@@ -12,6 +12,7 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
+	"gorm.io/gorm"
 )
 
 // ===== GRADING UTILITIES =====
@@ -557,9 +558,9 @@ func (s *gradingService) calculateLetterGrade(percentage float64) string {
 	}
 }
 
-func (s *gradingService) gradeAnswerInTransaction(ctx context.Context, txRepo repositories.Repository, answerID uint, score float64, feedback *string, graderID uint) (*GradingResult, error) {
+func (s *gradingService) gradeAnswerInTransaction(ctx context.Context, tx *gorm.DB, answerID uint, score float64, feedback *string, graderID uint) (*GradingResult, error) {
 	// Get answer
-	answer, err := txRepo.Answer().GetByIDWithDetails(ctx, nil, answerID)
+	answer, err := s.repo.Answer().GetByIDWithDetails(ctx, tx, answerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get answer: %w", err)
 	}
@@ -572,7 +573,7 @@ func (s *gradingService) gradeAnswerInTransaction(ctx context.Context, txRepo re
 	answer.GradedAt = timePtr(time.Now())
 	answer.IsGraded = true
 
-	if err := txRepo.Answer().Update(ctx, nil, answer); err != nil {
+	if err := s.repo.Answer().Update(ctx, tx, answer); err != nil {
 		return nil, fmt.Errorf("failed to update answer: %w", err)
 	}
 

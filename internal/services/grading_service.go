@@ -218,28 +218,20 @@ func (s *gradingService) GradeMultipleAnswers(ctx context.Context, grades []repo
 	results := make([]GradingResult, len(grades))
 
 	// Process each grade in transaction
-	txRepo, err := s.repo.(repositories.TransactionRepository).Begin(ctx)
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		for i, grade := range grades {
+			result, gradeErr := s.gradeAnswerInTransaction(ctx, tx, grade.ID, grade.Score, grade.Feedback, graderID)
+			if gradeErr != nil {
+				return fmt.Errorf("failed to grade answer %d: %w", grade.ID, gradeErr)
+			}
+			results[i] = *result
+		}
+
+		return nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			txRepo.(repositories.TransactionRepository).Rollback(ctx)
-		}
-	}()
-
-	for i, grade := range grades {
-		result, gradeErr := s.gradeAnswerInTransaction(ctx, txRepo, grade.ID, grade.Score, grade.Feedback, graderID)
-		if gradeErr != nil {
-			err = gradeErr
-			return nil, fmt.Errorf("failed to grade answer %d: %w", grade.ID, gradeErr)
-		}
-		results[i] = *result
-	}
-
-	// Commit transaction
-	if err = txRepo.(repositories.TransactionRepository).Commit(ctx); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+		return nil, fmt.Errorf("failed to grade multiple answers: %w", err)
 	}
 
 	s.logger.Info("Multiple answers graded successfully", "count", len(grades))
@@ -431,8 +423,9 @@ func (s *gradingService) AutoGradeAssessment(ctx context.Context, assessmentID u
 	s.logger.Info("Auto-grading all attempts for assessment", "assessment_id", assessmentID)
 
 	// Get all submitted attempts for assessment
+	status := models.AttemptCompleted
 	filters := repositories.AttemptFilters{
-		Status: models.AttemptCompleted,
+		Status: &status,
 	}
 
 	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, nil, assessmentID, filters)

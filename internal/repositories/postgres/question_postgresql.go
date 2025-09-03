@@ -595,6 +595,102 @@ func (q *QuestionPostgreSQL) UpdateContent(ctx context.Context, tx *gorm.DB, id 
 	return nil
 }
 
+// ===== QUESTION BANK OPERATIONS =====
+
+// GetByBank retrieves questions from a specific question bank with filters
+func (q *QuestionPostgreSQL) GetByBank(ctx context.Context, bankID uint, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
+	db := q.db
+	var questions []*models.Question
+	var total int64
+
+	// Build the query to get questions from the bank
+	query := db.WithContext(ctx).
+		Table("questions q").
+		Select("q.*").
+		Joins("INNER JOIN question_bank_questions qbq ON q.id = qbq.question_id").
+		Where("qbq.question_bank_id = ?", bankID).
+		Preload("Category").
+		Preload("Creator").
+		Preload("Attachments")
+
+	// Apply question filters
+	query = q.applyQuestionFilters(query, filters)
+
+	// Count total
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count questions in bank: %w", err)
+	}
+
+	// Apply pagination and sorting
+	if filters.SortBy == "" {
+		filters.SortBy = "q.created_at"
+	}
+	if filters.SortOrder == "" {
+		filters.SortOrder = "desc"
+	}
+
+	query = query.Order(fmt.Sprintf("%s %s", filters.SortBy, filters.SortOrder))
+
+	if filters.Limit > 0 {
+		query = query.Limit(filters.Limit)
+	}
+	if filters.Offset > 0 {
+		query = query.Offset(filters.Offset)
+	}
+
+	if err := query.Find(&questions).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to get questions from bank: %w", err)
+	}
+
+	return questions, total, nil
+}
+
+// AddToBank adds a question to a question bank
+func (q *QuestionPostgreSQL) AddToBank(ctx context.Context, questionID, bankID uint) error {
+	db := q.db
+
+	// Check if the relationship already exists
+	var count int64
+	if err := db.WithContext(ctx).
+		Table("question_bank_questions").
+		Where("question_id = ? AND question_bank_id = ?", questionID, bankID).
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to check question-bank relationship: %w", err)
+	}
+
+	if count > 0 {
+		return nil // Already exists, no error
+	}
+
+	// Insert the relationship
+	if err := db.WithContext(ctx).
+		Exec("INSERT INTO question_bank_questions (question_id, question_bank_id, created_at) VALUES (?, ?, NOW())",
+			questionID, bankID).Error; err != nil {
+		return fmt.Errorf("failed to add question to bank: %w", err)
+	}
+
+	// Invalidate related caches
+	q.cacheManager.Question.InvalidatePattern(ctx, fmt.Sprintf("bank:%d:*", bankID))
+
+	return nil
+}
+
+// RemoveFromBank removes a question from a question bank
+func (q *QuestionPostgreSQL) RemoveFromBank(ctx context.Context, questionID, bankID uint) error {
+	db := q.db
+
+	if err := db.WithContext(ctx).
+		Exec("DELETE FROM question_bank_questions WHERE question_id = ? AND question_bank_id = ?",
+			questionID, bankID).Error; err != nil {
+		return fmt.Errorf("failed to remove question from bank: %w", err)
+	}
+
+	// Invalidate related caches
+	q.cacheManager.Question.InvalidatePattern(ctx, fmt.Sprintf("bank:%d:*", bankID))
+
+	return nil
+}
+
 // ===== HELPER METHODS =====
 
 // applyQuestionFilters applies common question filters to a query

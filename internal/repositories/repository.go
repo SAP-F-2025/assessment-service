@@ -12,6 +12,7 @@ type Repository interface {
 	Question() QuestionRepository
 	QuestionCategory() QuestionCategoryRepository
 	QuestionAttachment() QuestionAttachmentRepository
+	QuestionBank() QuestionBankRepository
 
 	// Assessment-Question relationship
 	AssessmentQuestion() AssessmentQuestionRepository

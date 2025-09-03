@@ -155,12 +155,16 @@ func (v *QuestionValidator) validateEssayContent(contentBytes []byte) error {
 		return fmt.Errorf("invalid essay content structure: %w", err)
 	}
 
-	if essayContent.MinWords > 0 && essayContent.MaxWords > 0 && essayContent.MinWords > essayContent.MaxWords {
+	if essayContent.MinWords != nil && essayContent.MaxWords != nil && *essayContent.MinWords > *essayContent.MaxWords {
 		return fmt.Errorf("minimum word count cannot be greater than maximum word count")
 	}
 
-	if essayContent.MinWords < 0 || essayContent.MaxWords < 0 {
-		return fmt.Errorf("word counts cannot be negative")
+	if essayContent.MinWords != nil && *essayContent.MinWords < 0 {
+		return fmt.Errorf("minimum word count cannot be negative")
+	}
+
+	if essayContent.MaxWords != nil && *essayContent.MaxWords < 0 {
+		return fmt.Errorf("maximum word count cannot be negative")
 	}
 
 	return nil

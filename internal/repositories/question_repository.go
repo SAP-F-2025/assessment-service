@@ -51,6 +51,11 @@ type QuestionRepository interface {
 
 	// Content management
 	UpdateContent(ctx context.Context, tx *gorm.DB, id uint, content interface{}) error
+
+	// Question bank operations
+	GetByBank(ctx context.Context, bankID uint, filters QuestionFilters) ([]*models.Question, int64, error)
+	AddToBank(ctx context.Context, questionID, bankID uint) error
+	RemoveFromBank(ctx context.Context, questionID, bankID uint) error
 }
 
 // QuestionCategoryRepository interface for question category operations
@@ -106,22 +111,52 @@ type QuestionAttachmentRepository interface {
 	UpdateOrder(ctx context.Context, tx *gorm.DB, questionID uint, attachmentOrders []AttachmentOrder) error
 }
 
-// ===== ADDITIONAL FILTER STRUCTS =====
+// QuestionBankRepository interface for question bank operations
+type QuestionBankRepository interface {
+	// Basic CRUD operations
+	Create(ctx context.Context, tx *gorm.DB, bank *models.QuestionBank) error
+	GetByID(ctx context.Context, tx *gorm.DB, id uint) (*models.QuestionBank, error)
+	GetByIDWithDetails(ctx context.Context, tx *gorm.DB, id uint) (*models.QuestionBank, error)
+	Update(ctx context.Context, tx *gorm.DB, bank *models.QuestionBank) error
+	Delete(ctx context.Context, tx *gorm.DB, id uint) error
 
-type QuestionBankFilters struct {
-	CategoryID     *uint                   `json:"category_id"`
-	Type           *models.QuestionType    `json:"type"`
-	Difficulty     *models.DifficultyLevel `json:"difficulty"`
-	Tags           []string                `json:"tags"`
-	UsageCountMin  *int                    `json:"usage_count_min"`
-	UsageCountMax  *int                    `json:"usage_count_max"`
-	CorrectRateMin *float64                `json:"correct_rate_min"`
-	CorrectRateMax *float64                `json:"correct_rate_max"`
-	Limit          int                     `json:"limit"`
-	Offset         int                     `json:"offset"`
-	SortBy         string                  `json:"sort_by"`
-	SortOrder      string                  `json:"sort_order"`
+	// Query operations
+	List(ctx context.Context, tx *gorm.DB, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
+	GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
+	GetPublicBanks(ctx context.Context, tx *gorm.DB, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
+	GetSharedWithUser(ctx context.Context, tx *gorm.DB, userID uint, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
+	Search(ctx context.Context, tx *gorm.DB, query string, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
+
+	// Sharing operations
+	ShareBank(ctx context.Context, tx *gorm.DB, share *models.QuestionBankShare) error
+	UnshareBank(ctx context.Context, tx *gorm.DB, bankID, userID uint) error
+	UpdateSharePermissions(ctx context.Context, tx *gorm.DB, bankID, userID uint, canEdit, canDelete bool) error
+	GetBankShares(ctx context.Context, tx *gorm.DB, bankID uint) ([]*models.QuestionBankShare, error)
+	GetUserShares(ctx context.Context, tx *gorm.DB, userID uint, filters QuestionBankShareFilters) ([]*models.QuestionBankShare, int64, error)
+
+	// Question-Bank relationship operations
+	AddQuestions(ctx context.Context, tx *gorm.DB, bankID uint, questionIDs []uint) error
+	RemoveQuestions(ctx context.Context, tx *gorm.DB, bankID uint, questionIDs []uint) error
+	GetBankQuestions(ctx context.Context, tx *gorm.DB, bankID uint, filters QuestionFilters) ([]*models.Question, int64, error)
+	IsQuestionInBank(ctx context.Context, tx *gorm.DB, questionID, bankID uint) (bool, error)
+
+	// Permission checks
+	CanAccess(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error)
+	CanEdit(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error)
+	CanDelete(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error)
+	IsOwner(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error)
+
+	// Validation
+	ExistsByName(ctx context.Context, tx *gorm.DB, name string, creatorID uint) (bool, error)
+	HasQuestions(ctx context.Context, tx *gorm.DB, bankID uint) (bool, error)
+
+	// Statistics
+	GetBankStats(ctx context.Context, tx *gorm.DB, bankID uint) (*QuestionBankStats, error)
+	GetUsageCount(ctx context.Context, tx *gorm.DB, bankID uint) (int, error)
+	UpdateUsage(ctx context.Context, tx *gorm.DB, bankID uint) error
 }
+
+// ===== ADDITIONAL FILTER STRUCTS =====
 
 type AttachmentOrder struct {
 	AttachmentID uint `json:"attachment_id"`

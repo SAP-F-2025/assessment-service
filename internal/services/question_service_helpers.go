@@ -21,7 +21,7 @@ func (s *questionService) GetStats(ctx context.Context, questionID uint, userID 
 		return nil, NewPermissionError(userID, questionID, "question", "view_stats", "not owner or insufficient permissions")
 	}
 
-	stats, err := s.repo.Question().GetStats(ctx, questionID)
+	stats, err := s.repo.Question().GetQuestionStats(ctx, nil, questionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get question stats: %w", err)
 	}
@@ -133,7 +133,7 @@ func (s *questionService) CanDelete(ctx context.Context, questionID uint, userID
 	}
 
 	// Check if question is in use by assessments
-	inUse, err := s.repo.Question().IsInUse(ctx, questionID)
+	inUse, err := s.repo.Question().IsUsedInAssessments(ctx, nil, questionID)
 	if err != nil {
 		return false, err
 	}
@@ -178,7 +178,7 @@ func (s *questionService) canAccessQuestionBank(ctx context.Context, bankID uint
 	}
 
 	// Get bank to check ownership/access
-	bank, err := s.repo.QuestionBank().GetByID(ctx, bankID)
+	bank, err := s.repo.QuestionBank().GetByID(ctx, nil, bankID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return false, nil
@@ -214,7 +214,7 @@ func (s *questionService) canEditQuestionBank(ctx context.Context, bankID uint, 
 	}
 
 	// Get bank to check ownership
-	bank, err := s.repo.QuestionBank().GetByID(ctx, bankID)
+	bank, err := s.repo.QuestionBank().GetByID(ctx, nil, bankID)
 	if err != nil {
 		return false, err
 	}
@@ -236,7 +236,7 @@ func (s *questionService) buildQuestionResponse(ctx context.Context, question *m
 	response.CanDelete = canDelete
 
 	// Get usage count
-	stats, err := s.repo.Question().GetStats(ctx, question.ID)
+	stats, err := s.repo.Question().GetQuestionStats(ctx, nil, question.ID)
 	if err == nil {
 		response.UsageCount = stats.UsageCount
 	}
@@ -255,7 +255,7 @@ func (s *questionService) applyQuestionUpdates(question *models.Question, req *U
 			return fmt.Errorf("failed to marshal content: %w", err)
 		}
 		question.Content = contentBytes
-		question.Version++ // Increment version when content changes
+		// Note: Version tracking would need to be added to Question model if needed
 	}
 
 	if req.Points != nil {
@@ -275,7 +275,11 @@ func (s *questionService) applyQuestionUpdates(question *models.Question, req *U
 	}
 
 	if req.Tags != nil {
-		question.Tags = req.Tags
+		tagsJSon, err := json.Marshal(req.Tags)
+		if err != nil {
+			return fmt.Errorf("failed to marshal tags: %w", err)
+		}
+		question.Tags = tagsJSon
 	}
 
 	if req.Explanation != nil {
@@ -312,19 +316,19 @@ func (s *questionService) validateCategoryAccess(ctx context.Context, categoryID
 
 func (s *questionService) validateQuestionContent(questionType models.QuestionType, content interface{}) error {
 	switch questionType {
-	case models.QuestionTypeMultipleChoice:
+	case models.MultipleChoice:
 		return s.validateMultipleChoiceContent(content)
-	case models.QuestionTypeTrueFalse:
+	case models.TrueFalse:
 		return s.validateTrueFalseContent(content)
-	case models.QuestionTypeEssay:
+	case models.Essay:
 		return s.validateEssayContent(content)
-	case models.QuestionTypeFillBlank:
+	case models.FillInBlank:
 		return s.validateFillBlankContent(content)
-	case models.QuestionTypeMatching:
+	case models.Matching:
 		return s.validateMatchingContent(content)
-	case models.QuestionTypeOrdering:
+	case models.Ordering:
 		return s.validateOrderingContent(content)
-	case models.QuestionTypeShortAnswer:
+	case models.ShortAnswer:
 		return s.validateShortAnswerContent(content)
 	default:
 		return NewValidationError("type", "unsupported question type", questionType)
@@ -355,10 +359,15 @@ func (s *questionService) validateMultipleChoiceContent(content interface{}) err
 		errors = append(errors, *NewValidationError("content.correct_answers", "must specify at least one correct answer", nil))
 	}
 
-	// Validate correct answer indices
-	for i, correctIndex := range mcContent.CorrectAnswers {
-		if correctIndex < 0 || correctIndex >= len(mcContent.Options) {
-			errors = append(errors, *NewValidationError(fmt.Sprintf("content.correct_answers[%d]", i), "invalid option index", correctIndex))
+	// Validate correct answer option IDs
+	optionIDs := make(map[string]bool)
+	for _, option := range mcContent.Options {
+		optionIDs[option.ID] = true
+	}
+
+	for i, correctID := range mcContent.CorrectAnswers {
+		if !optionIDs[correctID] {
+			errors = append(errors, *NewValidationError(fmt.Sprintf("content.correct_answers[%d]", i), "invalid option ID", correctID))
 		}
 	}
 
@@ -383,10 +392,7 @@ func (s *questionService) validateTrueFalseContent(content interface{}) error {
 		return err
 	}
 
-	// Validate correct answer is boolean
-	if tfContent.CorrectAnswer == nil {
-		return NewValidationError("content.correct_answer", "correct answer is required", nil)
-	}
+	// Note: CorrectAnswer is a bool, not a pointer, so validation is implicit
 
 	return nil
 }
@@ -468,19 +474,31 @@ func (s *questionService) validateMatchingContent(content interface{}) error {
 
 	var errors ValidationErrors
 
-	// Validate pairs
-	if len(matchContent.Pairs) < 2 {
-		errors = append(errors, *NewValidationError("content.pairs", "must have at least 2 pairs", len(matchContent.Pairs)))
+	// Validate left and right items
+	if len(matchContent.LeftItems) < 2 {
+		errors = append(errors, *NewValidationError("content.left_items", "must have at least 2 left items", len(matchContent.LeftItems)))
+	}
+	if len(matchContent.RightItems) < 2 {
+		errors = append(errors, *NewValidationError("content.right_items", "must have at least 2 right items", len(matchContent.RightItems)))
 	}
 
-	// Validate each pair
-	for i, pair := range matchContent.Pairs {
-		if pair.Left == "" {
-			errors = append(errors, *NewValidationError(fmt.Sprintf("content.pairs[%d].left", i), "left item cannot be empty", nil))
+	// Validate left items
+	for i, item := range matchContent.LeftItems {
+		if item.Text == "" {
+			errors = append(errors, *NewValidationError(fmt.Sprintf("content.left_items[%d].text", i), "left item text cannot be empty", nil))
 		}
-		if pair.Right == "" {
-			errors = append(errors, *NewValidationError(fmt.Sprintf("content.pairs[%d].right", i), "right item cannot be empty", nil))
+	}
+
+	// Validate right items
+	for i, item := range matchContent.RightItems {
+		if item.Text == "" {
+			errors = append(errors, *NewValidationError(fmt.Sprintf("content.right_items[%d].text", i), "right item text cannot be empty", nil))
 		}
+	}
+
+	// Validate correct pairs
+	if len(matchContent.CorrectPairs) == 0 {
+		errors = append(errors, *NewValidationError("content.correct_pairs", "must have at least one correct pair", nil))
 	}
 
 	if len(errors) > 0 {
@@ -509,18 +527,11 @@ func (s *questionService) validateOrderingContent(content interface{}) error {
 		if item.Text == "" {
 			errors = append(errors, *NewValidationError(fmt.Sprintf("content.items[%d].text", i), "item text cannot be empty", nil))
 		}
-		if item.CorrectOrder <= 0 {
-			errors = append(errors, *NewValidationError(fmt.Sprintf("content.items[%d].correct_order", i), "correct order must be positive", item.CorrectOrder))
-		}
 	}
 
-	// Check for duplicate correct orders
-	orderMap := make(map[int]bool)
-	for i, item := range orderContent.Items {
-		if orderMap[item.CorrectOrder] {
-			errors = append(errors, *NewValidationError(fmt.Sprintf("content.items[%d].correct_order", i), "duplicate correct order", item.CorrectOrder))
-		}
-		orderMap[item.CorrectOrder] = true
+	// Validate correct order length
+	if len(orderContent.CorrectOrder) != len(orderContent.Items) {
+		errors = append(errors, *NewValidationError("content.correct_order", "correct order must match number of items", len(orderContent.CorrectOrder)))
 	}
 
 	if len(errors) > 0 {
