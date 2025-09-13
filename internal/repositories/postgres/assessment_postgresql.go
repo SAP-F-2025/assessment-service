@@ -5,72 +5,63 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/SAP-F-2025/assessment-service/internal/cache"
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type AssessmentPostgreSQL struct {
-	db      *gorm.DB
-	helpers *SharedHelpers
+	db           *gorm.DB
+	helpers      *SharedHelpers
+	cacheManager *cache.CacheManager
 }
 
-func NewAssessmentPostgreSQL(db *gorm.DB) repositories.AssessmentRepository {
+func NewAssessmentPostgreSQL(db *gorm.DB, redisClient *redis.Client) repositories.AssessmentRepository {
 	return &AssessmentPostgreSQL{
-		db:      db,
-		helpers: NewSharedHelpers(db),
+		db:           db,
+		helpers:      NewSharedHelpers(db),
+		cacheManager: cache.NewCacheManager(redisClient),
 	}
 }
 
-// Create creates a new assessment with default settings
-func (a *AssessmentPostgreSQL) Create(ctx context.Context, assessment *models.Assessment) error {
-	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Check title uniqueness for creator
-		exists, err := a.ExistsByTitle(ctx, assessment.Title, assessment.CreatedBy, nil)
-		if err != nil {
-			return fmt.Errorf("failed to check title uniqueness: %w", err)
-		}
-		if exists {
-			return fmt.Errorf("assessment with title '%s' already exists for this creator", assessment.Title)
-		}
-
-		// Create the assessment
-		assessment.Status = models.StatusDraft
-		assessment.Version = 1
-		if err := tx.Create(assessment).Error; err != nil {
-			return fmt.Errorf("failed to create assessment: %w", err)
-		}
-
-		// Create default settings
-		settings := &models.AssessmentSettings{
-			AssessmentID:        assessment.ID,
-			RandomizeQuestions:  false,
-			RandomizeOptions:    false,
-			QuestionsPerPage:    1,
-			ShowProgressBar:     true,
-			ShowResults:         true,
-			ShowCorrectAnswers:  true,
-			ShowScoreBreakdown:  true,
-			AllowRetake:         false,
-			RetakeDelay:         0,
-			TimeLimitEnforced:   true,
-			AutoSubmitOnTimeout: true,
-		}
-
-		if err := tx.Create(settings).Error; err != nil {
-			return fmt.Errorf("failed to create assessment settings: %w", err)
-		}
-
-		return nil
-	})
+// getDB returns the transaction DB if provided, otherwise returns the default DB
+func (a *AssessmentPostgreSQL) getDB(tx *gorm.DB) *gorm.DB {
+	if tx != nil {
+		return tx
+	}
+	return a.db
 }
 
-// GetByID retrieves an assessment by ID
-func (a *AssessmentPostgreSQL) GetByID(ctx context.Context, id uint) (*models.Assessment, error) {
+// Create creates a new assessment with default settings and invalidates cache
+func (a *AssessmentPostgreSQL) Create(ctx context.Context, tx *gorm.DB, assessment *models.Assessment) error {
+	if err := tx.WithContext(ctx).Create(assessment).Error; err != nil {
+		return fmt.Errorf("failed to create assessment: %w", err)
+	}
+	// Invalidate related caches
+	a.cacheManager.Assessment.InvalidatePattern(ctx, fmt.Sprintf("creator:%d:*", assessment.CreatedBy))
+	a.cacheManager.Assessment.InvalidatePattern(ctx, "list:*")
+
+	return nil
+}
+
+// GetByID retrieves an assessment by ID with caching
+func (a *AssessmentPostgreSQL) GetByID(ctx context.Context, tx *gorm.DB, id uint) (*models.Assessment, error) {
+	// Try cache first for fast performance (<200ms requirement)
+	cacheKey := fmt.Sprintf("id:%d", id)
 	var assessment models.Assessment
-	err := a.db.WithContext(ctx).
-		Preload("Creator").
-		First(&assessment, id).Error
+
+	err := a.cacheManager.Assessment.CacheOrExecute(ctx, cacheKey, &assessment, cache.AssessmentCacheConfig.TTL, func() (interface{}, error) {
+		var dbAssessment models.Assessment
+		err := tx.WithContext(ctx).
+			Preload("Creator").
+			First(&dbAssessment, id).Error
+		if err != nil {
+			return nil, fmt.Errorf("failed to get assessment: %w", err)
+		}
+		return &dbAssessment, nil
+	})
 
 	if err != nil {
 		return nil, err
@@ -80,83 +71,92 @@ func (a *AssessmentPostgreSQL) GetByID(ctx context.Context, id uint) (*models.As
 }
 
 // GetByIDWithDetails retrieves an assessment with full details (questions, settings)
-func (a *AssessmentPostgreSQL) GetByIDWithDetails(ctx context.Context, id uint) (*models.Assessment, error) {
+func (a *AssessmentPostgreSQL) GetByIDWithDetails(ctx context.Context, tx *gorm.DB, id uint) (*models.Assessment, error) {
+	// Cache the most expensive query with shorter TTL
+	cacheKey := fmt.Sprintf("details:%d", id)
 	var assessment models.Assessment
-	err := a.db.WithContext(ctx).
-		Preload("Creator").
-		Preload("Settings").
-		Preload("Questions", func(db *gorm.DB) *gorm.DB {
-			return db.Order("order ASC")
-		}).
-		Preload("Questions.Question").
-		First(&assessment, id).Error
 
-	if err != nil {
-		return nil, err
-	}
+	err := a.cacheManager.Assessment.CacheOrExecute(ctx, cacheKey, &assessment, 10*time.Minute, func() (interface{}, error) {
+		var dbAssessment models.Assessment
+		err := tx.WithContext(ctx).
+			Preload("Creator").
+			Preload("Settings").
+			Preload("Questions", func(db *gorm.DB) *gorm.DB {
+				return db.Order("order ASC")
+			}).
+			Preload("Questions.Question").
+			First(&dbAssessment, id).Error
+		if err != nil {
+			return nil, fmt.Errorf("failed to get assessment details: %w", err)
+		}
 
-	// Calculate computed fields
-	a.calculateComputedFields(&assessment)
+		// Calculate computed fields
+		a.calculateComputedFields(&dbAssessment)
+		return &dbAssessment, nil
+	})
 
-	return &assessment, nil
+	return &assessment, err
 }
 
-// Update updates an assessment
-func (a *AssessmentPostgreSQL) Update(ctx context.Context, assessment *models.Assessment) error {
-	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Get current assessment for validation
-		var currentAssessment models.Assessment
-		if err := tx.First(&currentAssessment, assessment.ID).Error; err != nil {
-			return fmt.Errorf("assessment not found: %w", err)
+// Update updates an assessment and invalidates cache
+func (a *AssessmentPostgreSQL) Update(ctx context.Context, tx *gorm.DB, assessment *models.Assessment) error {
+	// Get current assessment for validation
+	var currentAssessment models.Assessment
+	if err := tx.WithContext(ctx).First(&currentAssessment, assessment.ID).Error; err != nil {
+		return fmt.Errorf("assessment not found: %w", err)
+	}
+
+	// Check title uniqueness if title changed
+	if assessment.Title != currentAssessment.Title {
+		exists, err := a.ExistsByTitle(ctx, tx, assessment.Title, assessment.CreatedBy, &assessment.ID)
+		if err != nil {
+			return fmt.Errorf("failed to check title uniqueness: %w", err)
+		}
+		if exists {
+			return fmt.Errorf("assessment with title '%s' already exists for this creator", assessment.Title)
+		}
+	}
+
+	// Validate business rules for active assessments
+	if currentAssessment.Status == models.StatusActive {
+		// Check if assessment has attempts
+		hasAttempts, err := a.HasAttempts(ctx, tx, assessment.ID)
+		if err != nil {
+			return fmt.Errorf("failed to check attempts: %w", err)
 		}
 
-		// Check title uniqueness if title changed
-		if assessment.Title != currentAssessment.Title {
-			exists, err := a.ExistsByTitle(ctx, assessment.Title, assessment.CreatedBy, &assessment.ID)
-			if err != nil {
-				return fmt.Errorf("failed to check title uniqueness: %w", err)
+		if hasAttempts {
+			// Restrict modifications for assessments with attempts
+			if assessment.Duration != currentAssessment.Duration {
+				return fmt.Errorf("cannot change duration for active assessment with attempts")
 			}
-			if exists {
-				return fmt.Errorf("assessment with title '%s' already exists for this creator", assessment.Title)
-			}
-		}
-
-		// Validate business rules for active assessments
-		if currentAssessment.Status == models.StatusActive {
-			// Check if assessment has attempts
-			hasAttempts, err := a.HasAttempts(ctx, assessment.ID)
-			if err != nil {
-				return fmt.Errorf("failed to check attempts: %w", err)
-			}
-
-			if hasAttempts {
-				// Restrict modifications for assessments with attempts
-				if assessment.Duration != currentAssessment.Duration {
-					return fmt.Errorf("cannot change duration for active assessment with attempts")
-				}
-				if assessment.MaxAttempts < currentAssessment.MaxAttempts {
-					return fmt.Errorf("cannot decrease max attempts for assessment with existing attempts")
-				}
+			if assessment.MaxAttempts < currentAssessment.MaxAttempts {
+				return fmt.Errorf("cannot decrease max attempts for assessment with existing attempts")
 			}
 		}
+	}
 
-		// Increment version
-		assessment.Version = currentAssessment.Version + 1
-		assessment.UpdatedAt = time.Now()
+	// Increment version
+	assessment.Version = currentAssessment.Version + 1
+	assessment.UpdatedAt = time.Now()
 
-		// Update assessment
-		if err := tx.Save(assessment).Error; err != nil {
-			return fmt.Errorf("failed to update assessment: %w", err)
-		}
+	// Update assessment
+	if err := tx.WithContext(ctx).Save(assessment).Error; err != nil {
+		return fmt.Errorf("failed to update assessment: %w", err)
+	}
 
-		return nil
-	})
+	// Invalidate caches
+	a.cacheManager.Assessment.Delete(ctx, fmt.Sprintf("id:%d", assessment.ID), fmt.Sprintf("details:%d", assessment.ID))
+	a.cacheManager.Assessment.InvalidatePattern(ctx, fmt.Sprintf("creator:%d:*", assessment.CreatedBy))
+	a.cacheManager.Assessment.InvalidatePattern(ctx, "list:*")
+
+	return nil
 }
 
 // Delete soft deletes an assessment
-func (a *AssessmentPostgreSQL) Delete(ctx context.Context, id uint) error {
+func (a *AssessmentPostgreSQL) Delete(ctx context.Context, tx *gorm.DB, id uint) error {
 	// Check if assessment has attempts before deleting
-	hasAttempts, err := a.HasAttempts(ctx, id)
+	hasAttempts, err := a.HasAttempts(ctx, tx, id)
 	if err != nil {
 		return fmt.Errorf("failed to check attempts: %w", err)
 	}
@@ -164,12 +164,12 @@ func (a *AssessmentPostgreSQL) Delete(ctx context.Context, id uint) error {
 		return fmt.Errorf("cannot delete assessment with existing attempts")
 	}
 
-	return a.db.WithContext(ctx).Delete(&models.Assessment{}, id).Error
+	return tx.WithContext(ctx).Delete(&models.Assessment{}, id).Error
 }
 
 // List retrieves assessments with filters and pagination
-func (a *AssessmentPostgreSQL) List(ctx context.Context, filters repositories.AssessmentFilters) ([]*models.Assessment, int64, error) {
-	query := a.db.WithContext(ctx).Model(&models.Assessment{})
+func (a *AssessmentPostgreSQL) List(ctx context.Context, tx *gorm.DB, filters repositories.AssessmentFilters) ([]*models.Assessment, int64, error) {
+	query := tx.WithContext(ctx).Model(&models.Assessment{})
 
 	// Apply filters
 	query = a.applyFilters(query, filters)
@@ -199,15 +199,16 @@ func (a *AssessmentPostgreSQL) List(ctx context.Context, filters repositories.As
 }
 
 // GetByCreator retrieves assessments created by a specific user
-func (a *AssessmentPostgreSQL) GetByCreator(ctx context.Context, creatorID uint, filters repositories.AssessmentFilters) ([]*models.Assessment, int64, error) {
+func (a *AssessmentPostgreSQL) GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint, filters repositories.AssessmentFilters) ([]*models.Assessment, int64, error) {
 	filters.CreatedBy = &creatorID
-	return a.List(ctx, filters)
+	return a.List(ctx, tx, filters)
 }
 
 // GetByStatus retrieves assessments by status with pagination
-func (a *AssessmentPostgreSQL) GetByStatus(ctx context.Context, status models.AssessmentStatus, limit, offset int) ([]*models.Assessment, error) {
+func (a *AssessmentPostgreSQL) GetByStatus(ctx context.Context, tx *gorm.DB, status models.AssessmentStatus, limit, offset int) ([]*models.Assessment, error) {
+	db := a.getDB(tx)
 	var assessments []*models.Assessment
-	err := a.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Where("status = ?", status).
 		Preload("Creator").
 		Limit(limit).
@@ -223,8 +224,8 @@ func (a *AssessmentPostgreSQL) GetByStatus(ctx context.Context, status models.As
 }
 
 // Search performs full-text search on assessments
-func (a *AssessmentPostgreSQL) Search(ctx context.Context, query string, filters repositories.AssessmentFilters) ([]*models.Assessment, int64, error) {
-	db := a.db.WithContext(ctx).Model(&models.Assessment{})
+func (a *AssessmentPostgreSQL) Search(ctx context.Context, tx *gorm.DB, query string, filters repositories.AssessmentFilters) ([]*models.Assessment, int64, error) {
+	db := a.getDB(tx).WithContext(ctx).Model(&models.Assessment{})
 
 	// Full-text search
 	if query != "" {
@@ -255,8 +256,9 @@ func (a *AssessmentPostgreSQL) Search(ctx context.Context, query string, filters
 }
 
 // UpdateStatus updates the status of an assessment
-func (a *AssessmentPostgreSQL) UpdateStatus(ctx context.Context, id uint, status models.AssessmentStatus) error {
-	return a.db.WithContext(ctx).
+func (a *AssessmentPostgreSQL) UpdateStatus(ctx context.Context, tx *gorm.DB, id uint, status models.AssessmentStatus) error {
+	db := a.getDB(tx)
+	return db.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
@@ -266,9 +268,10 @@ func (a *AssessmentPostgreSQL) UpdateStatus(ctx context.Context, id uint, status
 }
 
 // GetExpiredAssessments retrieves assessments that have passed their due date
-func (a *AssessmentPostgreSQL) GetExpiredAssessments(ctx context.Context) ([]*models.Assessment, error) {
+func (a *AssessmentPostgreSQL) GetExpiredAssessments(ctx context.Context, tx *gorm.DB) ([]*models.Assessment, error) {
+	db := a.getDB(tx)
 	var assessments []*models.Assessment
-	err := a.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Where("status = ? AND due_date IS NOT NULL AND due_date < ?", models.StatusActive, time.Now()).
 		Preload("Creator").
 		Find(&assessments).Error
@@ -304,14 +307,15 @@ func (a *AssessmentPostgreSQL) GetAssessmentsNearExpiry(ctx context.Context, wit
 }
 
 // BulkUpdateStatus updates the status of multiple assessments
-func (a *AssessmentPostgreSQL) BulkUpdateStatus(ctx context.Context, ids []uint, status models.AssessmentStatus) error {
+func (a *AssessmentPostgreSQL) BulkUpdateStatus(ctx context.Context, tx *gorm.DB, ids []uint, status models.AssessmentStatus) error {
 	return a.helpers.BulkUpdateAssessmentStatus(ctx, ids, status)
 }
 
 // IsOwner checks if a user is the owner of an assessment
-func (a *AssessmentPostgreSQL) IsOwner(ctx context.Context, assessmentID, userID uint) (bool, error) {
+func (a *AssessmentPostgreSQL) IsOwner(ctx context.Context, tx *gorm.DB, assessmentID, userID uint) (bool, error) {
+	db := a.getDB(tx)
 	var count int64
-	err := a.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Where("id = ? AND created_by = ?", assessmentID, userID).
 		Count(&count).Error
@@ -320,7 +324,8 @@ func (a *AssessmentPostgreSQL) IsOwner(ctx context.Context, assessmentID, userID
 }
 
 // CanAccess checks if a user can access an assessment based on role
-func (a *AssessmentPostgreSQL) CanAccess(ctx context.Context, assessmentID, userID uint, role models.UserRole) (bool, error) {
+func (a *AssessmentPostgreSQL) CanAccess(ctx context.Context, tx *gorm.DB, assessmentID, userID uint, role models.UserRole) (bool, error) {
+	db := a.getDB(tx)
 	// Admins can access everything
 	if role == models.RoleAdmin {
 		return true, nil
@@ -328,14 +333,14 @@ func (a *AssessmentPostgreSQL) CanAccess(ctx context.Context, assessmentID, user
 
 	// Teachers can access their own assessments
 	if role == models.RoleTeacher {
-		return a.IsOwner(ctx, assessmentID, userID)
+		return a.IsOwner(ctx, tx, assessmentID, userID)
 	}
 
 	// Students can only access active assessments they're enrolled in
 	if role == models.RoleStudent {
 		// Check if assessment is active
 		var assessment models.Assessment
-		err := a.db.WithContext(ctx).
+		err := db.WithContext(ctx).
 			Select("status").
 			First(&assessment, assessmentID).Error
 		if err != nil {
@@ -349,7 +354,8 @@ func (a *AssessmentPostgreSQL) CanAccess(ctx context.Context, assessmentID, user
 }
 
 // GetAssessmentStats retrieves statistics for an assessment
-func (a *AssessmentPostgreSQL) GetAssessmentStats(ctx context.Context, id uint) (*repositories.AssessmentStats, error) {
+func (a *AssessmentPostgreSQL) GetAssessmentStats(ctx context.Context, tx *gorm.DB, id uint) (*repositories.AssessmentStats, error) {
+	db := a.getDB(tx)
 	stats := &repositories.AssessmentStats{}
 
 	// Use helper for total attempts
@@ -374,7 +380,7 @@ func (a *AssessmentPostgreSQL) GetAssessmentStats(ctx context.Context, id uint) 
 	var avgScore, avgTimeSpent float64
 	var passedAttempts int64
 	if completedAttempts > 0 {
-		a.db.WithContext(ctx).
+		db.WithContext(ctx).
 			Model(&models.AssessmentAttempt{}).
 			Select("AVG(score), AVG(time_spent), SUM(CASE WHEN score >= ? THEN 1 ELSE 0 END)", assessment.PassingScore).
 			Where("assessment_id = ? AND status = ?", id, models.AttemptCompleted).
@@ -389,7 +395,7 @@ func (a *AssessmentPostgreSQL) GetAssessmentStats(ctx context.Context, id uint) 
 
 	// Get question stats in single query
 	var questionCount, totalPoints int64
-	a.db.WithContext(ctx).
+	db.WithContext(ctx).
 		Model(&models.AssessmentQuestion{}).
 		Select("COUNT(*), COALESCE(SUM(points), 0)").
 		Where("assessment_id = ?", id).
@@ -408,33 +414,34 @@ func (a *AssessmentPostgreSQL) GetAssessmentStats(ctx context.Context, id uint) 
 }
 
 // GetCreatorStats retrieves statistics for a creator
-func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, creatorID uint) (*repositories.CreatorStats, error) {
+func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, tx *gorm.DB, creatorID uint) (*repositories.CreatorStats, error) {
+	db := a.getDB(tx)
 	stats := &repositories.CreatorStats{}
 
 	// Total assessments
 	var totalAssessments int64
-	a.db.WithContext(ctx).
+	db.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Where("created_by = ?", creatorID).
 		Count(&totalAssessments)
 
 	// Active assessments
 	var activeAssessments int64
-	a.db.WithContext(ctx).
+	db.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Where("created_by = ? AND status = ?", creatorID, models.StatusActive).
 		Count(&activeAssessments)
 
 	// Draft assessments
 	var draftAssessments int64
-	a.db.WithContext(ctx).
+	db.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Where("created_by = ? AND status = ?", creatorID, models.StatusDraft).
 		Count(&draftAssessments)
 
 	// Total questions (from assessments created by this user)
 	var totalQuestions int64
-	a.db.WithContext(ctx).
+	db.WithContext(ctx).
 		Table("assessment_questions aq").
 		Joins("JOIN assessments a ON aq.assessment_id = a.id").
 		Where("a.created_by = ?", creatorID).
@@ -442,7 +449,7 @@ func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, creatorID ui
 
 	// Total attempts on creator's assessments
 	var totalAttempts int64
-	a.db.WithContext(ctx).
+	db.WithContext(ctx).
 		Table("assessment_attempts att").
 		Joins("JOIN assessments a ON att.assessment_id = a.id").
 		Where("a.created_by = ?", creatorID).
@@ -458,10 +465,11 @@ func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, creatorID ui
 }
 
 // GetPopularAssessments retrieves the most attempted assessments
-func (a *AssessmentPostgreSQL) GetPopularAssessments(ctx context.Context, limit int) ([]*models.Assessment, error) {
+func (a *AssessmentPostgreSQL) GetPopularAssessments(ctx context.Context, tx *gorm.DB, limit int) ([]*models.Assessment, error) {
+	db := a.getDB(tx)
 	var assessments []*models.Assessment
 
-	err := a.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Table("assessments a").
 		Select("a.*, COUNT(att.id) as attempt_count").
 		Joins("LEFT JOIN assessment_attempts att ON a.id = att.assessment_id").
@@ -476,8 +484,8 @@ func (a *AssessmentPostgreSQL) GetPopularAssessments(ctx context.Context, limit 
 }
 
 // ExistsByTitle checks if an assessment with the same title exists for a creator
-func (a *AssessmentPostgreSQL) ExistsByTitle(ctx context.Context, title string, creatorID uint, excludeID *uint) (bool, error) {
-	query := a.db.WithContext(ctx).
+func (a *AssessmentPostgreSQL) ExistsByTitle(ctx context.Context, tx *gorm.DB, title string, creatorID uint, excludeID *uint) (bool, error) {
+	query := tx.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Where("title = ? AND created_by = ?", title, creatorID)
 
@@ -491,15 +499,16 @@ func (a *AssessmentPostgreSQL) ExistsByTitle(ctx context.Context, title string, 
 }
 
 // HasAttempts checks if an assessment has any attempts
-func (a *AssessmentPostgreSQL) HasAttempts(ctx context.Context, id uint) (bool, error) {
+func (a *AssessmentPostgreSQL) HasAttempts(ctx context.Context, tx *gorm.DB, id uint) (bool, error) {
 	count, err := a.helpers.CountAttempts(ctx, id)
 	return count > 0, err
 }
 
 // HasActiveAttempts checks if an assessment has any active/in-progress attempts
-func (a *AssessmentPostgreSQL) HasActiveAttempts(ctx context.Context, id uint) (bool, error) {
+func (a *AssessmentPostgreSQL) HasActiveAttempts(ctx context.Context, tx *gorm.DB, id uint) (bool, error) {
+	db := a.getDB(tx)
 	var count int64
-	err := a.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Model(&models.AssessmentAttempt{}).
 		Where("assessment_id = ? AND status IN ?", id, models.AttemptInProgress).
 		Count(&count).Error
@@ -508,18 +517,20 @@ func (a *AssessmentPostgreSQL) HasActiveAttempts(ctx context.Context, id uint) (
 }
 
 // UpdateSettings updates assessment settings
-func (a *AssessmentPostgreSQL) UpdateSettings(ctx context.Context, assessmentID uint, settings *models.AssessmentSettings) error {
+func (a *AssessmentPostgreSQL) UpdateSettings(ctx context.Context, tx *gorm.DB, assessmentID uint, settings *models.AssessmentSettings) error {
+	db := a.getDB(tx)
 	settings.AssessmentID = assessmentID
-	return a.db.WithContext(ctx).
+	return db.WithContext(ctx).
 		Model(&models.AssessmentSettings{}).
 		Where("assessment_id = ?", assessmentID).
 		Updates(settings).Error
 }
 
 // GetSettings retrieves assessment settings
-func (a *AssessmentPostgreSQL) GetSettings(ctx context.Context, assessmentID uint) (*models.AssessmentSettings, error) {
+func (a *AssessmentPostgreSQL) GetSettings(ctx context.Context, tx *gorm.DB, assessmentID uint) (*models.AssessmentSettings, error) {
+	db := a.getDB(tx)
 	var settings models.AssessmentSettings
-	err := a.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Where("assessment_id = ?", assessmentID).
 		First(&settings).Error
 
@@ -531,7 +542,8 @@ func (a *AssessmentPostgreSQL) GetSettings(ctx context.Context, assessmentID uin
 }
 
 // UpdateDuration updates assessment duration with business rules
-func (a *AssessmentPostgreSQL) UpdateDuration(ctx context.Context, assessmentID uint, duration int) error {
+func (a *AssessmentPostgreSQL) UpdateDuration(ctx context.Context, tx *gorm.DB, assessmentID uint, duration int) error {
+	db := a.getDB(tx)
 	// Validate duration range (5-300 minutes as per docs)
 	if duration < 5 || duration > 300 {
 		return fmt.Errorf("duration must be between 5 and 300 minutes")
@@ -539,7 +551,7 @@ func (a *AssessmentPostgreSQL) UpdateDuration(ctx context.Context, assessmentID 
 
 	// Check if assessment can be modified
 	var assessment models.Assessment
-	err := a.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Select("status").
 		First(&assessment, assessmentID).Error
 	if err != nil {
@@ -551,14 +563,15 @@ func (a *AssessmentPostgreSQL) UpdateDuration(ctx context.Context, assessmentID 
 		return fmt.Errorf("can only modify duration for draft assessments")
 	}
 
-	return a.db.WithContext(ctx).
+	return db.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Where("id = ?", assessmentID).
 		Update("duration", duration).Error
 }
 
 // UpdateMaxAttempts updates max attempts with business rules
-func (a *AssessmentPostgreSQL) UpdateMaxAttempts(ctx context.Context, assessmentID uint, maxAttempts int) error {
+func (a *AssessmentPostgreSQL) UpdateMaxAttempts(ctx context.Context, tx *gorm.DB, assessmentID uint, maxAttempts int) error {
+	db := a.getDB(tx)
 	// Validate max attempts range (1-10 as per docs)
 	if maxAttempts < 1 || maxAttempts > 10 {
 		return fmt.Errorf("max attempts must be between 1 and 10")
@@ -566,7 +579,7 @@ func (a *AssessmentPostgreSQL) UpdateMaxAttempts(ctx context.Context, assessment
 
 	// Get current max attempts
 	var currentMaxAttempts int
-	err := a.db.WithContext(ctx).
+	err := db.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Select("max_attempts").
 		Where("id = ?", assessmentID).
@@ -576,7 +589,7 @@ func (a *AssessmentPostgreSQL) UpdateMaxAttempts(ctx context.Context, assessment
 	}
 
 	// Check if assessment has attempts
-	hasAttempts, err := a.HasAttempts(ctx, assessmentID)
+	hasAttempts, err := a.HasAttempts(ctx, tx, assessmentID)
 	if err != nil {
 		return err
 	}
@@ -586,7 +599,7 @@ func (a *AssessmentPostgreSQL) UpdateMaxAttempts(ctx context.Context, assessment
 		return fmt.Errorf("cannot decrease max attempts when assessment has existing attempts")
 	}
 
-	return a.db.WithContext(ctx).
+	return db.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Where("id = ?", assessmentID).
 		Update("max_attempts", maxAttempts).Error

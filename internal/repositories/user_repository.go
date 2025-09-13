@@ -14,28 +14,11 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (*models.User, error)
 	GetByIDs(ctx context.Context, ids []uint) ([]*models.User, error)
 
-	// Role-based queries
-	GetByRole(ctx context.Context, role models.UserRole, limit, offset int) ([]*models.User, error)
-	GetTeachers(ctx context.Context, limit, offset int) ([]*models.User, error)
-	GetStudents(ctx context.Context, limit, offset int) ([]*models.User, error)
-
 	// Validation and checks
 	ExistsByID(ctx context.Context, id uint) (bool, error)
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
 	IsActive(ctx context.Context, id uint) (bool, error)
 	HasRole(ctx context.Context, id uint, role models.UserRole) (bool, error)
-
-	// Search operations
-	Search(ctx context.Context, query string, role *models.UserRole, limit, offset int) ([]*models.User, error)
-	GetByOrganization(ctx context.Context, organization string, limit, offset int) ([]*models.User, error)
-
-	// Activity tracking (read-only)
-	UpdateLastLogin(ctx context.Context, id uint, loginTime time.Time) error
-	GetActiveUsers(ctx context.Context, since time.Time) ([]*models.User, error)
-
-	// Statistics (for assessment service analytics)
-	GetUserStats(ctx context.Context, id uint) (*UserStats, error)
-	GetRoleDistribution(ctx context.Context) (map[models.UserRole]int, error)
 }
 
 // ===== USER STATISTICS STRUCT =====

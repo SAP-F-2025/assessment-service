@@ -5,107 +5,112 @@ import (
 	"time"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
+	"gorm.io/gorm"
 )
 
 // AttemptRepository interface for assessment attempt operations
 type AttemptRepository interface {
 	// Basic CRUD operations
-	Create(ctx context.Context, attempt *models.AssessmentAttempt) error
-	GetByID(ctx context.Context, id uint) (*models.AssessmentAttempt, error)
-	GetByIDWithDetails(ctx context.Context, id uint) (*models.AssessmentAttempt, error) // Include answers, assessment
-	Update(ctx context.Context, attempt *models.AssessmentAttempt) error
-	Delete(ctx context.Context, id uint) error
+	Create(ctx context.Context, tx *gorm.DB, attempt *models.AssessmentAttempt) error
+	GetByID(ctx context.Context, tx *gorm.DB, id uint) (*models.AssessmentAttempt, error)
+	GetByIDWithDetails(ctx context.Context, tx *gorm.DB, id uint) (*models.AssessmentAttempt, error) // Include answers, assessment
+	Update(ctx context.Context, tx *gorm.DB, attempt *models.AssessmentAttempt) error
+	Delete(ctx context.Context, tx *gorm.DB, id uint) error
 
 	// Query operations
-	List(ctx context.Context, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
-	GetByStudent(ctx context.Context, studentID uint, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
-	GetByAssessment(ctx context.Context, assessmentID uint, filters AttemptFilters) ([]*models.AssessmentAttempt, error)
-	GetByStudentAndAssessment(ctx context.Context, studentID, assessmentID uint) ([]*models.AssessmentAttempt, error)
+	List(ctx context.Context, tx *gorm.DB, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
+	GetByStudent(ctx context.Context, tx *gorm.DB, studentID uint, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
+	GetByAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
+	GetByStudentAndAssessment(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) ([]*models.AssessmentAttempt, error)
 
 	// Active attempt management
-	GetActiveAttempt(ctx context.Context, studentID, assessmentID uint) (*models.AssessmentAttempt, error)
-	HasActiveAttempt(ctx context.Context, studentID, assessmentID uint) (bool, error)
-	GetActiveAttempts(ctx context.Context, studentID uint) ([]*models.AssessmentAttempt, error)
+	GetActiveAttempt(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (*models.AssessmentAttempt, error)
+	HasActiveAttempt(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (bool, error)
+	GetActiveAttempts(ctx context.Context, tx *gorm.DB, studentID uint) ([]*models.AssessmentAttempt, error)
 
 	// Status management
-	UpdateStatus(ctx context.Context, id uint, status models.AttemptStatus) error
-	BulkUpdateStatus(ctx context.Context, ids []uint, status models.AttemptStatus) error
-	GetByStatus(ctx context.Context, status models.AttemptStatus, limit, offset int) ([]*models.AssessmentAttempt, error)
+	UpdateStatus(ctx context.Context, tx *gorm.DB, id uint, status models.AttemptStatus) error
+	BulkUpdateStatus(ctx context.Context, tx *gorm.DB, ids []uint, status models.AttemptStatus) error
+	GetByStatus(ctx context.Context, tx *gorm.DB, status models.AttemptStatus, limit, offset int) ([]*models.AssessmentAttempt, error)
 
 	// Time management
-	UpdateTimeRemaining(ctx context.Context, id uint, timeRemaining int) error
-	GetInProgressAttempts(ctx context.Context) ([]*models.AssessmentAttempt, error)
-	GetTimedOutAttempts(ctx context.Context) ([]*models.AssessmentAttempt, error)
-	GetExpiredAttempts(ctx context.Context, cutoffTime time.Time) ([]*models.AssessmentAttempt, error)
+	UpdateTimeRemaining(ctx context.Context, tx *gorm.DB, id uint, timeRemaining int) error
+	GetInProgressAttempts(ctx context.Context, tx *gorm.DB) ([]*models.AssessmentAttempt, error)
+	GetTimedOutAttempts(ctx context.Context, tx *gorm.DB) ([]*models.AssessmentAttempt, error)
+	GetExpiredAttempts(ctx context.Context, tx *gorm.DB, cutoffTime time.Time) ([]*models.AssessmentAttempt, error)
 
 	// Progress tracking
-	UpdateProgress(ctx context.Context, id uint, currentQuestionIndex, questionsAnswered int) error
-	GetProgress(ctx context.Context, id uint) (*AttemptProgress, error)
+	UpdateProgress(ctx context.Context, tx *gorm.DB, id uint, currentQuestionIndex, questionsAnswered int) error
+	GetProgress(ctx context.Context, tx *gorm.DB, id uint) (*AttemptProgress, error)
 
 	// Scoring and completion
-	UpdateScore(ctx context.Context, id uint, score, percentage float64, passed bool) error
-	CompleteAttempt(ctx context.Context, id uint, completedAt time.Time, finalScore float64) error
+	UpdateScore(ctx context.Context, tx *gorm.DB, id uint, score, percentage float64, passed bool) error
+	CompleteAttempt(ctx context.Context, tx *gorm.DB, id uint, completedAt time.Time, finalScore float64) error
 
 	// Statistics and analytics
-	GetAttemptCount(ctx context.Context, studentID, assessmentID uint) (int, error)
-	GetAssessmentAttemptStats(ctx context.Context, assessmentID uint) (*AttemptStats, error)
-	GetStudentAttemptStats(ctx context.Context, studentID uint) (*StudentAttemptStats, error)
-	GetAttemptsByDateRange(ctx context.Context, from, to time.Time) ([]*models.AssessmentAttempt, error)
+	GetAttemptCount(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (int, error)
+	GetAssessmentAttemptStats(ctx context.Context, tx *gorm.DB, assessmentID uint) (*AttemptStats, error)
+	GetStudentAttemptStats(ctx context.Context, tx *gorm.DB, studentID uint) (*StudentAttemptStats, error)
+	GetAttemptsByDateRange(ctx context.Context, tx *gorm.DB, from, to time.Time) ([]*models.AssessmentAttempt, error)
 
 	// Validation and checks
-	CanStartAttempt(ctx context.Context, studentID, assessmentID uint) (*AttemptValidation, error)
-	GetNextAttemptNumber(ctx context.Context, studentID, assessmentID uint) (int, error)
-	HasCompletedAttempts(ctx context.Context, studentID, assessmentID uint) (bool, error)
+	CanStartAttempt(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (*AttemptValidation, error)
+	GetNextAttemptNumber(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (int, error)
+	HasCompletedAttempts(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (bool, error)
 
 	// Session management
-	UpdateSessionData(ctx context.Context, id uint, sessionData interface{}) error
-	GetSessionData(ctx context.Context, id uint) (interface{}, error)
+	UpdateSessionData(ctx context.Context, tx *gorm.DB, id uint, sessionData interface{}) error
+	GetSessionData(ctx context.Context, tx *gorm.DB, id uint) (interface{}, error)
 }
 
 // AnswerRepository interface for student answer operations
 type AnswerRepository interface {
 	// Basic CRUD operations
-	Create(ctx context.Context, answer *models.StudentAnswer) error
-	GetByID(ctx context.Context, id uint) (*models.StudentAnswer, error)
-	Update(ctx context.Context, answer *models.StudentAnswer) error
-	Delete(ctx context.Context, id uint) error
+	Create(ctx context.Context, tx *gorm.DB, answer *models.StudentAnswer) error
+	GetByID(ctx context.Context, tx *gorm.DB, id uint) (*models.StudentAnswer, error)
+	Update(ctx context.Context, tx *gorm.DB, answer *models.StudentAnswer) error
+	Delete(ctx context.Context, tx *gorm.DB, id uint) error
 
 	// Bulk operations
-	CreateBatch(ctx context.Context, answers []*models.StudentAnswer) error
-	UpdateBatch(ctx context.Context, answers []*models.StudentAnswer) error
-	UpsertAnswer(ctx context.Context, answer *models.StudentAnswer) error // Create or update
+	CreateBatch(ctx context.Context, tx *gorm.DB, answers []*models.StudentAnswer) error
+	UpdateBatch(ctx context.Context, tx *gorm.DB, answers []*models.StudentAnswer) error
+	UpsertAnswer(ctx context.Context, tx *gorm.DB, answer *models.StudentAnswer) error // Create or update
 
 	// Query operations
-	GetByAttempt(ctx context.Context, attemptID uint) ([]*models.StudentAnswer, error)
-	GetByAttemptAndQuestion(ctx context.Context, attemptID, questionID uint) (*models.StudentAnswer, error)
-	GetByQuestion(ctx context.Context, questionID uint, filters AnswerFilters) ([]*models.StudentAnswer, error)
-	GetByStudent(ctx context.Context, studentID uint, filters AnswerFilters) ([]*models.StudentAnswer, error)
+	GetByAttempt(ctx context.Context, tx *gorm.DB, attemptID uint) ([]*models.StudentAnswer, error)
+	GetByAttemptAndQuestion(ctx context.Context, tx *gorm.DB, attemptID, questionID uint) (*models.StudentAnswer, error)
+	GetByQuestion(ctx context.Context, tx *gorm.DB, questionID uint, filters AnswerFilters) ([]*models.StudentAnswer, error)
+	GetByStudent(ctx context.Context, tx *gorm.DB, studentID uint, filters AnswerFilters) ([]*models.StudentAnswer, error)
 
 	// Grading operations
-	UpdateGrade(ctx context.Context, id uint, score float64, isCorrect *bool, feedback *string, graderID uint) error
-	BulkGrade(ctx context.Context, grades []AnswerGrade) error
-	GetPendingGrading(ctx context.Context, teacherID uint) ([]*models.StudentAnswer, error)
-	GetGradedAnswers(ctx context.Context, graderID uint, filters AnswerFilters) ([]*models.StudentAnswer, error)
+	UpdateGrade(ctx context.Context, tx *gorm.DB, id uint, score float64, isCorrect *bool, feedback *string, graderID uint) error
+	BulkGrade(ctx context.Context, tx *gorm.DB, grades []AnswerGrade) error
+	GetPendingGrading(ctx context.Context, tx *gorm.DB, teacherID uint) ([]*models.StudentAnswer, error)
+	GetGradedAnswers(ctx context.Context, tx *gorm.DB, graderID uint, filters AnswerFilters) ([]*models.StudentAnswer, error)
 
 	// Answer tracking
-	UpdateAnswerHistory(ctx context.Context, id uint, newAnswer interface{}) error
-	GetAnswerHistory(ctx context.Context, id uint) ([]AnswerHistoryEntry, error)
-	FlagAnswer(ctx context.Context, id uint, flagged bool) error
-	GetFlaggedAnswers(ctx context.Context, attemptID uint) ([]*models.StudentAnswer, error)
+	UpdateAnswerHistory(ctx context.Context, tx *gorm.DB, id uint, newAnswer interface{}) error
+	GetAnswerHistory(ctx context.Context, tx *gorm.DB, id uint) ([]AnswerHistoryEntry, error)
+	FlagAnswer(ctx context.Context, tx *gorm.DB, id uint, flagged bool) error
+	GetFlaggedAnswers(ctx context.Context, tx *gorm.DB, attemptID uint) ([]*models.StudentAnswer, error)
 
 	// Time tracking
-	UpdateTimeSpent(ctx context.Context, id uint, timeSpent int) error
-	GetTimeSpentByQuestion(ctx context.Context, attemptID uint) (map[uint]int, error)
+	UpdateTimeSpent(ctx context.Context, tx *gorm.DB, id uint, timeSpent int) error
+	GetTimeSpentByQuestion(ctx context.Context, tx *gorm.DB, attemptID uint) (map[uint]int, error)
 
 	// Statistics and analytics
-	GetAnswerStats(ctx context.Context, questionID uint) (*AnswerStats, error)
-	GetStudentAnswerStats(ctx context.Context, studentID uint) (*StudentAnswerStats, error)
-	GetAnswerDistribution(ctx context.Context, questionID uint) (*AnswerDistribution, error)
+	GetAnswerStats(ctx context.Context, tx *gorm.DB, questionID uint) (*AnswerStats, error)
+	GetStudentAnswerStats(ctx context.Context, tx *gorm.DB, studentID uint) (*StudentAnswerStats, error)
+	GetAnswerDistribution(ctx context.Context, tx *gorm.DB, questionID uint) (*AnswerDistribution, error)
+	GetGradingStats(ctx context.Context, tx *gorm.DB, assessmentID uint) (*GradingStats, error)
+	GetByIDWithDetails(ctx context.Context, tx *gorm.DB, id uint) (*models.StudentAnswer, error)
 
 	// Validation
-	HasAnswer(ctx context.Context, attemptID, questionID uint) (bool, error)
-	GetAnsweredQuestions(ctx context.Context, attemptID uint) ([]uint, error)
-	GetUnansweredQuestions(ctx context.Context, attemptID uint) ([]uint, error)
+	HasAnswer(ctx context.Context, tx *gorm.DB, attemptID, questionID uint) (bool, error)
+	GetAnsweredQuestions(ctx context.Context, tx *gorm.DB, attemptID uint) ([]uint, error)
+	GetUnansweredQuestions(ctx context.Context, tx *gorm.DB, attemptID uint) ([]uint, error)
+
+	AreAllAnswersGraded(ctx context.Context, tx *gorm.DB, attemptID uint) (bool, error)
 }
 
 // ===== ADDITIONAL STRUCTS =====

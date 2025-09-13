@@ -7,8 +7,10 @@ import (
 )
 
 type NotificationType string
+type NotificationPriority int // Add missing type
 
 const (
+	// Notification types
 	NotificationAssessmentPublished NotificationType = "assessment_published"
 	NotificationAssessmentDue       NotificationType = "assessment_due"
 	NotificationResultAvailable     NotificationType = "result_available"
@@ -17,6 +19,12 @@ const (
 	NotificationQuestionBankShared  NotificationType = "question_bank_shared"
 	NotificationImportCompleted     NotificationType = "import_completed"
 	NotificationSystemMaintenance   NotificationType = "system_maintenance"
+
+	// Priority levels
+	PriorityLow      NotificationPriority = 1
+	PriorityNormal   NotificationPriority = 2
+	PriorityHigh     NotificationPriority = 3
+	PriorityCritical NotificationPriority = 4
 )
 
 type Notification struct {

@@ -37,6 +37,7 @@ type Question struct {
 
 	// Content stored as JSONB for flexibility
 	Content datatypes.JSON `json:"content" gorm:"type:jsonb"`
+	Answer  datatypes.JSON `json:"answer" gorm:"type:jsonb"` // Correct answer for the question
 
 	// Categorization
 	CategoryID *uint           `json:"category_id" gorm:"index"`
@@ -160,8 +161,8 @@ type TrueFalseContent struct {
 }
 
 type EssayContent struct {
-	MinWords        int      `json:"min_words"`
-	MaxWords        int      `json:"max_words"`
+	MinWords        *int     `json:"min_words"`
+	MaxWords        *int     `json:"max_words"`
 	SuggestedLength string   `json:"suggested_length"` // "2-3 paragraphs"
 	RubricCriteria  []string `json:"rubric_criteria"`
 	SampleAnswer    *string  `json:"sample_answer"`
@@ -221,4 +222,5 @@ type ShortAnswerContent struct {
 	ExactMatch      bool     `json:"exact_match"`
 	MaxLength       int      `json:"max_length" validate:"min=1,max=500"`
 	PlaceholderText *string  `json:"placeholder_text"`
+	FuzzyMatching   bool     `json:"fuzzy_matching"`
 }

@@ -123,3 +123,50 @@ type AttemptStats struct {
 	PassRate         float64                      `json:"pass_rate"`
 	CompletionRate   float64                      `json:"completion_rate"`
 }
+
+type GradingStats struct {
+	TotalAnswers   int     `json:"total_answers"`
+	GradedAnswers  int     `json:"graded_answers"`
+	PendingAnswers int     `json:"pending_answers"`
+	AutoGraded     int     `json:"auto_graded"`
+	ManualGraded   int     `json:"manual_graded"`
+	AverageScore   float64 `json:"average_score"`
+}
+
+type QuestionBankFilters struct {
+	IsPublic       *bool                   `json:"is_public"`
+	IsShared       *bool                   `json:"is_shared"`
+	CreatedBy      *uint                   `json:"created_by"`
+	SharedBy       *uint                   `json:"shared_by"`
+	Name           *string                 `json:"name"`
+	CategoryID     *uint                   `json:"category_id"`
+	Type           *models.QuestionType    `json:"type"`
+	Difficulty     *models.DifficultyLevel `json:"difficulty"`
+	Tags           []string                `json:"tags"`
+	UsageCountMin  *int                    `json:"usage_count_min"`
+	UsageCountMax  *int                    `json:"usage_count_max"`
+	CorrectRateMin *float64                `json:"correct_rate_min"`
+	CorrectRateMax *float64                `json:"correct_rate_max"`
+	Limit          int                     `json:"limit"`
+	Offset         int                     `json:"offset"`
+	SortBy         string                  `json:"sort_by"`
+	SortOrder      string                  `json:"sort_order"`
+}
+
+type QuestionBankShareFilters struct {
+	BankID    *uint `json:"bank_id"`
+	UserID    *uint `json:"user_id"`
+	CanEdit   *bool `json:"can_edit"`
+	CanDelete *bool `json:"can_delete"`
+	Limit     int   `json:"limit"`
+	Offset    int   `json:"offset"`
+}
+
+type QuestionBankStats struct {
+	QuestionCount   int                            `json:"question_count"`
+	QuestionsByType map[models.QuestionType]int    `json:"questions_by_type"`
+	QuestionsByDiff map[models.DifficultyLevel]int `json:"questions_by_difficulty"`
+	UsageCount      int                            `json:"usage_count"`
+	ShareCount      int                            `json:"share_count"`
+	LastUsed        *time.Time                     `json:"last_used"`
+}

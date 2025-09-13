@@ -8,6 +8,53 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
+// Validator wraps the go-playground validator with business rules
+type Validator struct {
+	businessValidator *BusinessValidator
+	structValidator   *validator.Validate
+}
+
+// NewValidator creates a new validator instance
+func NewValidator() *Validator {
+	structValidator := validator.New()
+	RegisterCustomValidators(structValidator)
+
+	return &Validator{
+		businessValidator: NewBusinessValidator(),
+		structValidator:   structValidator,
+	}
+}
+
+// Validate validates a struct using both struct tags and business rules
+func (v *Validator) Validate(s interface{}) error {
+	// First run struct validation
+	if err := v.structValidator.Struct(s); err != nil {
+		return err
+	}
+
+	// Then run business validation
+	if errors := v.businessValidator.Validate(s); len(errors) > 0 {
+		return errors
+	}
+
+	return nil
+}
+
+// ValidateStruct validates only struct tags
+func (v *Validator) ValidateStruct(s interface{}) error {
+	return v.structValidator.Struct(s)
+}
+
+// ValidateBusiness validates only business rules
+func (v *Validator) ValidateBusiness(s interface{}) ValidationErrors {
+	return v.businessValidator.Validate(s)
+}
+
+// GetBusinessValidator returns the business validator
+func (v *Validator) GetBusinessValidator() *BusinessValidator {
+	return v.businessValidator
+}
+
 // Custom validation functions
 
 func ValidateQuestionType(fl validator.FieldLevel) bool {
