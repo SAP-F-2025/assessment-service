@@ -1,7 +1,9 @@
 package config
 
 import (
+	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -12,6 +14,7 @@ type Config struct {
 	RedisURL    string
 	JWTSecret   string
 	Environment string
+	LogLevel    slog.Level
 	Events      EventConfig
 }
 
@@ -27,6 +30,7 @@ func LoadConfig() (*Config, error) {
 		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
 		JWTSecret:   getEnv("JWT_SECRET", "supersecretkey"),
 		Environment: getEnv("ENVIRONMENT", "development"),
+		LogLevel:    parseLogLevel(getEnv("LOG_LEVEL", "info")),
 		Events: EventConfig{
 			Enabled:           getEnv("EVENTS_ENABLED", "true") == "true",
 			Publisher:         getEnv("EVENTS_PUBLISHER", "kafka"),
@@ -42,4 +46,19 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }

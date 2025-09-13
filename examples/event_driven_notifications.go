@@ -1,13 +1,11 @@
 package examples
 
 import (
-	"context"
 	"log/slog"
 	"os"
 
 	"github.com/SAP-F-2025/assessment-service/internal/config"
 	"github.com/SAP-F-2025/assessment-service/internal/events"
-	"github.com/SAP-F-2025/assessment-service/internal/services"
 	"gorm.io/gorm"
 )
 
@@ -37,7 +35,7 @@ func ExampleEventDrivenNotificationSetup(db *gorm.DB, repo interface{}, logger *
 	// )
 
 	// Example usage:
-	ctx := context.Background()
+	// ctx := context.Background()
 
 	// Publish an assessment published event
 	// err = notificationService.NotifyAssessmentPublished(ctx, 123)

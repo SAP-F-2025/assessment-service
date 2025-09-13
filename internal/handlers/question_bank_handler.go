@@ -293,7 +293,7 @@ func (h *QuestionBankHandler) ListQuestionBanks(c *gin.Context) {
 // @Failure 400 {object} ErrorResponse "Bad request"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /question-banks/public [get]
-func (h *QuestionBankHandler) ListPublicQuestionBanks(c *gin.Context) {
+func (h *QuestionBankHandler) GetPublicQuestionBanksOLD(c *gin.Context) {
 	filters := h.parseQuestionBankFilters(c)
 	response, err := h.service.GetPublic(c.Request.Context(), filters)
 	if err != nil {
@@ -320,7 +320,7 @@ func (h *QuestionBankHandler) ListPublicQuestionBanks(c *gin.Context) {
 // @Failure 401 {object} ErrorResponse "Unauthorized"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /question-banks/shared [get]
-func (h *QuestionBankHandler) ListSharedQuestionBanks(c *gin.Context) {
+func (h *QuestionBankHandler) GetSharedQuestionBanksOLD(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{
@@ -566,7 +566,7 @@ func (h *QuestionBankHandler) UpdateSharePermissions(c *gin.Context) {
 // @Failure 404 {object} ErrorResponse "Not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /question-banks/{id}/shares [get]
-func (h *QuestionBankHandler) GetBankShares(c *gin.Context) {
+func (h *QuestionBankHandler) GetQuestionBankSharesOLD(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -746,23 +746,82 @@ func (h *QuestionBankHandler) GetBankQuestions(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ===== STATISTICS ENDPOINTS =====
-
-// GetBankStats gets statistics for a question bank
-// @Summary Get bank statistics
-// @Description Get statistics about a question bank (question counts, usage, etc.)
+// GetPublicQuestionBanks gets public question banks
+// @Summary Get public question banks
+// @Description Get all publicly available question banks
 // @Tags question-banks
 // @Accept json
 // @Produce json
-// @Param id path int true "Question Bank ID"
-// @Success 200 {object} repositories.QuestionBankStats
+// @Param page query int false "Page number" default(1)
+// @Param size query int false "Page size" default(10)
+// @Param sort query string false "Sort field" default("created_at")
+// @Param order query string false "Sort order" default("desc")
+// @Success 200 {object} map[string]interface{} "Public question banks list"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /question-banks/public [get]
+func (h *QuestionBankHandler) GetPublicQuestionBanks(c *gin.Context) {
+	filters := h.parseQuestionBankFilters(c)
+	isPublic := true
+	filters.IsPublic = &isPublic
+
+	response, err := h.service.GetPublic(c.Request.Context(), filters)
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// GetSharedQuestionBanks gets question banks shared with the current user
+// @Summary Get shared question banks
+// @Description Get all question banks that have been shared with the current user
+// @Tags question-banks
+// @Accept json
+// @Produce json
+// @Param page query int false "Page number" default(1)
+// @Param size query int false "Page size" default(10)
+// @Param sort query string false "Sort field" default("created_at")
+// @Param order query string false "Sort order" default("desc")
+// @Success 200 {object} map[string]interface{} "Shared question banks list"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /question-banks/shared [get]
+func (h *QuestionBankHandler) GetSharedQuestionBanks(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	filters := h.parseQuestionBankFilters(c)
+
+	response, err := h.service.GetSharedWithUser(c.Request.Context(), userID.(uint), filters)
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// GetQuestionBankStats gets statistics for a question bank
+// @Summary Get question bank statistics
+// @Description Get detailed statistics about a question bank including usage metrics
+// @Tags question-banks
+// @Accept json
+// @Produce json
+// @Param id path uint true "Question Bank ID"
+// @Success 200 {object} repositories.QuestionBankStats "Question bank statistics"
 // @Failure 400 {object} ErrorResponse "Bad request"
 // @Failure 401 {object} ErrorResponse "Unauthorized"
 // @Failure 403 {object} ErrorResponse "Forbidden - no access to bank"
 // @Failure 404 {object} ErrorResponse "Not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /question-banks/{id}/stats [get]
-func (h *QuestionBankHandler) GetBankStats(c *gin.Context) {
+func (h *QuestionBankHandler) GetQuestionBankStats(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -786,6 +845,142 @@ func (h *QuestionBankHandler) GetBankStats(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, stats)
+}
+
+// GetQuestionBankShares gets all shares for a question bank
+// @Summary Get question bank shares
+// @Description Get all users that a question bank has been shared with
+// @Tags question-banks
+// @Accept json
+// @Produce json
+// @Param id path uint true "Question Bank ID"
+// @Success 200 {object} []repositories.QuestionBankShare "List of bank shares"
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - not owner of bank"
+// @Failure 404 {object} ErrorResponse "Not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /question-banks/{id}/shares [get]
+func (h *QuestionBankHandler) GetQuestionBankShares(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid question bank ID",
+		})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	shares, err := h.service.GetBankShares(c.Request.Context(), uint(id), userID.(uint))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, shares)
+}
+
+// GetUserShares gets all question banks shared with a specific user
+// @Summary Get user shares
+// @Description Get all question banks that have been shared with a specific user
+// @Tags question-banks
+// @Accept json
+// @Produce json
+// @Param user_id path uint true "User ID"
+// @Param page query int false "Page number" default(1)
+// @Param size query int false "Page size" default(10)
+// @Success 200 {object} map[string]interface{} "List of question banks shared with user"
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - insufficient permissions"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /question-banks/user/{user_id}/shares [get]
+func (h *QuestionBankHandler) GetUserShares(c *gin.Context) {
+	targetUserID, err := strconv.ParseUint(c.Param("user_id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid user ID",
+		})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	// Only allow users to see their own shares, or admin access
+	if userID.(uint) != uint(targetUserID) {
+		// You might want to add admin role check here
+		c.JSON(http.StatusForbidden, ErrorResponse{
+			Message: "Cannot view other user's shares",
+		})
+		return
+	}
+
+	filters := h.parseQuestionBankFilters(c)
+
+	response, err := h.service.GetSharedWithUser(c.Request.Context(), uint(targetUserID), filters)
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// GetQuestionBanksByCreator gets all question banks created by a specific user
+// @Summary Get question banks by creator
+// @Description Get all question banks created by a specific user
+// @Tags question-banks
+// @Accept json
+// @Produce json
+// @Param creator_id path uint true "Creator User ID"
+// @Param page query int false "Page number" default(1)
+// @Param size query int false "Page size" default(10)
+// @Param sort query string false "Sort field" default("created_at")
+// @Param order query string false "Sort order" default("desc")
+// @Success 200 {object} map[string]interface{} "List of question banks by creator"
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /question-banks/creator/{creator_id} [get]
+func (h *QuestionBankHandler) GetQuestionBanksByCreator(c *gin.Context) {
+	creatorID, err := strconv.ParseUint(c.Param("creator_id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid creator ID",
+		})
+		return
+	}
+
+	_, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	filters := h.parseQuestionBankFilters(c)
+
+	response, err := h.service.GetByCreator(c.Request.Context(), uint(creatorID), filters)
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // ===== HELPER METHODS =====
