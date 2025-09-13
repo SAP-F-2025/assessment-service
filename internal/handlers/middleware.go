@@ -1,12 +1,11 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	uuid2 "github.com/google/uuid"
 )
 
 // SetupMiddleware sets up common middleware for the Gin router
@@ -79,9 +78,7 @@ func RequestIDMiddleware() gin.HandlerFunc {
 		requestID := c.GetHeader("X-Request-ID")
 		if requestID == "" {
 			// Generate a new request ID
-			bytes := make([]byte, 16)
-			rand.Read(bytes)
-			requestID = hex.EncodeToString(bytes)
+			requestID = uuid2.New().String()
 		}
 		c.Header("X-Request-ID", requestID)
 		c.Set("request_id", requestID)
