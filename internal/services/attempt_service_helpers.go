@@ -13,7 +13,7 @@ import (
 
 // ===== TIME MANAGEMENT =====
 
-func (s *attemptService) GetTimeRemaining(ctx context.Context, attemptID uint, studentID uint) (int, error) {
+func (s *attemptService) GetTimeRemaining(ctx context.Context, attemptID uint, studentID string) (int, error) {
 	// Get attempt
 	attempt, err := s.repo.Attempt().GetByID(ctx, nil, attemptID)
 	if err != nil {
@@ -46,7 +46,7 @@ func (s *attemptService) GetTimeRemaining(ctx context.Context, attemptID uint, s
 	return remaining, nil
 }
 
-func (s *attemptService) ExtendTime(ctx context.Context, attemptID uint, minutes int, userID uint) error {
+func (s *attemptService) ExtendTime(ctx context.Context, attemptID uint, minutes int, userID string) error {
 	s.logger.Info("Extending attempt time",
 		"attempt_id", attemptID,
 		"minutes", minutes,
@@ -143,7 +143,7 @@ func (s *attemptService) HandleTimeout(ctx context.Context, attemptID uint) erro
 
 // ===== VALIDATION =====
 
-func (s *attemptService) CanStart(ctx context.Context, assessmentID uint, studentID uint) (bool, error) {
+func (s *attemptService) CanStart(ctx context.Context, assessmentID uint, studentID string) (bool, error) {
 	// Check if assessment is available for taking
 	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
 	canTake, err := assessmentService.CanTake(ctx, assessmentID, studentID)
@@ -192,8 +192,8 @@ func (s *attemptService) CanStart(ctx context.Context, assessmentID uint, studen
 	return true, nil
 }
 
-func (s *attemptService) GetAttemptCount(ctx context.Context, assessmentID uint, studentID uint) (int, error) {
-	count, err := s.repo.Attempt().GetAttemptCount(ctx, nil, assessmentID, studentID)
+func (s *attemptService) GetAttemptCount(ctx context.Context, assessmentID uint, studentID string) (int, error) {
+	count, err := s.repo.Attempt().GetAttemptCount(ctx, nil, studentID, assessmentID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get attempt count: %w", err)
 	}
@@ -220,7 +220,7 @@ func (s *attemptService) IsAttemptActive(ctx context.Context, attemptID uint) (b
 
 // ===== STATISTICS =====
 
-func (s *attemptService) GetStats(ctx context.Context, assessmentID uint, userID uint) (*repositories.AttemptStats, error) {
+func (s *attemptService) GetStats(ctx context.Context, assessmentID uint, userID string) (*repositories.AttemptStats, error) {
 	// Check access permission
 	assessmentService := NewAssessmentService(s.repo, nil, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)
@@ -241,7 +241,7 @@ func (s *attemptService) GetStats(ctx context.Context, assessmentID uint, userID
 
 // ===== HELPER FUNCTIONS =====
 
-func (s *attemptService) getUserRole(ctx context.Context, userID uint) (models.UserRole, error) {
+func (s *attemptService) getUserRole(ctx context.Context, userID string) (models.UserRole, error) {
 	user, err := s.repo.User().GetByID(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get user: %w", err)
@@ -249,7 +249,7 @@ func (s *attemptService) getUserRole(ctx context.Context, userID uint) (models.U
 	return user.Role, nil
 }
 
-func (s *attemptService) canAccessAttempt(ctx context.Context, attempt *models.AssessmentAttempt, userID uint) (bool, error) {
+func (s *attemptService) canAccessAttempt(ctx context.Context, attempt *models.AssessmentAttempt, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -270,7 +270,7 @@ func (s *attemptService) canAccessAttempt(ctx context.Context, attempt *models.A
 	return false, nil
 }
 
-func (s *attemptService) buildAttemptResponse(ctx context.Context, attempt *models.AssessmentAttempt, userID uint, includeQuestions bool) *AttemptResponse {
+func (s *attemptService) buildAttemptResponse(ctx context.Context, attempt *models.AssessmentAttempt, userID string, includeQuestions bool) *AttemptResponse {
 	response := &AttemptResponse{
 		AssessmentAttempt: attempt,
 	}
@@ -343,7 +343,7 @@ func (s *attemptService) initializeAttemptAnswers(ctx context.Context, tx *gorm.
 	return nil
 }
 
-func (s *attemptService) updateAttemptAnswer(ctx context.Context, tx *gorm.DB, attemptID uint, req SubmitAnswerRequest, studentID uint) error {
+func (s *attemptService) updateAttemptAnswer(ctx context.Context, tx *gorm.DB, attemptID uint, req SubmitAnswerRequest, studentID string) error {
 	// Get existing answer
 	answer, err := s.repo.Answer().GetByAttemptAndQuestion(ctx, tx, attemptID, req.QuestionID)
 	if err != nil {

@@ -119,7 +119,7 @@ type ListAssessmentsParams struct {
 	Status     AssessmentStatus `json:"status"`
 	Search     string           `json:"search"`
 	CategoryID *uint            `json:"category_id"`
-	CreatedBy  *uint            `json:"created_by"`
+	CreatedBy  *string          `json:"created_by"`
 	SortBy     string           `json:"sort_by"`
 	SortDir    string           `json:"sort_dir" validate:"omitempty,oneof=asc desc"`
 	DateFrom   *time.Time       `json:"date_from"`
@@ -143,7 +143,7 @@ type ListAttemptsParams struct {
 	Page         int           `json:"page" validate:"min=0"`
 	Size         int           `json:"size" validate:"min=1,max=100"`
 	AssessmentID *uint         `json:"assessment_id"`
-	StudentID    *uint         `json:"student_id"`
+	StudentID    *string       `json:"student_id"`
 	Status       AttemptStatus `json:"status"`
 	DateFrom     *time.Time    `json:"date_from"`
 	DateTo       *time.Time    `json:"date_to"`
@@ -210,7 +210,7 @@ type CategoryStatsItem struct {
 }
 
 type StudentProgress struct {
-	StudentID         uint       `json:"student_id"`
+	StudentID         string     `json:"student_id"`
 	StudentName       string     `json:"student_name"`
 	StudentEmail      string     `json:"student_email"`
 	AttemptNumber     int        `json:"attempt_number"`

@@ -4,23 +4,25 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/services"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"github.com/gin-gonic/gin"
 )
 
 type AssessmentHandler struct {
 	BaseHandler
 	assessmentService services.AssessmentService
-	validator         *utils.Validator
+	validator         *validator.Validator
 }
 
 func NewAssessmentHandler(
 	assessmentService services.AssessmentService,
-	validator *utils.Validator,
+	validator *validator.Validator,
 	logger utils.Logger,
 ) *AssessmentHandler {
 	return &AssessmentHandler{
@@ -60,7 +62,7 @@ func (h *AssessmentHandler) CreateAssessment(c *gin.Context) {
 		return
 	}
 
-	assessment, err := h.assessmentService.Create(c.Request.Context(), &req, userID.(uint))
+	assessment, err := h.assessmentService.Create(c.Request.Context(), &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -97,7 +99,7 @@ func (h *AssessmentHandler) GetAssessment(c *gin.Context) {
 		return
 	}
 
-	assessment, err := h.assessmentService.GetByID(c.Request.Context(), id, userID.(uint))
+	assessment, err := h.assessmentService.GetByID(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -134,7 +136,7 @@ func (h *AssessmentHandler) GetAssessmentWithDetails(c *gin.Context) {
 		return
 	}
 
-	assessment, err := h.assessmentService.GetByIDWithDetails(c.Request.Context(), id, userID.(uint))
+	assessment, err := h.assessmentService.GetByIDWithDetails(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -181,7 +183,7 @@ func (h *AssessmentHandler) UpdateAssessment(c *gin.Context) {
 		return
 	}
 
-	assessment, err := h.assessmentService.Update(c.Request.Context(), id, &req, userID.(uint))
+	assessment, err := h.assessmentService.Update(c.Request.Context(), id, &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -218,7 +220,7 @@ func (h *AssessmentHandler) DeleteAssessment(c *gin.Context) {
 		return
 	}
 
-	err := h.assessmentService.Delete(c.Request.Context(), id, userID.(uint))
+	err := h.assessmentService.Delete(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -252,7 +254,7 @@ func (h *AssessmentHandler) ListAssessments(c *gin.Context) {
 	}
 
 	filters := h.parseAssessmentFilters(c)
-	assessments, err := h.assessmentService.List(c.Request.Context(), filters, userID.(uint))
+	assessments, err := h.assessmentService.List(c.Request.Context(), filters, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -275,8 +277,8 @@ func (h *AssessmentHandler) ListAssessments(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /assessments/creator/{creator_id} [get]
 func (h *AssessmentHandler) GetAssessmentsByCreator(c *gin.Context) {
-	creatorID := h.parseIDParam(c, "creator_id")
-	if creatorID == 0 {
+	creatorID := ParseStringIDParam(c, "creator_id")
+	if creatorID == "" {
 		return
 	}
 
@@ -325,7 +327,7 @@ func (h *AssessmentHandler) SearchAssessments(c *gin.Context) {
 		return
 	}
 
-	assessments, err := h.assessmentService.Search(c.Request.Context(), query, filters, userID.(uint))
+	assessments, err := h.assessmentService.Search(c.Request.Context(), query, filters, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -373,7 +375,7 @@ func (h *AssessmentHandler) UpdateAssessmentStatus(c *gin.Context) {
 		})
 		return
 	}
-	err := h.assessmentService.UpdateStatus(c.Request.Context(), id, &req, userID.(uint))
+	err := h.assessmentService.UpdateStatus(c.Request.Context(), id, &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -411,7 +413,7 @@ func (h *AssessmentHandler) PublishAssessment(c *gin.Context) {
 		})
 		return
 	}
-	err := h.assessmentService.Publish(c.Request.Context(), id, userID.(uint))
+	err := h.assessmentService.Publish(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -449,7 +451,7 @@ func (h *AssessmentHandler) ArchiveAssessment(c *gin.Context) {
 		})
 		return
 	}
-	err := h.assessmentService.Archive(c.Request.Context(), id, userID.(uint))
+	err := h.assessmentService.Archive(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -498,7 +500,7 @@ func (h *AssessmentHandler) AddQuestionToAssessment(c *gin.Context) {
 		})
 		return
 	}
-	err := h.assessmentService.AddQuestion(c.Request.Context(), assessmentID, questionID, order, points, userID.(uint))
+	err := h.assessmentService.AddQuestion(c.Request.Context(), assessmentID, questionID, order, points, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -542,7 +544,7 @@ func (h *AssessmentHandler) RemoveQuestionFromAssessment(c *gin.Context) {
 		})
 		return
 	}
-	err := h.assessmentService.RemoveQuestion(c.Request.Context(), assessmentID, questionID, userID.(uint))
+	err := h.assessmentService.RemoveQuestion(c.Request.Context(), assessmentID, questionID, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -587,7 +589,7 @@ func (h *AssessmentHandler) ReorderAssessmentQuestions(c *gin.Context) {
 		})
 		return
 	}
-	err := h.assessmentService.ReorderQuestions(c.Request.Context(), id, orders, userID.(uint))
+	err := h.assessmentService.ReorderQuestions(c.Request.Context(), id, orders, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -625,7 +627,7 @@ func (h *AssessmentHandler) GetAssessmentStats(c *gin.Context) {
 		})
 		return
 	}
-	stats, err := h.assessmentService.GetStats(c.Request.Context(), id, userID.(uint))
+	stats, err := h.assessmentService.GetStats(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -646,8 +648,8 @@ func (h *AssessmentHandler) GetAssessmentStats(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /assessments/creator/{creator_id}/stats [get]
 func (h *AssessmentHandler) GetCreatorStats(c *gin.Context) {
-	creatorID := h.parseIDParam(c, "creator_id")
-	if creatorID == 0 {
+	creatorID := ParseStringIDParam(c, "creator_id")
+	if creatorID == "" {
 		return
 	}
 
@@ -664,15 +666,15 @@ func (h *AssessmentHandler) GetCreatorStats(c *gin.Context) {
 
 // Helper methods
 
-func (h *AssessmentHandler) getUserID(c *gin.Context) uint {
+func (h *AssessmentHandler) getUserID(c *gin.Context) string {
 	userID, exists := c.Get("user_id")
 	if !exists {
-		return 0
+		return ""
 	}
-	if id, ok := userID.(uint); ok {
+	if id, ok := userID.(string); ok {
 		return id
 	}
-	return 0
+	return ""
 }
 
 func (h *AssessmentHandler) parseIDParam(c *gin.Context, param string) uint {
@@ -686,6 +688,19 @@ func (h *AssessmentHandler) parseIDParam(c *gin.Context, param string) uint {
 		return 0
 	}
 	return uint(id)
+}
+
+func (h *AssessmentHandler) parseStringIDParam(c *gin.Context, param string) string {
+	idStr := c.Param(param)
+	idStr = strings.TrimSpace(idStr)
+	if idStr == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid " + param,
+			Details: "ID cannot be empty",
+		})
+		return ""
+	}
+	return idStr
 }
 
 func (h *AssessmentHandler) parseIntQuery(c *gin.Context, param string, defaultValue int) int {
@@ -727,10 +742,7 @@ func (h *AssessmentHandler) parseAssessmentFilters(c *gin.Context) repositories.
 	}
 
 	if creatorIDStr := c.Query("creator_id"); creatorIDStr != "" {
-		if creatorID, err := strconv.ParseUint(creatorIDStr, 10, 32); err == nil {
-			id := uint(creatorID)
-			filters.CreatedBy = &id
-		}
+		filters.CreatedBy = &creatorIDStr
 	}
 
 	return filters

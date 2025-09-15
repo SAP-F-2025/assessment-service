@@ -95,7 +95,7 @@ func (a *AttemptPostgreSQL) List(ctx context.Context, tx *gorm.DB, filters repos
 	return attempts, total, nil
 }
 
-func (a *AttemptPostgreSQL) GetByStudent(ctx context.Context, tx *gorm.DB, studentID uint, filters repositories.AttemptFilters) ([]*models.AssessmentAttempt, int64, error) {
+func (a *AttemptPostgreSQL) GetByStudent(ctx context.Context, tx *gorm.DB, studentID string, filters repositories.AttemptFilters) ([]*models.AssessmentAttempt, int64, error) {
 	filters.StudentID = &studentID
 	return a.List(ctx, tx, filters)
 }
@@ -120,21 +120,34 @@ func (a *AttemptPostgreSQL) GetByAssessment(ctx context.Context, tx *gorm.DB, as
 	return attempts, total, nil
 }
 
-func (a *AttemptPostgreSQL) GetByStudentAndAssessment(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) ([]*models.AssessmentAttempt, error) {
+//func (a *AttemptPostgreSQL) GetByStudentAndAssessment(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) ([]*models.AssessmentAttempt, error) {
+//	db := a.getDB(tx)
+//	var attempts []*models.AssessmentAttempt
+//	if err := db.WithContext(ctx).
+//		Where("student_id = ? AND assessment_id = ?", studentID, assessmentID).
+//		Preload("Student").
+//		Preload("Assessment").
+//		Find(&attempts).Error; err != nil {
+//		return nil, err
+//	}
+//
+//	return attempts, nil
+//}
+
+// GetByStudentAndAssessment retrieves all attempts by a student for a specific assessment
+func (a *AttemptPostgreSQL) GetByStudentAndAssessment(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) ([]*models.AssessmentAttempt, error) {
 	db := a.getDB(tx)
 	var attempts []*models.AssessmentAttempt
 	if err := db.WithContext(ctx).
 		Where("student_id = ? AND assessment_id = ?", studentID, assessmentID).
-		Preload("Student").
-		Preload("Assessment").
+		Order("created_at DESC").
 		Find(&attempts).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get attempts by student and assessment: %w", err)
 	}
-
 	return attempts, nil
 }
 
-func (a *AttemptPostgreSQL) GetActiveAttempt(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (*models.AssessmentAttempt, error) {
+func (a *AttemptPostgreSQL) GetActiveAttempt(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (*models.AssessmentAttempt, error) {
 	db := a.getDB(tx)
 	var attempt models.AssessmentAttempt
 	if err := db.WithContext(ctx).
@@ -152,7 +165,7 @@ func (a *AttemptPostgreSQL) GetActiveAttempt(ctx context.Context, tx *gorm.DB, s
 	return &attempt, nil
 }
 
-func (a *AttemptPostgreSQL) HasActiveAttempt(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (bool, error) {
+func (a *AttemptPostgreSQL) HasActiveAttempt(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (bool, error) {
 	db := a.getDB(tx)
 	var count int64
 	if err := db.WithContext(ctx).
@@ -165,7 +178,7 @@ func (a *AttemptPostgreSQL) HasActiveAttempt(ctx context.Context, tx *gorm.DB, s
 	return count > 0, nil
 }
 
-func (a *AttemptPostgreSQL) GetActiveAttempts(ctx context.Context, tx *gorm.DB, studentID uint) ([]*models.AssessmentAttempt, error) {
+func (a *AttemptPostgreSQL) GetActiveAttempts(ctx context.Context, tx *gorm.DB, studentID string) ([]*models.AssessmentAttempt, error) {
 	db := a.getDB(tx)
 	var attempts []*models.AssessmentAttempt
 	if err := db.WithContext(ctx).
@@ -309,7 +322,7 @@ func (a *AttemptPostgreSQL) CompleteAttempt(ctx context.Context, tx *gorm.DB, id
 		}).Error
 }
 
-func (a *AttemptPostgreSQL) GetAttemptCount(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (int, error) {
+func (a *AttemptPostgreSQL) GetAttemptCount(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (int, error) {
 	count, err := a.helpers.CountAttemptsByStudent(ctx, assessmentID, studentID)
 	return int(count), err
 }
@@ -365,7 +378,7 @@ func (a *AttemptPostgreSQL) GetAssessmentAttemptStats(ctx context.Context, tx *g
 	return &stats, nil
 }
 
-func (a *AttemptPostgreSQL) GetStudentAttemptStats(ctx context.Context, tx *gorm.DB, studentID uint) (*repositories.StudentAttemptStats, error) {
+func (a *AttemptPostgreSQL) GetStudentAttemptStats(ctx context.Context, tx *gorm.DB, studentID string) (*repositories.StudentAttemptStats, error) {
 	var stats repositories.StudentAttemptStats
 
 	var totalAttempts int64
@@ -485,21 +498,21 @@ func (a *AttemptPostgreSQL) GetAttemptsByDateRange(ctx context.Context, tx *gorm
 	return attempts, nil
 }
 
-func (a *AttemptPostgreSQL) CanStartAttempt(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (*repositories.AttemptValidation, error) {
+func (a *AttemptPostgreSQL) CanStartAttempt(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (*repositories.AttemptValidation, error) {
 	return a.helpers.ValidateAttemptEligibility(ctx, assessmentID, studentID)
 }
 
-func (a *AttemptPostgreSQL) GetNextAttemptNumber(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (int, error) {
+func (a *AttemptPostgreSQL) GetNextAttemptNumber(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (int, error) {
 	count, err := a.helpers.CountAttemptsByStudent(ctx, assessmentID, studentID)
 	return int(count) + 1, err
 }
 
 // GetRemainingAttempts calculates remaining attempts for a student
-func (a *AttemptPostgreSQL) GetRemainingAttempts(ctx context.Context, assessmentID, studentID uint) (int, error) {
+func (a *AttemptPostgreSQL) GetRemainingAttempts(ctx context.Context, assessmentID uint, studentID string) (int, error) {
 	return a.helpers.GetRemainingAttempts(ctx, assessmentID, studentID)
 }
 
-func (a *AttemptPostgreSQL) HasCompletedAttempts(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (bool, error) {
+func (a *AttemptPostgreSQL) HasCompletedAttempts(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (bool, error) {
 	db := a.getDB(tx)
 	var count int64
 	err := db.WithContext(ctx).
@@ -813,7 +826,7 @@ func (ar *AnswerPostgreSQL) GetByQuestion(ctx context.Context, tx *gorm.DB, ques
 }
 
 // GetByStudent retrieves answers for a specific student
-func (ar *AnswerPostgreSQL) GetByStudent(ctx context.Context, tx *gorm.DB, studentID uint, filters repositories.AnswerFilters) ([]*models.StudentAnswer, error) {
+func (ar *AnswerPostgreSQL) GetByStudent(ctx context.Context, tx *gorm.DB, studentID string, filters repositories.AnswerFilters) ([]*models.StudentAnswer, error) {
 	db := ar.getDB(tx)
 	query := db.WithContext(ctx).
 		Joins("JOIN assessment_attempts aa ON aa.id = student_answers.attempt_id").
@@ -831,7 +844,7 @@ func (ar *AnswerPostgreSQL) GetByStudent(ctx context.Context, tx *gorm.DB, stude
 // ===== GRADING OPERATIONS =====
 
 // UpdateGrade updates the grade for an answer
-func (ar *AnswerPostgreSQL) UpdateGrade(ctx context.Context, tx *gorm.DB, id uint, score float64, isCorrect *bool, feedback *string, graderID uint) error {
+func (ar *AnswerPostgreSQL) UpdateGrade(ctx context.Context, tx *gorm.DB, id uint, score float64, isCorrect *bool, feedback *string, graderID string) error {
 	db := ar.getDB(tx)
 	now := time.Now()
 	updates := map[string]interface{}{
@@ -896,7 +909,7 @@ func (ar *AnswerPostgreSQL) BulkGrade(ctx context.Context, tx *gorm.DB, grades [
 }
 
 // GetPendingGrading retrieves answers pending manual grading
-func (ar *AnswerPostgreSQL) GetPendingGrading(ctx context.Context, tx *gorm.DB, teacherID uint) ([]*models.StudentAnswer, error) {
+func (ar *AnswerPostgreSQL) GetPendingGrading(ctx context.Context, tx *gorm.DB, teacherID string) ([]*models.StudentAnswer, error) {
 	db := ar.getDB(tx)
 	var answers []*models.StudentAnswer
 	if err := db.WithContext(ctx).
@@ -913,7 +926,7 @@ func (ar *AnswerPostgreSQL) GetPendingGrading(ctx context.Context, tx *gorm.DB, 
 }
 
 // GetGradedAnswers retrieves answers graded by a specific teacher
-func (ar *AnswerPostgreSQL) GetGradedAnswers(ctx context.Context, tx *gorm.DB, graderID uint, filters repositories.AnswerFilters) ([]*models.StudentAnswer, error) {
+func (ar *AnswerPostgreSQL) GetGradedAnswers(ctx context.Context, tx *gorm.DB, graderID string, filters repositories.AnswerFilters) ([]*models.StudentAnswer, error) {
 	db := ar.getDB(tx)
 	query := db.WithContext(ctx).Where("graded_by = ?", graderID)
 	query = ar.applyAnswerFilters(query, filters)
@@ -1092,7 +1105,7 @@ func (ar *AnswerPostgreSQL) GetAnswerStats(ctx context.Context, tx *gorm.DB, que
 }
 
 // GetStudentAnswerStats retrieves answer statistics for a student
-func (ar *AnswerPostgreSQL) GetStudentAnswerStats(ctx context.Context, tx *gorm.DB, studentID uint) (*repositories.StudentAnswerStats, error) {
+func (ar *AnswerPostgreSQL) GetStudentAnswerStats(ctx context.Context, tx *gorm.DB, studentID string) (*repositories.StudentAnswerStats, error) {
 	db := ar.getDB(tx)
 	stats := &repositories.StudentAnswerStats{
 		StudentID:         studentID,

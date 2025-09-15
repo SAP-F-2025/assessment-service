@@ -27,7 +27,7 @@ type Assessment struct {
 	DueDate      *time.Time       `json:"due_date"`
 
 	// Metadata
-	CreatedBy uint           `json:"created_by" gorm:"not null;index"`
+	CreatedBy string         `json:"created_by" gorm:"not null;index;size:255"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
@@ -49,41 +49,50 @@ type Assessment struct {
 }
 
 type AssessmentSettings struct {
-	AssessmentID uint `json:"assessment_id" gorm:"primaryKey"`
+	AssessmentID uint      `json:"assessment_id" gorm:"primaryKey;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	CreatedAt    time.Time `json:"created_at" gorm:"not null"`
+	UpdatedAt    time.Time `json:"updated_at" gorm:"not null"`
 
 	// Question Display Settings
-	RandomizeQuestions bool `json:"randomize_questions" gorm:"default:false"`
-	RandomizeOptions   bool `json:"randomize_options" gorm:"default:false"`
-	QuestionsPerPage   int  `json:"questions_per_page" gorm:"default:1"`
-	ShowProgressBar    bool `json:"show_progress_bar" gorm:"default:true"`
+	RandomizeQuestions bool `json:"randomize_questions" gorm:"not null;default:false;comment:Randomize question order"`
+	RandomizeOptions   bool `json:"randomize_options" gorm:"not null;default:false;comment:Randomize answer options"`
+	QuestionsPerPage   int  `json:"questions_per_page" gorm:"not null;default:1;check:questions_per_page >= 1 AND questions_per_page <= 20;comment:Number of questions per page"`
+	ShowProgressBar    bool `json:"show_progress_bar" gorm:"not null;default:true;comment:Show progress indicator"`
 
 	// Result Settings
-	ShowResults        bool `json:"show_results" gorm:"default:true"`
-	ShowCorrectAnswers bool `json:"show_correct_answers" gorm:"default:true"`
-	ShowScoreBreakdown bool `json:"show_score_breakdown" gorm:"default:true"`
+	ShowResults        bool `json:"show_results" gorm:"not null;default:true;comment:Show results after completion"`
+	ShowCorrectAnswers bool `json:"show_correct_answers" gorm:"not null;default:true;comment:Show correct answers in results"`
+	ShowScoreBreakdown bool `json:"show_score_breakdown" gorm:"not null;default:true;comment:Show detailed score breakdown"`
 
 	// Attempt Settings
-	AllowRetake bool `json:"allow_retake" gorm:"default:false"`
-	RetakeDelay int  `json:"retake_delay" gorm:"default:0"` // Minutes
+	AllowRetake bool `json:"allow_retake" gorm:"not null;default:false;comment:Allow multiple attempts"`
+	RetakeDelay int  `json:"retake_delay" gorm:"not null;default:0;check:retake_delay >= 0 AND retake_delay <= 1440;comment:Delay between retakes in minutes"`
 
 	// Time Settings
-	TimeLimitEnforced   bool `json:"time_limit_enforced" gorm:"default:true"`
-	AutoSubmitOnTimeout bool `json:"auto_submit_on_timeout" gorm:"default:true"`
+	TimeLimitEnforced   bool `json:"time_limit_enforced" gorm:"not null;default:true;comment:Enforce time limits"`
+	AutoSubmitOnTimeout bool `json:"auto_submit_on_timeout" gorm:"not null;default:true;comment:Auto-submit when time expires"`
 
 	// Proctoring Settings
-	RequireWebcam               bool `json:"require_webcam" gorm:"default:false"`
-	PreventTabSwitching         bool `json:"prevent_tab_switching" gorm:"default:false"`
-	PreventRightClick           bool `json:"prevent_right_click" gorm:"default:false"`
-	PreventCopyPaste            bool `json:"prevent_copy_paste" gorm:"default:false"`
-	RequireIdentityVerification bool `json:"require_identity_verification" gorm:"default:false"`
-	RequireFullScreen           bool `json:"require_full_screen" gorm:"default:false"`
+	RequireWebcam               bool `json:"require_webcam" gorm:"not null;default:false;comment:Require webcam for proctoring"`
+	PreventTabSwitching         bool `json:"prevent_tab_switching" gorm:"not null;default:false;comment:Prevent switching browser tabs"`
+	PreventRightClick           bool `json:"prevent_right_click" gorm:"not null;default:false;comment:Disable right-click context menu"`
+	PreventCopyPaste            bool `json:"prevent_copy_paste" gorm:"not null;default:false;comment:Disable copy/paste functionality"`
+	RequireIdentityVerification bool `json:"require_identity_verification" gorm:"not null;default:false;comment:Require identity verification"`
+	RequireFullScreen           bool `json:"require_full_screen" gorm:"not null;default:false;comment:Force fullscreen mode"`
 
 	// Accessibility Settings
-	AllowScreenReader  bool `json:"allow_screen_reader" gorm:"default:false"`
-	FontSizeAdjustment int  `json:"font_size_adjustment" gorm:"default:0"` // -2 to +2
-	HighContrastMode   bool `json:"high_contrast_mode" gorm:"default:false"`
+	AllowScreenReader  bool `json:"allow_screen_reader" gorm:"not null;default:false;comment:Enable screen reader support"`
+	FontSizeAdjustment int  `json:"font_size_adjustment" gorm:"not null;default:0;check:font_size_adjustment >= -2 AND font_size_adjustment <= 2;comment:Font size adjustment (-2 to +2)"`
+	HighContrastMode   bool `json:"high_contrast_mode" gorm:"not null;default:false;comment:Enable high contrast display mode"`
+
+	// Relations
+	// Assessment Assessment `json:"assessment" gorm:"foreignKey:AssessmentID;references:ID"`
 }
 
 func (Assessment) TableName() string {
 	return "assessments"
+}
+
+func (AssessmentSettings) TableName() string {
+	return "assessment_settings"
 }

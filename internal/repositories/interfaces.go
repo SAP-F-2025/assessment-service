@@ -10,7 +10,7 @@ import (
 
 type AssessmentFilters struct {
 	Status    *models.AssessmentStatus `json:"status"`
-	CreatedBy *uint                    `json:"created_by"`
+	CreatedBy *string                  `json:"created_by"`
 	DateFrom  *time.Time               `json:"date_from"`
 	DateTo    *time.Time               `json:"date_to"`
 	Limit     int                      `json:"limit"`
@@ -23,7 +23,7 @@ type QuestionFilters struct {
 	Type       *models.QuestionType    `json:"type"`
 	Difficulty *models.DifficultyLevel `json:"difficulty"`
 	CategoryID *uint                   `json:"category_id"`
-	CreatedBy  *uint                   `json:"created_by"`
+	CreatedBy  *string                 `json:"created_by"`
 	Tags       []string                `json:"tags"`
 	Limit      int                     `json:"limit"`
 	Offset     int                     `json:"offset"`
@@ -41,7 +41,7 @@ type RandomQuestionFilters struct {
 
 type AttemptFilters struct {
 	Status    *models.AttemptStatus `json:"status"`
-	StudentID *uint                 `json:"student_id"`
+	StudentID *string               `json:"student_id"`
 	DateFrom  *time.Time            `json:"date_from"`
 	DateTo    *time.Time            `json:"date_to"`
 	Limit     int                   `json:"limit"`
@@ -52,7 +52,7 @@ type AttemptFilters struct {
 
 type AnswerFilters struct {
 	IsGraded *bool      `json:"is_graded"`
-	GradedBy *uint      `json:"graded_by"`
+	GradedBy *string    `json:"graded_by"`
 	DateFrom *time.Time `json:"date_from"`
 	DateTo   *time.Time `json:"date_to"`
 	Limit    int        `json:"limit"`
@@ -70,7 +70,7 @@ type AnswerGrade struct {
 	ID       uint    `json:"id"`
 	Score    float64 `json:"score"`
 	Feedback *string `json:"feedback"`
-	GraderID uint    `json:"grader_id"`
+	GraderID string  `json:"grader_id"`
 }
 
 // ===== SHARED STATISTICS STRUCTS =====
@@ -136,8 +136,8 @@ type GradingStats struct {
 type QuestionBankFilters struct {
 	IsPublic       *bool                   `json:"is_public"`
 	IsShared       *bool                   `json:"is_shared"`
-	CreatedBy      *uint                   `json:"created_by"`
-	SharedBy       *uint                   `json:"shared_by"`
+	CreatedBy      *string                 `json:"created_by"`
+	SharedBy       *string                 `json:"shared_by"`
 	Name           *string                 `json:"name"`
 	CategoryID     *uint                   `json:"category_id"`
 	Type           *models.QuestionType    `json:"type"`
@@ -154,12 +154,12 @@ type QuestionBankFilters struct {
 }
 
 type QuestionBankShareFilters struct {
-	BankID    *uint `json:"bank_id"`
-	UserID    *uint `json:"user_id"`
-	CanEdit   *bool `json:"can_edit"`
-	CanDelete *bool `json:"can_delete"`
-	Limit     int   `json:"limit"`
-	Offset    int   `json:"offset"`
+	BankID    *uint   `json:"bank_id"`
+	UserID    *string `json:"user_id"`
+	CanEdit   *bool   `json:"can_edit"`
+	CanDelete *bool   `json:"can_delete"`
+	Limit     int     `json:"limit"`
+	Offset    int     `json:"offset"`
 }
 
 type QuestionBankStats struct {

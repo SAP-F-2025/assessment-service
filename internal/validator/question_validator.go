@@ -1,4 +1,4 @@
-package utils
+package validator
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 )
 
-// QuestionValidator handles validation logic for questions
+// QuestionValidator handles question-specific validation
 type QuestionValidator struct{}
 
 // NewQuestionValidator creates a new question validator
@@ -21,13 +21,11 @@ func (v *QuestionValidator) ValidateContent(questionType models.QuestionType, co
 		return fmt.Errorf("content cannot be nil")
 	}
 
-	// Convert content to JSON for validation
 	contentBytes, err := json.Marshal(content)
 	if err != nil {
 		return fmt.Errorf("failed to marshal content: %w", err)
 	}
 
-	// Type-specific validation
 	switch questionType {
 	case models.MultipleChoice:
 		return v.validateMultipleChoiceContent(contentBytes)
@@ -50,7 +48,6 @@ func (v *QuestionValidator) ValidateContent(questionType models.QuestionType, co
 
 // ValidateQuestion validates a complete question object
 func (v *QuestionValidator) ValidateQuestion(question *models.Question) error {
-	// Basic field validation
 	if question.Text == "" {
 		return fmt.Errorf("question text is required")
 	}
@@ -59,12 +56,11 @@ func (v *QuestionValidator) ValidateQuestion(question *models.Question) error {
 		return fmt.Errorf("question points must be between 1 and 100")
 	}
 
-	// Validate content
 	return v.ValidateContent(question.Type, question.Content)
 }
 
-// ValidateQuestionBatch validates a batch of questions
-func (v *QuestionValidator) ValidateQuestionBatch(questions []*models.Question) error {
+// ValidateBatch validates multiple questions
+func (v *QuestionValidator) ValidateBatch(questions []*models.Question) error {
 	if len(questions) == 0 {
 		return fmt.Errorf("question batch cannot be empty")
 	}
@@ -78,15 +74,16 @@ func (v *QuestionValidator) ValidateQuestionBatch(questions []*models.Question) 
 	return nil
 }
 
-// Business rule validation methods
-func (v *QuestionValidator) ValidateQuestionUsage(isUsedInAssessments bool, operation string) error {
+// ValidateUsage validates question usage constraints
+func (v *QuestionValidator) ValidateUsage(isUsedInAssessments bool, operation string) error {
 	if isUsedInAssessments && operation == "delete" {
 		return fmt.Errorf("cannot delete question: it is used in active assessments")
 	}
 	return nil
 }
 
-func (v *QuestionValidator) ValidateQuestionText(text string, exists bool) error {
+// ValidateText validates question text uniqueness
+func (v *QuestionValidator) ValidateText(text string, exists bool) error {
 	if text == "" {
 		return fmt.Errorf("question text cannot be empty")
 	}
@@ -96,43 +93,44 @@ func (v *QuestionValidator) ValidateQuestionText(text string, exists bool) error
 	return nil
 }
 
-// ===== PRIVATE VALIDATION METHODS =====
+// Private validation methods for each question type
 
 func (v *QuestionValidator) validateMultipleChoiceContent(contentBytes []byte) error {
-	var mcContent models.MultipleChoiceContent
-	if err := json.Unmarshal(contentBytes, &mcContent); err != nil {
-		return fmt.Errorf("invalid multiple choice content structure: %w", err)
+	var content models.MultipleChoiceContent
+	if err := json.Unmarshal(contentBytes, &content); err != nil {
+		return fmt.Errorf("invalid multiple choice content: %w", err)
 	}
 
-	if len(mcContent.Options) < 2 {
-		return fmt.Errorf("multiple choice questions must have at least 2 options")
+	if len(content.Options) < 2 {
+		return fmt.Errorf("must have at least 2 options")
 	}
 
-	if len(mcContent.Options) > 10 {
-		return fmt.Errorf("multiple choice questions cannot have more than 10 options")
+	if len(content.Options) > 10 {
+		return fmt.Errorf("cannot have more than 10 options")
 	}
 
-	if len(mcContent.CorrectAnswers) == 0 {
-		return fmt.Errorf("multiple choice questions must have at least 1 correct answer")
+	if len(content.CorrectAnswers) == 0 {
+		return fmt.Errorf("must have at least 1 correct answer")
 	}
 
-	// Validate that all correct answers exist in options
+	// Validate option IDs and text
 	optionIDs := make(map[string]bool)
-	for _, option := range mcContent.Options {
+	for _, option := range content.Options {
 		if option.Text == "" {
 			return fmt.Errorf("option text cannot be empty")
 		}
 		optionIDs[option.ID] = true
 	}
 
-	for _, correctID := range mcContent.CorrectAnswers {
+	// Validate correct answers exist in options
+	for _, correctID := range content.CorrectAnswers {
 		if !optionIDs[correctID] {
 			return fmt.Errorf("correct answer ID '%s' does not match any option", correctID)
 		}
 	}
 
-	// If multiple correct answers, ensure MultipleCorrect is true
-	if len(mcContent.CorrectAnswers) > 1 && !mcContent.MultipleCorrect {
+	// Multiple correct answers validation
+	if len(content.CorrectAnswers) > 1 && !content.MultipleCorrect {
 		return fmt.Errorf("multiple correct answers require MultipleCorrect to be true")
 	}
 
@@ -140,30 +138,28 @@ func (v *QuestionValidator) validateMultipleChoiceContent(contentBytes []byte) e
 }
 
 func (v *QuestionValidator) validateTrueFalseContent(contentBytes []byte) error {
-	var tfContent models.TrueFalseContent
-	if err := json.Unmarshal(contentBytes, &tfContent); err != nil {
-		return fmt.Errorf("invalid true/false content structure: %w", err)
+	var content models.TrueFalseContent
+	if err := json.Unmarshal(contentBytes, &content); err != nil {
+		return fmt.Errorf("invalid true/false content: %w", err)
 	}
-
-	// True/False content is simple, just ensure it unmarshals correctly
 	return nil
 }
 
 func (v *QuestionValidator) validateEssayContent(contentBytes []byte) error {
-	var essayContent models.EssayContent
-	if err := json.Unmarshal(contentBytes, &essayContent); err != nil {
-		return fmt.Errorf("invalid essay content structure: %w", err)
+	var content models.EssayContent
+	if err := json.Unmarshal(contentBytes, &content); err != nil {
+		return fmt.Errorf("invalid essay content: %w", err)
 	}
 
-	if essayContent.MinWords != nil && essayContent.MaxWords != nil && *essayContent.MinWords > *essayContent.MaxWords {
-		return fmt.Errorf("minimum word count cannot be greater than maximum word count")
+	if content.MinWords != nil && content.MaxWords != nil && *content.MinWords > *content.MaxWords {
+		return fmt.Errorf("minimum word count cannot be greater than maximum")
 	}
 
-	if essayContent.MinWords != nil && *essayContent.MinWords < 0 {
+	if content.MinWords != nil && *content.MinWords < 0 {
 		return fmt.Errorf("minimum word count cannot be negative")
 	}
 
-	if essayContent.MaxWords != nil && *essayContent.MaxWords < 0 {
+	if content.MaxWords != nil && *content.MaxWords < 0 {
 		return fmt.Errorf("maximum word count cannot be negative")
 	}
 
@@ -171,21 +167,20 @@ func (v *QuestionValidator) validateEssayContent(contentBytes []byte) error {
 }
 
 func (v *QuestionValidator) validateFillBlankContent(contentBytes []byte) error {
-	var fillContent models.FillBlankContent
-	if err := json.Unmarshal(contentBytes, &fillContent); err != nil {
-		return fmt.Errorf("invalid fill-in-blank content structure: %w", err)
+	var content models.FillBlankContent
+	if err := json.Unmarshal(contentBytes, &content); err != nil {
+		return fmt.Errorf("invalid fill-in-blank content: %w", err)
 	}
 
-	if fillContent.Template == "" {
-		return fmt.Errorf("template is required for fill-in-blank questions")
+	if content.Template == "" {
+		return fmt.Errorf("template is required")
 	}
 
-	if len(fillContent.Blanks) == 0 {
-		return fmt.Errorf("fill-in-blank questions must have at least 1 blank")
+	if len(content.Blanks) == 0 {
+		return fmt.Errorf("must have at least 1 blank")
 	}
 
-	// Validate each blank definition
-	for blankID, blankDef := range fillContent.Blanks {
+	for blankID, blankDef := range content.Blanks {
 		if len(blankDef.AcceptedAnswers) == 0 {
 			return fmt.Errorf("blank '%s' must have at least 1 accepted answer", blankID)
 		}
@@ -198,47 +193,47 @@ func (v *QuestionValidator) validateFillBlankContent(contentBytes []byte) error 
 }
 
 func (v *QuestionValidator) validateMatchingContent(contentBytes []byte) error {
-	var matchContent models.MatchingContent
-	if err := json.Unmarshal(contentBytes, &matchContent); err != nil {
-		return fmt.Errorf("invalid matching content structure: %w", err)
+	var content models.MatchingContent
+	if err := json.Unmarshal(contentBytes, &content); err != nil {
+		return fmt.Errorf("invalid matching content: %w", err)
 	}
 
-	if len(matchContent.LeftItems) < 2 {
-		return fmt.Errorf("matching questions must have at least 2 left items")
+	if len(content.LeftItems) < 2 {
+		return fmt.Errorf("must have at least 2 left items")
 	}
 
-	if len(matchContent.RightItems) < 2 {
-		return fmt.Errorf("matching questions must have at least 2 right items")
+	if len(content.RightItems) < 2 {
+		return fmt.Errorf("must have at least 2 right items")
 	}
 
-	if len(matchContent.LeftItems) > 10 || len(matchContent.RightItems) > 10 {
-		return fmt.Errorf("matching questions cannot have more than 10 items on each side")
+	if len(content.LeftItems) > 10 || len(content.RightItems) > 10 {
+		return fmt.Errorf("cannot have more than 10 items on each side")
 	}
 
-	if len(matchContent.CorrectPairs) == 0 {
-		return fmt.Errorf("matching questions must have at least 1 correct pair")
+	if len(content.CorrectPairs) == 0 {
+		return fmt.Errorf("must have at least 1 correct pair")
 	}
 
 	// Validate item IDs and text
 	leftIDs := make(map[string]bool)
 	rightIDs := make(map[string]bool)
 
-	for _, item := range matchContent.LeftItems {
+	for _, item := range content.LeftItems {
 		if item.ID == "" || item.Text == "" {
 			return fmt.Errorf("left items must have both ID and text")
 		}
 		leftIDs[item.ID] = true
 	}
 
-	for _, item := range matchContent.RightItems {
+	for _, item := range content.RightItems {
 		if item.ID == "" || item.Text == "" {
 			return fmt.Errorf("right items must have both ID and text")
 		}
 		rightIDs[item.ID] = true
 	}
 
-	// Validate correct pairs reference existing items
-	for _, pair := range matchContent.CorrectPairs {
+	// Validate correct pairs
+	for _, pair := range content.CorrectPairs {
 		if !leftIDs[pair.LeftID] {
 			return fmt.Errorf("correct pair references non-existent left item: %s", pair.LeftID)
 		}
@@ -251,35 +246,35 @@ func (v *QuestionValidator) validateMatchingContent(contentBytes []byte) error {
 }
 
 func (v *QuestionValidator) validateOrderingContent(contentBytes []byte) error {
-	var orderContent models.OrderingContent
-	if err := json.Unmarshal(contentBytes, &orderContent); err != nil {
-		return fmt.Errorf("invalid ordering content structure: %w", err)
+	var content models.OrderingContent
+	if err := json.Unmarshal(contentBytes, &content); err != nil {
+		return fmt.Errorf("invalid ordering content: %w", err)
 	}
 
-	if len(orderContent.Items) < 2 {
-		return fmt.Errorf("ordering questions must have at least 2 items")
+	if len(content.Items) < 2 {
+		return fmt.Errorf("must have at least 2 items")
 	}
 
-	if len(orderContent.Items) > 10 {
-		return fmt.Errorf("ordering questions cannot have more than 10 items")
+	if len(content.Items) > 10 {
+		return fmt.Errorf("cannot have more than 10 items")
 	}
 
-	if len(orderContent.CorrectOrder) != len(orderContent.Items) {
+	if len(content.CorrectOrder) != len(content.Items) {
 		return fmt.Errorf("correct order must include all items exactly once")
 	}
 
 	// Validate item IDs and text
 	itemIDs := make(map[string]bool)
-	for _, item := range orderContent.Items {
+	for _, item := range content.Items {
 		if item.ID == "" || item.Text == "" {
 			return fmt.Errorf("items must have both ID and text")
 		}
 		itemIDs[item.ID] = true
 	}
 
-	// Validate correct order references all items
+	// Validate correct order
 	orderIDs := make(map[string]bool)
-	for _, orderID := range orderContent.CorrectOrder {
+	for _, orderID := range content.CorrectOrder {
 		if !itemIDs[orderID] {
 			return fmt.Errorf("correct order references non-existent item: %s", orderID)
 		}
@@ -293,27 +288,26 @@ func (v *QuestionValidator) validateOrderingContent(contentBytes []byte) error {
 }
 
 func (v *QuestionValidator) validateShortAnswerContent(contentBytes []byte) error {
-	var shortContent models.ShortAnswerContent
-	if err := json.Unmarshal(contentBytes, &shortContent); err != nil {
-		return fmt.Errorf("invalid short answer content structure: %w", err)
+	var content models.ShortAnswerContent
+	if err := json.Unmarshal(contentBytes, &content); err != nil {
+		return fmt.Errorf("invalid short answer content: %w", err)
 	}
 
-	if len(shortContent.AcceptedAnswers) == 0 {
-		return fmt.Errorf("short answer questions must have at least 1 accepted answer")
+	if len(content.AcceptedAnswers) == 0 {
+		return fmt.Errorf("must have at least 1 accepted answer")
 	}
 
-	if shortContent.MaxLength < 1 {
+	if content.MaxLength < 1 {
 		return fmt.Errorf("max length must be at least 1")
 	}
 
-	if shortContent.MaxLength > 500 {
+	if content.MaxLength > 500 {
 		return fmt.Errorf("max length cannot exceed 500 characters")
 	}
 
-	// Validate that accepted answers don't exceed max length
-	for i, answer := range shortContent.AcceptedAnswers {
-		if len(answer) > shortContent.MaxLength {
-			return fmt.Errorf("accepted answer %d exceeds max length of %d", i+1, shortContent.MaxLength)
+	for i, answer := range content.AcceptedAnswers {
+		if len(answer) > content.MaxLength {
+			return fmt.Errorf("accepted answer %d exceeds max length of %d", i+1, content.MaxLength)
 		}
 		if answer == "" {
 			return fmt.Errorf("accepted answer %d cannot be empty", i+1)

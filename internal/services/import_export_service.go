@@ -14,21 +14,21 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
-	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"github.com/xuri/excelize/v2"
 )
 
 // ImportExportService handles file import/export operations for questions and assessments
 type ImportExportService interface {
 	// Import operations
-	ImportQuestionsFromFile(ctx context.Context, file multipart.File, filename string, creatorID uint) (*ImportResult, error)
-	ImportQuestionsFromCSV(ctx context.Context, reader io.Reader, creatorID uint) (*ImportResult, error)
-	ImportQuestionsFromExcel(ctx context.Context, reader io.Reader, creatorID uint) (*ImportResult, error)
+	ImportQuestionsFromFile(ctx context.Context, file multipart.File, filename string, creatorID string) (*ImportResult, error)
+	ImportQuestionsFromCSV(ctx context.Context, reader io.Reader, creatorID string) (*ImportResult, error)
+	ImportQuestionsFromExcel(ctx context.Context, reader io.Reader, creatorID string) (*ImportResult, error)
 
 	// Export operations
-	ExportQuestionsToCSV(ctx context.Context, questionIDs []uint, userID uint) ([]byte, error)
-	ExportQuestionsToExcel(ctx context.Context, questionIDs []uint, userID uint) ([]byte, error)
-	ExportAssessmentResults(ctx context.Context, assessmentID uint, userID uint) ([]byte, error)
+	ExportQuestionsToCSV(ctx context.Context, questionIDs []uint, userID string) ([]byte, error)
+	ExportQuestionsToExcel(ctx context.Context, questionIDs []uint, userID string) ([]byte, error)
+	ExportAssessmentResults(ctx context.Context, assessmentID uint, userID string) ([]byte, error)
 
 	// Job management
 	GetImportJob(ctx context.Context, jobID string) (*models.ImportJob, error)
@@ -38,10 +38,10 @@ type ImportExportService interface {
 type importExportService struct {
 	repo      repositories.Repository
 	logger    *slog.Logger
-	validator *utils.Validator
+	validator *validator.Validator
 }
 
-func NewImportExportService(repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) ImportExportService {
+func NewImportExportService(repo repositories.Repository, logger *slog.Logger, validator *validator.Validator) ImportExportService {
 	return &importExportService{
 		repo:      repo,
 		logger:    logger,
@@ -62,7 +62,7 @@ type ImportResult struct {
 	Status        models.ImportJobStatus         `json:"status"`
 }
 
-func (s *importExportService) ImportQuestionsFromFile(ctx context.Context, file multipart.File, filename string, creatorID uint) (*ImportResult, error) {
+func (s *importExportService) ImportQuestionsFromFile(ctx context.Context, file multipart.File, filename string, creatorID string) (*ImportResult, error) {
 	s.logger.Info("Starting file import", "filename", filename, "creator_id", creatorID)
 
 	ext := strings.ToLower(filepath.Ext(filename))
@@ -77,7 +77,7 @@ func (s *importExportService) ImportQuestionsFromFile(ctx context.Context, file 
 	}
 }
 
-func (s *importExportService) ImportQuestionsFromCSV(ctx context.Context, reader io.Reader, creatorID uint) (*ImportResult, error) {
+func (s *importExportService) ImportQuestionsFromCSV(ctx context.Context, reader io.Reader, creatorID string) (*ImportResult, error) {
 	csvReader := csv.NewReader(reader)
 	csvReader.TrimLeadingSpace = true
 
@@ -146,7 +146,7 @@ func (s *importExportService) ImportQuestionsFromCSV(ctx context.Context, reader
 	return result, nil
 }
 
-func (s *importExportService) ImportQuestionsFromExcel(ctx context.Context, reader io.Reader, creatorID uint) (*ImportResult, error) {
+func (s *importExportService) ImportQuestionsFromExcel(ctx context.Context, reader io.Reader, creatorID string) (*ImportResult, error) {
 	// Read file into memory
 	data, err := io.ReadAll(reader)
 	if err != nil {
@@ -225,7 +225,7 @@ func (s *importExportService) ImportQuestionsFromExcel(ctx context.Context, read
 
 // ===== EXPORT OPERATIONS =====
 
-func (s *importExportService) ExportQuestionsToCSV(ctx context.Context, questionIDs []uint, userID uint) ([]byte, error) {
+func (s *importExportService) ExportQuestionsToCSV(ctx context.Context, questionIDs []uint, userID string) ([]byte, error) {
 	questions, err := s.getQuestionsForExport(ctx, questionIDs, userID)
 	if err != nil {
 		return nil, err
@@ -259,7 +259,7 @@ func (s *importExportService) ExportQuestionsToCSV(ctx context.Context, question
 	return []byte(buf.String()), nil
 }
 
-func (s *importExportService) ExportQuestionsToExcel(ctx context.Context, questionIDs []uint, userID uint) ([]byte, error) {
+func (s *importExportService) ExportQuestionsToExcel(ctx context.Context, questionIDs []uint, userID string) ([]byte, error) {
 	questions, err := s.getQuestionsForExport(ctx, questionIDs, userID)
 	if err != nil {
 		return nil, err
@@ -304,7 +304,7 @@ func (s *importExportService) ExportQuestionsToExcel(ctx context.Context, questi
 	return buf.Bytes(), nil
 }
 
-func (s *importExportService) ExportAssessmentResults(ctx context.Context, assessmentID uint, userID uint) ([]byte, error) {
+func (s *importExportService) ExportAssessmentResults(ctx context.Context, assessmentID uint, userID string) ([]byte, error) {
 	// Check permission
 	assessmentService := NewAssessmentService(s.repo, nil, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)
@@ -408,7 +408,7 @@ func (s *importExportService) ProcessImportJobAsync(ctx context.Context, jobID s
 
 // ===== HELPER FUNCTIONS =====
 
-func (s *importExportService) parseCSVRow(record []string, headerMap map[string]int, rowNum int, creatorID uint) (*models.Question, []models.ImportValidationError) {
+func (s *importExportService) parseCSVRow(record []string, headerMap map[string]int, rowNum int, creatorID string) (*models.Question, []models.ImportValidationError) {
 	var errors []models.ImportValidationError
 
 	// Helper function to get column value
@@ -510,7 +510,7 @@ func (s *importExportService) parseCSVRow(record []string, headerMap map[string]
 	return question, errors
 }
 
-func (s *importExportService) parseExcelRow(record []string, headerMap map[string]int, rowNum int, creatorID uint) (*models.Question, []models.ImportValidationError) {
+func (s *importExportService) parseExcelRow(record []string, headerMap map[string]int, rowNum int, creatorID string) (*models.Question, []models.ImportValidationError) {
 	// Excel parsing is similar to CSV, just different input format
 	return s.parseCSVRow(record, headerMap, rowNum, creatorID)
 }
@@ -639,7 +639,7 @@ func (s *importExportService) saveImportedQuestions(ctx context.Context, questio
 	return nil
 }
 
-func (s *importExportService) getQuestionsForExport(ctx context.Context, questionIDs []uint, userID uint) ([]*models.Question, error) {
+func (s *importExportService) getQuestionsForExport(ctx context.Context, questionIDs []uint, userID string) ([]*models.Question, error) {
 	var questions []*models.Question
 
 	for _, questionID := range questionIDs {

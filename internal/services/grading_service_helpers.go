@@ -72,7 +72,7 @@ func (s *gradingService) GenerateFeedback(ctx context.Context, questionType mode
 
 // ===== BULK OPERATIONS =====
 
-func (s *gradingService) ReGradeQuestion(ctx context.Context, questionID uint, userID uint) ([]GradingResult, error) {
+func (s *gradingService) ReGradeQuestion(ctx context.Context, questionID uint, userID string) ([]GradingResult, error) {
 	s.logger.Info("Re-grading all answers for question", "question_id", questionID, "user_id", userID)
 
 	// Check permission to regrade (must be able to access question)
@@ -110,7 +110,7 @@ func (s *gradingService) ReGradeQuestion(ctx context.Context, questionID uint, u
 	return results, nil
 }
 
-func (s *gradingService) ReGradeAssessment(ctx context.Context, assessmentID uint, userID uint) (map[uint]*AttemptGradingResult, error) {
+func (s *gradingService) ReGradeAssessment(ctx context.Context, assessmentID uint, userID string) (map[uint]*AttemptGradingResult, error) {
 	s.logger.Info("Re-grading all attempts for assessment", "assessment_id", assessmentID, "user_id", userID)
 
 	// Check permission
@@ -152,7 +152,7 @@ func (s *gradingService) ReGradeAssessment(ctx context.Context, assessmentID uin
 
 // ===== STATISTICS =====
 
-func (s *gradingService) GetGradingOverview(ctx context.Context, assessmentID uint, userID uint) (*repositories.GradingStats, error) {
+func (s *gradingService) GetGradingOverview(ctx context.Context, assessmentID uint, userID string) (*repositories.GradingStats, error) {
 	// Check permission
 	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)
@@ -481,7 +481,7 @@ func (s *gradingService) generateOrderingFeedback(questionContent json.RawMessag
 
 // ===== HELPER FUNCTIONS =====
 
-func (s *gradingService) checkGradingPermission(ctx context.Context, answer *models.StudentAnswer, graderID uint) error {
+func (s *gradingService) checkGradingPermission(ctx context.Context, answer *models.StudentAnswer, graderID string) error {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, graderID)
 	if err != nil {
@@ -506,7 +506,7 @@ func (s *gradingService) checkGradingPermission(ctx context.Context, answer *mod
 	return nil
 }
 
-func (s *gradingService) getUserRole(ctx context.Context, userID uint) (models.UserRole, error) {
+func (s *gradingService) getUserRole(ctx context.Context, userID string) (models.UserRole, error) {
 	user, err := s.repo.User().GetByID(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get user: %w", err)
@@ -558,7 +558,7 @@ func (s *gradingService) calculateLetterGrade(percentage float64) string {
 	}
 }
 
-func (s *gradingService) gradeAnswerInTransaction(ctx context.Context, tx *gorm.DB, answerID uint, score float64, feedback *string, graderID uint) (*GradingResult, error) {
+func (s *gradingService) gradeAnswerInTransaction(ctx context.Context, tx *gorm.DB, answerID uint, score float64, feedback *string, graderID string) (*GradingResult, error) {
 	// Get answer
 	answer, err := s.repo.Answer().GetByIDWithDetails(ctx, tx, answerID)
 	if err != nil {

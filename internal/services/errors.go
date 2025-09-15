@@ -3,6 +3,8 @@ package services
 import (
 	"errors"
 	"fmt"
+
+	apperrors "github.com/SAP-F-2025/assessment-service/internal/errors"
 )
 
 // ===== COMMON SERVICE ERRORS =====
@@ -67,23 +69,9 @@ var (
 
 // ===== CUSTOM ERROR TYPES =====
 
-type ValidationError struct {
-	Field   string      `json:"field"`
-	Message string      `json:"message"`
-	Value   interface{} `json:"value,omitempty"`
-}
-
-type ValidationErrors []ValidationError
-
-func (ve ValidationErrors) Error() string {
-	if len(ve) == 0 {
-		return "validation failed"
-	}
-	if len(ve) == 1 {
-		return fmt.Sprintf("validation failed: %s %s", ve[0].Field, ve[0].Message)
-	}
-	return fmt.Sprintf("validation failed: %d field errors", len(ve))
-}
+// Use shared validation errors from errors package
+type ValidationError = apperrors.ValidationError
+type ValidationErrors = apperrors.ValidationErrors
 
 type BusinessRuleError struct {
 	Rule    string                 `json:"rule"`
@@ -96,7 +84,7 @@ func (bre *BusinessRuleError) Error() string {
 }
 
 type PermissionError struct {
-	UserID     uint   `json:"user_id"`
+	UserID     string `json:"user_id"`
 	ResourceID uint   `json:"resource_id"`
 	Resource   string `json:"resource"`
 	Action     string `json:"action"`
@@ -104,22 +92,15 @@ type PermissionError struct {
 }
 
 func (pe *PermissionError) Error() string {
-	return fmt.Sprintf("permission denied: user %d cannot %s %s %d - %s",
+	return fmt.Sprintf("permission denied: user %s cannot %s %s %d - %s",
 		pe.UserID, pe.Action, pe.Resource, pe.ResourceID, pe.Reason)
-}
-
-func (pe *ValidationError) Error() string {
-	return fmt.Sprintf("validation error on field '%s': %s", pe.Field, pe.Message)
 }
 
 // ===== ERROR HELPERS =====
 
+// NewValidationError creates a new validation error using the shared type
 func NewValidationError(field, message string, value interface{}) *ValidationError {
-	return &ValidationError{
-		Field:   field,
-		Message: message,
-		Value:   value,
-	}
+	return apperrors.NewValidationError(field, message, value)
 }
 
 func NewBusinessRuleError(rule, message string, context map[string]interface{}) *BusinessRuleError {
@@ -130,7 +111,7 @@ func NewBusinessRuleError(rule, message string, context map[string]interface{}) 
 	}
 }
 
-func NewPermissionError(userID, resourceID uint, resource, action, reason string) *PermissionError {
+func NewPermissionError(userID string, resourceID uint, resource, action, reason string) *PermissionError {
 	return &PermissionError{
 		UserID:     userID,
 		ResourceID: resourceID,
@@ -164,7 +145,7 @@ func IsValidation(err error) bool {
 	if errors.Is(err, ErrValidationFailed) {
 		return true
 	}
-	var ve ValidationErrors
+	var ve apperrors.ValidationErrors
 	return errors.As(err, &ve)
 }
 

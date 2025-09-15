@@ -10,13 +10,14 @@ import (
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/services"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"github.com/gin-gonic/gin"
 )
 
 type GradingHandler struct {
 	BaseHandler
 	gradingService services.GradingService
-	validator      *utils.Validator
+	validator      *validator.Validator
 }
 
 type GradeAnswerRequest struct {
@@ -30,7 +31,7 @@ type GradeMultipleAnswersRequest struct {
 
 func NewGradingHandler(
 	gradingService services.GradingService,
-	validator *utils.Validator,
+	validator *validator.Validator,
 	logger utils.Logger,
 ) *GradingHandler {
 	return &GradingHandler{
@@ -85,7 +86,7 @@ func (h *GradingHandler) GradeAnswer(c *gin.Context) {
 		})
 		return
 	}
-	result, err := h.gradingService.GradeAnswer(c.Request.Context(), answerID, req.Score, req.Feedback, userID.(uint))
+	result, err := h.gradingService.GradeAnswer(c.Request.Context(), answerID, req.Score, req.Feedback, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -121,7 +122,7 @@ func (h *GradingHandler) GradeAttempt(c *gin.Context) {
 		})
 		return
 	}
-	result, err := h.gradingService.GradeAttempt(c.Request.Context(), attemptID, userID.(uint))
+	result, err := h.gradingService.GradeAttempt(c.Request.Context(), attemptID, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -168,7 +169,7 @@ func (h *GradingHandler) GradeMultipleAnswers(c *gin.Context) {
 		})
 		return
 	}
-	results, err := h.gradingService.GradeMultipleAnswers(c.Request.Context(), req.Grades, userID.(uint))
+	results, err := h.gradingService.GradeMultipleAnswers(c.Request.Context(), req.Grades, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -431,7 +432,7 @@ func (h *GradingHandler) ReGradeQuestion(c *gin.Context) {
 		})
 		return
 	}
-	results, err := h.gradingService.ReGradeQuestion(c.Request.Context(), questionID, userID.(uint))
+	results, err := h.gradingService.ReGradeQuestion(c.Request.Context(), questionID, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -467,7 +468,7 @@ func (h *GradingHandler) ReGradeAssessment(c *gin.Context) {
 		})
 		return
 	}
-	results, err := h.gradingService.ReGradeAssessment(c.Request.Context(), assessmentID, userID.(uint))
+	results, err := h.gradingService.ReGradeAssessment(c.Request.Context(), assessmentID, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -503,7 +504,7 @@ func (h *GradingHandler) GetGradingOverview(c *gin.Context) {
 		})
 		return
 	}
-	overview, err := h.gradingService.GetGradingOverview(c.Request.Context(), assessmentID, userID.(uint))
+	overview, err := h.gradingService.GetGradingOverview(c.Request.Context(), assessmentID, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -514,15 +515,15 @@ func (h *GradingHandler) GetGradingOverview(c *gin.Context) {
 
 // Helper methods
 
-func (h *GradingHandler) getUserID(c *gin.Context) uint {
+func (h *GradingHandler) getUserID(c *gin.Context) string {
 	userID, exists := c.Get("user_id")
 	if !exists {
-		return 0
+		return ""
 	}
-	if id, ok := userID.(uint); ok {
+	if id, ok := userID.(string); ok {
 		return id
 	}
-	return 0
+	return ""
 }
 
 func (h *GradingHandler) parseIDParam(c *gin.Context, param string) uint {

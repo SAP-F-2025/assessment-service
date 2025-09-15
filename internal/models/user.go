@@ -18,21 +18,21 @@ const (
 )
 
 type User struct {
-	ID       uint     `json:"id" gorm:"primaryKey"`
+	ID       string   `json:"id" gorm:"primaryKey;size:255"`
 	FullName string   `json:"full_name" gorm:"not null;size:100"`
 	Email    string   `json:"email" gorm:"uniqueIndex;not null;size:255"`
-	Role     UserRole `json:"role" gorm:"not null;index"`
+	Role     UserRole `json:"role" gorm:"-"`
 
 	// Profile info
 	AvatarURL    *string `json:"avatar_url" gorm:"size:500"`
 	PhoneNumber  *string `json:"phone_number" gorm:"size:20"`
-	Organization *string `json:"organization" gorm:"size:100"`
-	Department   *string `json:"department" gorm:"size:100"`
+	Organization *string `json:"organization" gorm:"-"`
+	Department   *string `json:"department" gorm:"-"`
 
 	// Settings
-	Timezone    string         `json:"timezone" gorm:"default:UTC;size:50"`
+	Timezone    string         `json:"timezone" gorm:"-"`
 	Language    string         `json:"language" gorm:"default:en;size:10"`
-	Preferences datatypes.JSON `json:"preferences" gorm:"type:jsonb"`
+	Preferences datatypes.JSON `json:"preferences" gorm:"-"`
 
 	// Status
 	IsActive      bool       `json:"is_active" gorm:"default:true"`

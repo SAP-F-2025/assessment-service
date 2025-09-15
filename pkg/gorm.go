@@ -24,5 +24,13 @@ func InitDatabase(cfg *config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
+	//err = db.AutoMigrate(&models.Question{}, &models.QuestionBank{},
+	//	&models.Assessment{}, &models.AssessmentQuestion{}, &models.QuestionBankShare{}, &models.AssessmentSettings{},
+	//	&models.AssessmentAttempt{}, &models.StudentAnswer{}, &models.QuestionCategory{}, &models.QuestionAttachment{},
+	//	&models.ImportJob{})
+	//if err != nil {
+	//	return nil, err
+	//}
+
 	return db, nil
 }

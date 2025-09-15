@@ -9,7 +9,7 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
-	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"gorm.io/gorm"
 )
 
@@ -17,10 +17,10 @@ type attemptService struct {
 	repo      repositories.Repository
 	db        *gorm.DB
 	logger    *slog.Logger
-	validator *utils.Validator
+	validator *validator.Validator
 }
 
-func NewAttemptService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *utils.Validator) AttemptService {
+func NewAttemptService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *validator.Validator) AttemptService {
 	return &attemptService{
 		repo:      repo,
 		db:        db,
@@ -31,7 +31,7 @@ func NewAttemptService(repo repositories.Repository, db *gorm.DB, logger *slog.L
 
 // ===== CORE ATTEMPT OPERATIONS =====
 
-func (s *attemptService) Start(ctx context.Context, req *StartAttemptRequest, studentID uint) (*AttemptResponse, error) {
+func (s *attemptService) Start(ctx context.Context, req *StartAttemptRequest, studentID string) (*AttemptResponse, error) {
 	s.logger.Info("Starting assessment attempt",
 		"assessment_id", req.AssessmentID,
 		"student_id", studentID)
@@ -112,7 +112,7 @@ func (s *attemptService) Start(ctx context.Context, req *StartAttemptRequest, st
 	return s.GetByIDWithDetails(ctx, attempt.ID, studentID)
 }
 
-func (s *attemptService) Resume(ctx context.Context, attemptID uint, studentID uint) (*AttemptResponse, error) {
+func (s *attemptService) Resume(ctx context.Context, attemptID uint, studentID string) (*AttemptResponse, error) {
 	s.logger.Info("Resuming assessment attempt",
 		"attempt_id", attemptID,
 		"student_id", studentID)
@@ -151,7 +151,7 @@ func (s *attemptService) Resume(ctx context.Context, attemptID uint, studentID u
 	return s.GetByIDWithDetails(ctx, attemptID, studentID)
 }
 
-func (s *attemptService) Submit(ctx context.Context, req *SubmitAttemptRequest, studentID uint) (*AttemptResponse, error) {
+func (s *attemptService) Submit(ctx context.Context, req *SubmitAttemptRequest, studentID string) (*AttemptResponse, error) {
 	s.logger.Info("Submitting assessment attempt",
 		"attempt_id", req.AttemptID,
 		"student_id", studentID,
@@ -231,7 +231,7 @@ func timePtr(now time.Time) *time.Time {
 	return &now
 }
 
-func (s *attemptService) SubmitAnswer(ctx context.Context, attemptID uint, req *SubmitAnswerRequest, studentID uint) error {
+func (s *attemptService) SubmitAnswer(ctx context.Context, attemptID uint, req *SubmitAnswerRequest, studentID string) error {
 	s.logger.Info("Submitting answer",
 		"attempt_id", attemptID,
 		"question_id", req.QuestionID,
@@ -280,7 +280,7 @@ func (s *attemptService) SubmitAnswer(ctx context.Context, attemptID uint, req *
 
 // ===== GET OPERATIONS =====
 
-func (s *attemptService) GetByID(ctx context.Context, id uint, userID uint) (*AttemptResponse, error) {
+func (s *attemptService) GetByID(ctx context.Context, id uint, userID string) (*AttemptResponse, error) {
 	// Get attempt
 	attempt, err := s.repo.Attempt().GetByID(ctx, s.db, id)
 	if err != nil {
@@ -302,7 +302,7 @@ func (s *attemptService) GetByID(ctx context.Context, id uint, userID uint) (*At
 	return s.buildAttemptResponse(ctx, attempt, userID, false), nil
 }
 
-func (s *attemptService) GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*AttemptResponse, error) {
+func (s *attemptService) GetByIDWithDetails(ctx context.Context, id uint, userID string) (*AttemptResponse, error) {
 	// Get attempt with details
 	attempt, err := s.repo.Attempt().GetByIDWithDetails(ctx, s.db, id)
 	if err != nil {
@@ -324,9 +324,9 @@ func (s *attemptService) GetByIDWithDetails(ctx context.Context, id uint, userID
 	return s.buildAttemptResponse(ctx, attempt, userID, true), nil
 }
 
-func (s *attemptService) GetCurrentAttempt(ctx context.Context, assessmentID uint, studentID uint) (*AttemptResponse, error) {
+func (s *attemptService) GetCurrentAttempt(ctx context.Context, assessmentID uint, studentID string) (*AttemptResponse, error) {
 	// Get current attempt for student
-	attempt, err := s.repo.Attempt().GetActiveAttempt(ctx, nil, assessmentID, studentID)
+	attempt, err := s.repo.Attempt().GetActiveAttempt(ctx, nil, studentID, assessmentID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return nil, ErrAttemptNotFound
@@ -339,7 +339,7 @@ func (s *attemptService) GetCurrentAttempt(ctx context.Context, assessmentID uin
 
 // ===== LIST OPERATIONS =====
 
-func (s *attemptService) List(ctx context.Context, filters repositories.AttemptFilters, userID uint) ([]*AttemptResponse, int64, error) {
+func (s *attemptService) List(ctx context.Context, filters repositories.AttemptFilters, userID string) ([]*AttemptResponse, int64, error) {
 	// Get user role for permission filtering
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -365,7 +365,7 @@ func (s *attemptService) List(ctx context.Context, filters repositories.AttemptF
 	return responses, total, nil
 }
 
-func (s *attemptService) GetByStudent(ctx context.Context, studentID uint, filters repositories.AttemptFilters) ([]*AttemptResponse, int64, error) {
+func (s *attemptService) GetByStudent(ctx context.Context, studentID string, filters repositories.AttemptFilters) ([]*AttemptResponse, int64, error) {
 	// Set student filter
 	filters.StudentID = &studentID
 
@@ -383,7 +383,7 @@ func (s *attemptService) GetByStudent(ctx context.Context, studentID uint, filte
 	return responses, total, nil
 }
 
-func (s *attemptService) GetByAssessment(ctx context.Context, assessmentID uint, filters repositories.AttemptFilters, userID uint) ([]*AttemptResponse, int64, error) {
+func (s *attemptService) GetByAssessment(ctx context.Context, assessmentID uint, filters repositories.AttemptFilters, userID string) ([]*AttemptResponse, int64, error) {
 	// Check if user can access assessment attempts
 	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)

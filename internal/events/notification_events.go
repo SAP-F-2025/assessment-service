@@ -47,15 +47,15 @@ type AssessmentPublishedEvent struct {
 	AssessmentTitle string     `json:"assessment_title"`
 	DueDate         *time.Time `json:"due_date,omitempty"`
 	Duration        int        `json:"duration"` // minutes
-	StudentIDs      []uint     `json:"student_ids"`
-	CreatorID       uint       `json:"creator_id"`
+	StudentIDs      []string   `json:"student_ids"`
+	CreatorID       string     `json:"creator_id"`
 }
 
 type AssessmentExpiringEvent struct {
 	AssessmentID    uint      `json:"assessment_id"`
 	AssessmentTitle string    `json:"assessment_title"`
 	HoursRemaining  int       `json:"hours_remaining"`
-	StudentIDs      []uint    `json:"student_ids"`
+	StudentIDs      []string  `json:"student_ids"`
 	DueDate         time.Time `json:"due_date"`
 }
 
@@ -63,8 +63,8 @@ type AssessmentExpiredEvent struct {
 	AssessmentID    uint      `json:"assessment_id"`
 	AssessmentTitle string    `json:"assessment_title"`
 	ExpiredAt       time.Time `json:"expired_at"`
-	StudentIDs      []uint    `json:"student_ids"`
-	CreatorID       uint      `json:"creator_id"`
+	StudentIDs      []string  `json:"student_ids"`
+	CreatorID       string    `json:"creator_id"`
 }
 
 // Attempt notification event payloads
@@ -73,7 +73,7 @@ type AttemptStartedEvent struct {
 	AttemptID       uint      `json:"attempt_id"`
 	AssessmentID    uint      `json:"assessment_id"`
 	AssessmentTitle string    `json:"assessment_title"`
-	StudentID       uint      `json:"student_id"`
+	StudentID       string    `json:"student_id"`
 	StartedAt       time.Time `json:"started_at"`
 	TimeLimit       *int      `json:"time_limit,omitempty"` // minutes
 }
@@ -82,7 +82,7 @@ type AttemptSubmittedEvent struct {
 	AttemptID       uint      `json:"attempt_id"`
 	AssessmentID    uint      `json:"assessment_id"`
 	AssessmentTitle string    `json:"assessment_title"`
-	StudentID       uint      `json:"student_id"`
+	StudentID       string    `json:"student_id"`
 	SubmittedAt     time.Time `json:"submitted_at"`
 	Score           *float64  `json:"score,omitempty"`
 	Passed          *bool     `json:"passed,omitempty"`
@@ -93,20 +93,20 @@ type AttemptGradedEvent struct {
 	AttemptID       uint      `json:"attempt_id"`
 	AssessmentID    uint      `json:"assessment_id"`
 	AssessmentTitle string    `json:"assessment_title"`
-	StudentID       uint      `json:"student_id"`
+	StudentID       string    `json:"student_id"`
 	GradedAt        time.Time `json:"graded_at"`
 	Score           float64   `json:"score"`
 	MaxScore        int       `json:"max_score"`
 	Percentage      float64   `json:"percentage"`
 	Passed          bool      `json:"passed"`
-	GraderID        uint      `json:"grader_id"`
+	GraderID        string    `json:"grader_id"`
 }
 
 type AttemptTimeWarningEvent struct {
 	AttemptID        uint      `json:"attempt_id"`
 	AssessmentID     uint      `json:"assessment_id"`
 	AssessmentTitle  string    `json:"assessment_title"`
-	StudentID        uint      `json:"student_id"`
+	StudentID        string    `json:"student_id"`
 	MinutesRemaining int       `json:"minutes_remaining"`
 	WarningTime      time.Time `json:"warning_time"`
 }
@@ -120,7 +120,7 @@ type GradingCompletedEvent struct {
 	TotalAttempts     int       `json:"total_attempts"`
 	AutoGradedCount   int       `json:"auto_graded_count"`
 	ManualGradedCount int       `json:"manual_graded_count"`
-	CreatorID         uint      `json:"creator_id"`
+	CreatorID         string    `json:"creator_id"`
 }
 
 type ManualGradingRequiredEvent struct {
@@ -129,8 +129,8 @@ type ManualGradingRequiredEvent struct {
 	RequiredAt        time.Time `json:"required_at"`
 	QuestionCount     int       `json:"question_count"`
 	PendingAttemptIDs []uint    `json:"pending_attempt_ids"`
-	CreatorID         uint      `json:"creator_id"`
-	GraderIDs         []uint    `json:"grader_ids"`
+	CreatorID         string    `json:"creator_id"`
+	GraderIDs         []string  `json:"grader_ids"`
 }
 
 // System notification event payload
@@ -144,12 +144,12 @@ type BulkNotificationEvent struct {
 	ActionURL    *string                     `json:"action_url,omitempty"`
 	Metadata     map[string]interface{}      `json:"metadata,omitempty"`
 	ScheduledAt  *time.Time                  `json:"scheduled_at,omitempty"`
-	SenderID     uint                        `json:"sender_id"`
+	SenderID     string                      `json:"sender_id"`
 }
 
 // Event factory functions
 
-func NewAssessmentPublishedEvent(assessmentID uint, title string, dueDate *time.Time, duration int, studentIDs []uint, creatorID uint) *NotificationEvent {
+func NewAssessmentPublishedEvent(assessmentID uint, title string, dueDate *time.Time, duration int, studentIDs []string, creatorID string) *NotificationEvent {
 	return &NotificationEvent{
 		ID:        generateEventID(),
 		Type:      EventAssessmentPublished,
@@ -167,7 +167,7 @@ func NewAssessmentPublishedEvent(assessmentID uint, title string, dueDate *time.
 	}
 }
 
-func NewAttemptStartedEvent(attemptID, assessmentID uint, title string, studentID uint, startedAt time.Time, timeLimit *int) *NotificationEvent {
+func NewAttemptStartedEvent(attemptID, assessmentID uint, title string, studentID string, startedAt time.Time, timeLimit *int) *NotificationEvent {
 	return &NotificationEvent{
 		ID:        generateEventID(),
 		Type:      EventAttemptStarted,
@@ -185,7 +185,7 @@ func NewAttemptStartedEvent(attemptID, assessmentID uint, title string, studentI
 	}
 }
 
-func NewBulkNotificationEvent(recipientIDs []uint, notificationType models.NotificationType, title, message string, priority models.NotificationPriority, actionURL *string, metadata map[string]interface{}, scheduledAt *time.Time, senderID uint) *NotificationEvent {
+func NewBulkNotificationEvent(recipientIDs []uint, notificationType models.NotificationType, title, message string, priority models.NotificationPriority, actionURL *string, metadata map[string]interface{}, scheduledAt *time.Time, senderID string) *NotificationEvent {
 	return &NotificationEvent{
 		ID:        generateEventID(),
 		Type:      EventBulkNotification,

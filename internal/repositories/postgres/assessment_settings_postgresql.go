@@ -5,13 +5,17 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/cache"
 	"github.com/SAP-F-2025/assessment-service/internal/models"
+	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"gorm.io/gorm"
 )
 
 type AssessmentSettingsPostgreSQL struct {
 	db           *gorm.DB
-	helpers      *SharedHelpers
 	cacheManager *cache.CacheManager
+}
+
+func NewAssessmentSettingsPostgreSQL(db *gorm.DB, cacheManager *cache.CacheManager) repositories.AssessmentSettingsRepository {
+	return &AssessmentSettingsPostgreSQL{db: db, cacheManager: cacheManager}
 }
 
 func (a AssessmentSettingsPostgreSQL) Create(ctx context.Context, tx *gorm.DB, settings *models.AssessmentSettings) error {

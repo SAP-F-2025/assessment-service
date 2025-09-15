@@ -34,8 +34,8 @@ type Notification struct {
 	Message string           `json:"message" gorm:"type:text"`
 
 	// Recipients
-	RecipientID   *uint     `json:"recipient_id" gorm:"index"` // null for broadcast
-	RecipientRole *UserRole `json:"recipient_role"`            // null for specific user
+	RecipientID   *string   `json:"recipient_id" gorm:"index;size:255"` // null for broadcast
+	RecipientRole *UserRole `json:"recipient_role"`                     // null for specific user
 
 	// Related entities
 	AssessmentID *uint `json:"assessment_id" gorm:"index"`
@@ -55,7 +55,7 @@ type Notification struct {
 	ExpiresAt    *time.Time `json:"expires_at"`
 
 	CreatedAt time.Time `json:"created_at"`
-	CreatedBy uint      `json:"created_by" gorm:"not null"`
+	CreatedBy string    `json:"created_by" gorm:"not null;size:255"`
 
 	// Relations
 	Recipient  *User              `json:"recipient" gorm:"foreignKey:RecipientID"`

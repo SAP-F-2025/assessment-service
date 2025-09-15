@@ -58,7 +58,7 @@ func (h *QuestionBankHandler) CreateQuestionBank(c *gin.Context) {
 		return
 	}
 
-	response, err := h.service.Create(c.Request.Context(), &req, userID.(uint))
+	response, err := h.service.Create(c.Request.Context(), &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -98,7 +98,7 @@ func (h *QuestionBankHandler) GetQuestionBank(c *gin.Context) {
 		return
 	}
 
-	response, err := h.service.GetByID(c.Request.Context(), uint(id), userID.(uint))
+	response, err := h.service.GetByID(c.Request.Context(), uint(id), userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -138,7 +138,7 @@ func (h *QuestionBankHandler) GetQuestionBankWithDetails(c *gin.Context) {
 		return
 	}
 
-	response, err := h.service.GetByIDWithDetails(c.Request.Context(), uint(id), userID.(uint))
+	response, err := h.service.GetByIDWithDetails(c.Request.Context(), uint(id), userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -189,7 +189,7 @@ func (h *QuestionBankHandler) UpdateQuestionBank(c *gin.Context) {
 		return
 	}
 
-	response, err := h.service.Update(c.Request.Context(), uint(id), &req, userID.(uint))
+	response, err := h.service.Update(c.Request.Context(), uint(id), &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -229,7 +229,7 @@ func (h *QuestionBankHandler) DeleteQuestionBank(c *gin.Context) {
 		return
 	}
 
-	err = h.service.Delete(c.Request.Context(), uint(id), userID.(uint))
+	err = h.service.Delete(c.Request.Context(), uint(id), userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -269,7 +269,7 @@ func (h *QuestionBankHandler) ListQuestionBanks(c *gin.Context) {
 	}
 
 	filters := h.parseQuestionBankFilters(c)
-	response, err := h.service.List(c.Request.Context(), filters, userID.(uint))
+	response, err := h.service.List(c.Request.Context(), filters, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -330,7 +330,7 @@ func (h *QuestionBankHandler) GetSharedQuestionBanksOLD(c *gin.Context) {
 	}
 
 	filters := h.parseQuestionBankFilters(c)
-	response, err := h.service.GetSharedWithUser(c.Request.Context(), userID.(uint), filters)
+	response, err := h.service.GetSharedWithUser(c.Request.Context(), userID.(string), filters)
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -376,7 +376,7 @@ func (h *QuestionBankHandler) SearchQuestionBanks(c *gin.Context) {
 	}
 
 	filters := h.parseQuestionBankFilters(c)
-	response, err := h.service.Search(c.Request.Context(), query, filters, userID.(uint))
+	response, err := h.service.Search(c.Request.Context(), query, filters, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -429,7 +429,7 @@ func (h *QuestionBankHandler) ShareQuestionBank(c *gin.Context) {
 		return
 	}
 
-	err = h.service.ShareBank(c.Request.Context(), uint(id), &req, userID.(uint))
+	err = h.service.ShareBank(c.Request.Context(), uint(id), &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -464,11 +464,8 @@ func (h *QuestionBankHandler) UnshareQuestionBank(c *gin.Context) {
 		return
 	}
 
-	targetUserID, err := strconv.ParseUint(c.Param("user_id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Message: "Invalid user ID",
-		})
+	targetUserId := ParseStringIDParam(c, "user_id")
+	if targetUserId == "" {
 		return
 	}
 
@@ -480,7 +477,7 @@ func (h *QuestionBankHandler) UnshareQuestionBank(c *gin.Context) {
 		return
 	}
 
-	err = h.service.UnshareBank(c.Request.Context(), uint(id), uint(targetUserID), userID.(uint))
+	err = h.service.UnshareBank(c.Request.Context(), uint(id), targetUserId, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -516,11 +513,8 @@ func (h *QuestionBankHandler) UpdateSharePermissions(c *gin.Context) {
 		return
 	}
 
-	targetUserID, err := strconv.ParseUint(c.Param("user_id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Message: "Invalid user ID",
-		})
+	targetUserID := ParseStringIDParam(c, "user_id")
+	if targetUserID == "" {
 		return
 	}
 
@@ -541,7 +535,7 @@ func (h *QuestionBankHandler) UpdateSharePermissions(c *gin.Context) {
 		return
 	}
 
-	err = h.service.UpdateSharePermissions(c.Request.Context(), uint(id), uint(targetUserID), req.CanEdit, req.CanDelete, userID.(uint))
+	err = h.service.UpdateSharePermissions(c.Request.Context(), uint(id), targetUserID, req.CanEdit, req.CanDelete, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -583,7 +577,7 @@ func (h *QuestionBankHandler) GetQuestionBankSharesOLD(c *gin.Context) {
 		return
 	}
 
-	shares, err := h.service.GetBankShares(c.Request.Context(), uint(id), userID.(uint))
+	shares, err := h.service.GetBankShares(c.Request.Context(), uint(id), userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -635,7 +629,7 @@ func (h *QuestionBankHandler) AddQuestionsToBank(c *gin.Context) {
 		return
 	}
 
-	err = h.service.AddQuestions(c.Request.Context(), uint(id), &req, userID.(uint))
+	err = h.service.AddQuestions(c.Request.Context(), uint(id), &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -687,7 +681,7 @@ func (h *QuestionBankHandler) RemoveQuestionsFromBank(c *gin.Context) {
 		return
 	}
 
-	err = h.service.RemoveQuestions(c.Request.Context(), uint(id), req.QuestionIDs, userID.(uint))
+	err = h.service.RemoveQuestions(c.Request.Context(), uint(id), req.QuestionIDs, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -737,7 +731,7 @@ func (h *QuestionBankHandler) GetBankQuestions(c *gin.Context) {
 	}
 
 	filters := h.parseQuestionFilters(c)
-	response, err := h.service.GetBankQuestions(c.Request.Context(), uint(id), filters, userID.(uint))
+	response, err := h.service.GetBankQuestions(c.Request.Context(), uint(id), filters, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -798,7 +792,7 @@ func (h *QuestionBankHandler) GetSharedQuestionBanks(c *gin.Context) {
 
 	filters := h.parseQuestionBankFilters(c)
 
-	response, err := h.service.GetSharedWithUser(c.Request.Context(), userID.(uint), filters)
+	response, err := h.service.GetSharedWithUser(c.Request.Context(), userID.(string), filters)
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -838,7 +832,7 @@ func (h *QuestionBankHandler) GetQuestionBankStats(c *gin.Context) {
 		return
 	}
 
-	stats, err := h.service.GetStats(c.Request.Context(), uint(id), userID.(uint))
+	stats, err := h.service.GetStats(c.Request.Context(), uint(id), userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -878,7 +872,7 @@ func (h *QuestionBankHandler) GetQuestionBankShares(c *gin.Context) {
 		return
 	}
 
-	shares, err := h.service.GetBankShares(c.Request.Context(), uint(id), userID.(uint))
+	shares, err := h.service.GetBankShares(c.Request.Context(), uint(id), userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -903,11 +897,8 @@ func (h *QuestionBankHandler) GetQuestionBankShares(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /question-banks/user/{user_id}/shares [get]
 func (h *QuestionBankHandler) GetUserShares(c *gin.Context) {
-	targetUserID, err := strconv.ParseUint(c.Param("user_id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Message: "Invalid user ID",
-		})
+	targetUserID := ParseStringIDParam(c, "user_id")
+	if targetUserID == "" {
 		return
 	}
 
@@ -920,7 +911,7 @@ func (h *QuestionBankHandler) GetUserShares(c *gin.Context) {
 	}
 
 	// Only allow users to see their own shares, or admin access
-	if userID.(uint) != uint(targetUserID) {
+	if userID.(string) != (targetUserID) {
 		// You might want to add admin role check here
 		c.JSON(http.StatusForbidden, ErrorResponse{
 			Message: "Cannot view other user's shares",
@@ -930,7 +921,7 @@ func (h *QuestionBankHandler) GetUserShares(c *gin.Context) {
 
 	filters := h.parseQuestionBankFilters(c)
 
-	response, err := h.service.GetSharedWithUser(c.Request.Context(), uint(targetUserID), filters)
+	response, err := h.service.GetSharedWithUser(c.Request.Context(), targetUserID, filters)
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -956,11 +947,8 @@ func (h *QuestionBankHandler) GetUserShares(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /question-banks/creator/{creator_id} [get]
 func (h *QuestionBankHandler) GetQuestionBanksByCreator(c *gin.Context) {
-	creatorID, err := strconv.ParseUint(c.Param("creator_id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{
-			Message: "Invalid creator ID",
-		})
+	creatorID := ParseStringIDParam(c, "creator_id")
+	if creatorID == "" {
 		return
 	}
 
@@ -974,7 +962,7 @@ func (h *QuestionBankHandler) GetQuestionBanksByCreator(c *gin.Context) {
 
 	filters := h.parseQuestionBankFilters(c)
 
-	response, err := h.service.GetByCreator(c.Request.Context(), uint(creatorID), filters)
+	response, err := h.service.GetByCreator(c.Request.Context(), creatorID, filters)
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -1012,9 +1000,7 @@ func (h *QuestionBankHandler) parseQuestionBankFilters(c *gin.Context) repositor
 
 	// Parse numeric filters
 	if createdBy := c.Query("created_by"); createdBy != "" {
-		if id, err := strconv.ParseUint(createdBy, 10, 32); err == nil {
-			filters.CreatedBy = &[]uint{uint(id)}[0]
-		}
+		filters.CreatedBy = &createdBy
 	}
 
 	// Parse string filters

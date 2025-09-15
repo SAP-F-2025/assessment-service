@@ -8,7 +8,7 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
-	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"gorm.io/gorm"
 )
 
@@ -16,10 +16,10 @@ type questionBankService struct {
 	repo      repositories.Repository
 	db        *gorm.DB
 	logger    *slog.Logger
-	validator *utils.Validator
+	validator *validator.Validator
 }
 
-func NewQuestionBankService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *utils.Validator) QuestionBankService {
+func NewQuestionBankService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *validator.Validator) QuestionBankService {
 	return &questionBankService{
 		repo:      repo,
 		db:        db,
@@ -30,7 +30,7 @@ func NewQuestionBankService(repo repositories.Repository, db *gorm.DB, logger *s
 
 // ===== CORE CRUD OPERATIONS =====
 
-func (s *questionBankService) Create(ctx context.Context, req *CreateQuestionBankRequest, creatorID uint) (*QuestionBankResponse, error) {
+func (s *questionBankService) Create(ctx context.Context, req *CreateQuestionBankRequest, creatorID string) (*QuestionBankResponse, error) {
 	s.logger.Info("Creating question bank", "creator_id", creatorID, "name", req.Name)
 
 	// Validate request
@@ -67,7 +67,7 @@ func (s *questionBankService) Create(ctx context.Context, req *CreateQuestionBan
 	return s.buildQuestionBankResponse(ctx, bank, creatorID), nil
 }
 
-func (s *questionBankService) GetByID(ctx context.Context, id uint, userID uint) (*QuestionBankResponse, error) {
+func (s *questionBankService) GetByID(ctx context.Context, id uint, userID string) (*QuestionBankResponse, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, id, userID)
 	if err != nil {
@@ -89,7 +89,7 @@ func (s *questionBankService) GetByID(ctx context.Context, id uint, userID uint)
 	return s.buildQuestionBankResponse(ctx, bank, userID), nil
 }
 
-func (s *questionBankService) GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*QuestionBankResponse, error) {
+func (s *questionBankService) GetByIDWithDetails(ctx context.Context, id uint, userID string) (*QuestionBankResponse, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, id, userID)
 	if err != nil {
@@ -111,7 +111,7 @@ func (s *questionBankService) GetByIDWithDetails(ctx context.Context, id uint, u
 	return s.buildQuestionBankResponse(ctx, bank, userID), nil
 }
 
-func (s *questionBankService) Update(ctx context.Context, id uint, req *UpdateQuestionBankRequest, userID uint) (*QuestionBankResponse, error) {
+func (s *questionBankService) Update(ctx context.Context, id uint, req *UpdateQuestionBankRequest, userID string) (*QuestionBankResponse, error) {
 	s.logger.Info("Updating question bank", "bank_id", id, "user_id", userID)
 
 	// Validate request
@@ -173,7 +173,7 @@ func (s *questionBankService) Update(ctx context.Context, id uint, req *UpdateQu
 	return s.buildQuestionBankResponse(ctx, bank, userID), nil
 }
 
-func (s *questionBankService) Delete(ctx context.Context, id uint, userID uint) error {
+func (s *questionBankService) Delete(ctx context.Context, id uint, userID string) error {
 	s.logger.Info("Deleting question bank", "bank_id", id, "user_id", userID)
 
 	// Check delete permission
@@ -196,7 +196,7 @@ func (s *questionBankService) Delete(ctx context.Context, id uint, userID uint) 
 
 // ===== LIST AND SEARCH OPERATIONS =====
 
-func (s *questionBankService) List(ctx context.Context, filters repositories.QuestionBankFilters, userID uint) (*QuestionBankListResponse, error) {
+func (s *questionBankService) List(ctx context.Context, filters repositories.QuestionBankFilters, userID string) (*QuestionBankListResponse, error) {
 	// Get user role to determine access level
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -229,7 +229,7 @@ func (s *questionBankService) List(ctx context.Context, filters repositories.Que
 	return response, nil
 }
 
-func (s *questionBankService) GetByCreator(ctx context.Context, creatorID uint, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error) {
+func (s *questionBankService) GetByCreator(ctx context.Context, creatorID string, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error) {
 	filters.CreatedBy = &creatorID
 
 	banks, total, err := s.repo.QuestionBank().GetByCreator(ctx, nil, creatorID, filters)
@@ -267,13 +267,13 @@ func (s *questionBankService) GetPublic(ctx context.Context, filters repositorie
 	}
 
 	for i, bank := range banks {
-		response.Banks[i] = s.buildQuestionBankResponse(ctx, bank, 0)
+		response.Banks[i] = s.buildQuestionBankResponse(ctx, bank, "0")
 	}
 
 	return response, nil
 }
 
-func (s *questionBankService) GetSharedWithUser(ctx context.Context, userID uint, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error) {
+func (s *questionBankService) GetSharedWithUser(ctx context.Context, userID string, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error) {
 	banks, total, err := s.repo.QuestionBank().GetSharedWithUser(ctx, nil, userID, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get shared question banks: %w", err)
@@ -294,7 +294,7 @@ func (s *questionBankService) GetSharedWithUser(ctx context.Context, userID uint
 	return response, nil
 }
 
-func (s *questionBankService) Search(ctx context.Context, query string, filters repositories.QuestionBankFilters, userID uint) (*QuestionBankListResponse, error) {
+func (s *questionBankService) Search(ctx context.Context, query string, filters repositories.QuestionBankFilters, userID string) (*QuestionBankListResponse, error) {
 	// Get user role to determine access level
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -330,7 +330,7 @@ func (s *questionBankService) Search(ctx context.Context, query string, filters 
 
 // ===== SHARING OPERATIONS =====
 
-func (s *questionBankService) ShareBank(ctx context.Context, bankID uint, req *ShareQuestionBankRequest, sharerID uint) error {
+func (s *questionBankService) ShareBank(ctx context.Context, bankID uint, req *ShareQuestionBankRequest, sharerID string) error {
 	s.logger.Info("Sharing question bank", "bank_id", bankID, "sharer_id", sharerID, "user_id", req.UserID)
 
 	// Validate request
@@ -375,7 +375,7 @@ func (s *questionBankService) ShareBank(ctx context.Context, bankID uint, req *S
 	return nil
 }
 
-func (s *questionBankService) UnshareBank(ctx context.Context, bankID, userID uint, sharerID uint) error {
+func (s *questionBankService) UnshareBank(ctx context.Context, bankID uint, userID string, sharerID string) error {
 	s.logger.Info("Unsharing question bank", "bank_id", bankID, "sharer_id", sharerID, "user_id", userID)
 
 	// Check if user is owner
@@ -395,7 +395,7 @@ func (s *questionBankService) UnshareBank(ctx context.Context, bankID, userID ui
 	return nil
 }
 
-func (s *questionBankService) UpdateSharePermissions(ctx context.Context, bankID, userID uint, canEdit, canDelete bool, sharerID uint) error {
+func (s *questionBankService) UpdateSharePermissions(ctx context.Context, bankID uint, userID string, canEdit, canDelete bool, sharerID string) error {
 	s.logger.Info("Updating share permissions", "bank_id", bankID, "sharer_id", sharerID, "user_id", userID)
 
 	// Check if user is owner
@@ -415,7 +415,7 @@ func (s *questionBankService) UpdateSharePermissions(ctx context.Context, bankID
 	return nil
 }
 
-func (s *questionBankService) GetBankShares(ctx context.Context, bankID uint, userID uint) ([]*QuestionBankShareResponse, error) {
+func (s *questionBankService) GetBankShares(ctx context.Context, bankID uint, userID string) ([]*QuestionBankShareResponse, error) {
 	// Check if user is owner
 	isOwner, err := s.IsOwner(ctx, bankID, userID)
 	if err != nil {
@@ -441,7 +441,7 @@ func (s *questionBankService) GetBankShares(ctx context.Context, bankID uint, us
 	return response, nil
 }
 
-func (s *questionBankService) GetUserShares(ctx context.Context, userID uint, filters repositories.QuestionBankShareFilters) ([]*QuestionBankShareResponse, int64, error) {
+func (s *questionBankService) GetUserShares(ctx context.Context, userID string, filters repositories.QuestionBankShareFilters) ([]*QuestionBankShareResponse, int64, error) {
 	shares, total, err := s.repo.QuestionBank().GetUserShares(ctx, nil, userID, filters)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get user shares: %w", err)
@@ -461,7 +461,7 @@ func (s *questionBankService) GetUserShares(ctx context.Context, userID uint, fi
 
 // ===== QUESTION MANAGEMENT =====
 
-func (s *questionBankService) AddQuestions(ctx context.Context, bankID uint, req *AddQuestionsTobankRequest, userID uint) error {
+func (s *questionBankService) AddQuestions(ctx context.Context, bankID uint, req *AddQuestionsTobankRequest, userID string) error {
 	s.logger.Info("Adding questions to bank", "bank_id", bankID, "user_id", userID, "question_count", len(req.QuestionIDs))
 
 	// Validate request
@@ -507,7 +507,7 @@ func (s *questionBankService) AddQuestions(ctx context.Context, bankID uint, req
 	return nil
 }
 
-func (s *questionBankService) RemoveQuestions(ctx context.Context, bankID uint, questionIDs []uint, userID uint) error {
+func (s *questionBankService) RemoveQuestions(ctx context.Context, bankID uint, questionIDs []uint, userID string) error {
 	s.logger.Info("Removing questions from bank", "bank_id", bankID, "user_id", userID, "question_count", len(questionIDs))
 
 	// Check edit permission
@@ -528,7 +528,7 @@ func (s *questionBankService) RemoveQuestions(ctx context.Context, bankID uint, 
 	return nil
 }
 
-func (s *questionBankService) GetBankQuestions(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error) {
+func (s *questionBankService) GetBankQuestions(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID string) (*QuestionListResponse, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, bankID, userID)
 	if err != nil {
@@ -560,7 +560,7 @@ func (s *questionBankService) GetBankQuestions(ctx context.Context, bankID uint,
 
 // ===== STATISTICS =====
 
-func (s *questionBankService) GetStats(ctx context.Context, bankID uint, userID uint) (*repositories.QuestionBankStats, error) {
+func (s *questionBankService) GetStats(ctx context.Context, bankID uint, userID string) (*repositories.QuestionBankStats, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, bankID, userID)
 	if err != nil {
@@ -580,25 +580,25 @@ func (s *questionBankService) GetStats(ctx context.Context, bankID uint, userID 
 
 // ===== PERMISSION CHECKS =====
 
-func (s *questionBankService) CanAccess(ctx context.Context, bankID, userID uint) (bool, error) {
+func (s *questionBankService) CanAccess(ctx context.Context, bankID uint, userID string) (bool, error) {
 	return s.repo.QuestionBank().CanAccess(ctx, nil, bankID, userID)
 }
 
-func (s *questionBankService) CanEdit(ctx context.Context, bankID, userID uint) (bool, error) {
+func (s *questionBankService) CanEdit(ctx context.Context, bankID uint, userID string) (bool, error) {
 	return s.repo.QuestionBank().CanEdit(ctx, nil, bankID, userID)
 }
 
-func (s *questionBankService) CanDelete(ctx context.Context, bankID, userID uint) (bool, error) {
+func (s *questionBankService) CanDelete(ctx context.Context, bankID uint, userID string) (bool, error) {
 	return s.repo.QuestionBank().CanDelete(ctx, nil, bankID, userID)
 }
 
-func (s *questionBankService) IsOwner(ctx context.Context, bankID, userID uint) (bool, error) {
+func (s *questionBankService) IsOwner(ctx context.Context, bankID uint, userID string) (bool, error) {
 	return s.repo.QuestionBank().IsOwner(ctx, nil, bankID, userID)
 }
 
 // ===== HELPER METHODS =====
 
-func (s *questionBankService) buildQuestionBankResponse(ctx context.Context, bank *models.QuestionBank, userID uint) *QuestionBankResponse {
+func (s *questionBankService) buildQuestionBankResponse(ctx context.Context, bank *models.QuestionBank, userID string) *QuestionBankResponse {
 	response := &QuestionBankResponse{
 		QuestionBank: bank,
 		IsOwner:      bank.CreatedBy == userID,
@@ -639,7 +639,7 @@ func (s *questionBankService) buildQuestionBankResponse(ctx context.Context, ban
 	return response
 }
 
-func (s *questionBankService) buildQuestionResponse(ctx context.Context, question *models.Question, userID uint) *QuestionResponse {
+func (s *questionBankService) buildQuestionResponse(ctx context.Context, question *models.Question, userID string) *QuestionResponse {
 	// This is a simplified version - you might want to reuse the question service's buildResponse method
 	response := &QuestionResponse{
 		Question:   question,
@@ -651,7 +651,7 @@ func (s *questionBankService) buildQuestionResponse(ctx context.Context, questio
 	return response
 }
 
-func (s *questionBankService) getUserRole(ctx context.Context, userID uint) (models.Role, error) {
+func (s *questionBankService) getUserRole(ctx context.Context, userID string) (models.Role, error) {
 	user, err := s.repo.User().GetByID(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get user: %w", err)
@@ -659,7 +659,7 @@ func (s *questionBankService) getUserRole(ctx context.Context, userID uint) (mod
 	return user.Role, nil
 }
 
-func (s *questionBankService) getAccessibleBanks(ctx context.Context, filters repositories.QuestionBankFilters, userID uint) (*QuestionBankListResponse, error) {
+func (s *questionBankService) getAccessibleBanks(ctx context.Context, filters repositories.QuestionBankFilters, userID string) (*QuestionBankListResponse, error) {
 	// This is a simplified implementation
 	// In a real scenario, you'd want to combine owned, public, and shared banks efficiently
 
