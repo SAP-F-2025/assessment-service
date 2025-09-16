@@ -253,6 +253,7 @@ func (s *assessmentService) applyAssessmentUpdates(assessment *models.Assessment
 		assessment.DueDate = req.DueDate
 	}
 
+	assessment.Version += 1
 	assessment.UpdatedAt = time.Now()
 }
 

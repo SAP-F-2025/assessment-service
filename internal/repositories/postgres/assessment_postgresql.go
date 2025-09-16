@@ -101,47 +101,58 @@ func (a *AssessmentPostgreSQL) GetByIDWithDetails(ctx context.Context, tx *gorm.
 // Update updates an assessment and invalidates cache
 func (a *AssessmentPostgreSQL) Update(ctx context.Context, tx *gorm.DB, assessment *models.Assessment) error {
 	// Get current assessment for validation
-	var currentAssessment models.Assessment
-	if err := tx.WithContext(ctx).First(&currentAssessment, assessment.ID).Error; err != nil {
-		return fmt.Errorf("assessment not found: %w", err)
-	}
-
-	// Check title uniqueness if title changed
-	if assessment.Title != currentAssessment.Title {
-		exists, err := a.ExistsByTitle(ctx, tx, assessment.Title, assessment.CreatedBy, &assessment.ID)
-		if err != nil {
-			return fmt.Errorf("failed to check title uniqueness: %w", err)
-		}
-		if exists {
-			return fmt.Errorf("assessment with title '%s' already exists for this creator", assessment.Title)
-		}
-	}
-
-	// Validate business rules for active assessments
-	if currentAssessment.Status == models.StatusActive {
-		// Check if assessment has attempts
-		hasAttempts, err := a.HasAttempts(ctx, tx, assessment.ID)
-		if err != nil {
-			return fmt.Errorf("failed to check attempts: %w", err)
-		}
-
-		if hasAttempts {
-			// Restrict modifications for assessments with attempts
-			if assessment.Duration != currentAssessment.Duration {
-				return fmt.Errorf("cannot change duration for active assessment with attempts")
-			}
-			if assessment.MaxAttempts < currentAssessment.MaxAttempts {
-				return fmt.Errorf("cannot decrease max attempts for assessment with existing attempts")
-			}
-		}
-	}
+	//var currentAssessment models.Assessment
+	//if err := tx.WithContext(ctx).First(&currentAssessment, assessment.ID).Error; err != nil {
+	//	return fmt.Errorf("assessment not found: %w", err)
+	//}
+	//
+	//// Check title uniqueness if title changed
+	//if assessment.Title != currentAssessment.Title {
+	//	exists, err := a.ExistsByTitle(ctx, tx, assessment.Title, assessment.CreatedBy, &assessment.ID)
+	//	if err != nil {
+	//		return fmt.Errorf("failed to check title uniqueness: %w", err)
+	//	}
+	//	if exists {
+	//		return fmt.Errorf("assessment with title '%s' already exists for this creator", assessment.Title)
+	//	}
+	//}
+	//
+	//// Validate business rules for active assessments
+	//if currentAssessment.Status == models.StatusActive {
+	//	// Check if assessment has attempts
+	//	hasAttempts, err := a.HasAttempts(ctx, tx, assessment.ID)
+	//	if err != nil {
+	//		return fmt.Errorf("failed to check attempts: %w", err)
+	//	}
+	//
+	//	if hasAttempts {
+	//		// Restrict modifications for assessments with attempts
+	//		if assessment.Duration != currentAssessment.Duration {
+	//			return fmt.Errorf("cannot change duration for active assessment with attempts")
+	//		}
+	//		if assessment.MaxAttempts < currentAssessment.MaxAttempts {
+	//			return fmt.Errorf("cannot decrease max attempts for assessment with existing attempts")
+	//		}
+	//	}
+	//}
 
 	// Increment version
-	assessment.Version = currentAssessment.Version + 1
-	assessment.UpdatedAt = time.Now()
+	//assessment.Version = currentAssessment.Version + 1
+	//assessment.UpdatedAt = time.Now()
 
 	// Update assessment
-	if err := tx.WithContext(ctx).Save(assessment).Error; err != nil {
+	if err := tx.WithContext(ctx).Model(&models.Assessment{}).Where("id = ?", assessment.ID).Updates(map[string]interface{}{
+		"title":         assessment.Title,
+		"description":   assessment.Description,
+		"duration":      assessment.Duration,
+		"max_attempts":  assessment.MaxAttempts,
+		"passing_score": assessment.PassingScore,
+		"time_warning":  assessment.TimeWarning,
+		"due_date":      assessment.DueDate,
+		"status":        assessment.Status,
+		"version":       assessment.Version,
+		"updated_at":    assessment.UpdatedAt,
+	}).Error; err != nil {
 		return fmt.Errorf("failed to update assessment: %w", err)
 	}
 
