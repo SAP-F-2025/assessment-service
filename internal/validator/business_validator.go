@@ -244,6 +244,30 @@ func (bv *BusinessValidator) registerBusinessRules() {
 		timeLimit := fl.Field().Int()
 		return timeLimit >= 30 && timeLimit <= 3600
 	})
+
+	// question type validation
+	bv.validate.RegisterValidation("question_type", func(fl validator.FieldLevel) bool {
+		qType := fl.Field().String()
+		validTypes := []models.QuestionType{models.TrueFalse, models.MultipleChoice, models.Essay, models.Matching, models.Ordering, models.ShortAnswer}
+		for _, vt := range validTypes {
+			if models.QuestionType(qType) == vt {
+				return true
+			}
+		}
+		return false
+	})
+
+	// difficulty level validation
+	bv.validate.RegisterValidation("difficulty_level", func(fl validator.FieldLevel) bool {
+		level := fl.Field().String()
+		validLevels := []models.DifficultyLevel{models.DifficultyEasy, models.DifficultyMedium, models.DifficultyHard}
+		for _, vl := range validLevels {
+			if models.DifficultyLevel(level) == vl {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 // validateAssessmentBusinessRules validates business rules for assessment creation

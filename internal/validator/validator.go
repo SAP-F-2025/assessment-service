@@ -69,6 +69,10 @@ func (v *Validator) GetBusinessValidator() *BusinessValidator {
 	return v.businessValidator
 }
 
+func (v *Validator) GetQuestionValidator() *QuestionValidator {
+	return v.questionValidator
+}
+
 // registerCustomValidators registers all custom validation functions
 func registerCustomValidators(validate *validator.Validate) {
 	// Question type validation

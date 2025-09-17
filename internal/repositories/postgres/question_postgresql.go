@@ -443,12 +443,12 @@ func (q *QuestionPostgreSQL) GetQuestionStats(ctx context.Context, tx *gorm.DB, 
 	// Get performance statistics from answers table if exists
 	var correctAnswers, totalAnswers int64
 	err := db.WithContext(ctx).
-		Table("answers").
+		Table("student_answers").
 		Where("question_id = ?", id).
 		Count(&totalAnswers).Error
 	if err == nil && totalAnswers > 0 {
 		db.WithContext(ctx).
-			Table("answers").
+			Table("student_answers").
 			Where("question_id = ? AND score > 0", id).
 			Count(&correctAnswers)
 

@@ -55,9 +55,10 @@ func (s *questionService) Create(ctx context.Context, req *CreateQuestionRequest
 
 	// Validate category exists if provided
 	if req.CategoryID != nil {
-		if err := s.validateCategoryAccess(ctx, *req.CategoryID, creatorID); err != nil {
-			return nil, err
-		}
+		// TODO: Enable category access validation when categories are implemented
+		//if err := s.validateCategoryAccess(ctx, *req.CategoryID, creatorID); err != nil {
+		//	return nil, err
+		//}
 	}
 
 	// Convert content to JSON

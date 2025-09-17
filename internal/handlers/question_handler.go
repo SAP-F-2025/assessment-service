@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -55,7 +56,26 @@ func (h *QuestionHandler) CreateQuestion(c *gin.Context) {
 		return
 	}
 
-	if err := h.validator.Validate(&req); err != nil {
+	// convert content to json
+	contentData, err := json.Marshal(req.Content)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid content format",
+			Details: err.Error(),
+		})
+		return
+	}
+
+	if err := h.validator.GetQuestionValidator().ValidateQuestion(&models.Question{
+		Type:        req.Type,
+		Text:        req.Text,
+		Content:     contentData,
+		Difficulty:  req.Difficulty,
+		CategoryID:  req.CategoryID,
+		Points:      req.Points,
+		TimeLimit:   req.TimeLimit,
+		Explanation: req.Explanation,
+	}); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Message: "Validation failed",
 			Details: err.Error(),
