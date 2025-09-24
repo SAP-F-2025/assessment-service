@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"context"
-	"time"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 )
@@ -10,37 +9,13 @@ import (
 // UserRepository interface for user operations (minimal for assessment service)
 type UserRepository interface {
 	// Basic read operations (assessment service is not owner of user data)
-	GetByID(ctx context.Context, id uint) (*models.User, error)
+	GetByID(ctx context.Context, id string) (*models.User, error)
 	GetByEmail(ctx context.Context, email string) (*models.User, error)
-	GetByIDs(ctx context.Context, ids []uint) ([]*models.User, error)
+	GetByIDs(ctx context.Context, ids []string) ([]*models.User, error)
 
 	// Validation and checks
-	ExistsByID(ctx context.Context, id uint) (bool, error)
+	ExistsByID(ctx context.Context, id string) (bool, error)
 	ExistsByEmail(ctx context.Context, email string) (bool, error)
-	IsActive(ctx context.Context, id uint) (bool, error)
-	HasRole(ctx context.Context, id uint, role models.UserRole) (bool, error)
-}
-
-// ===== USER STATISTICS STRUCT =====
-
-type UserStats struct {
-	UserID      uint            `json:"user_id"`
-	Role        models.UserRole `json:"role"`
-	IsActive    bool            `json:"is_active"`
-	LastLoginAt *time.Time      `json:"last_login_at"`
-
-	// Teacher-specific stats
-	AssessmentsCreated *int `json:"assessments_created,omitempty"`
-	QuestionsCreated   *int `json:"questions_created,omitempty"`
-	TotalAttempts      *int `json:"total_attempts,omitempty"`
-
-	// Student-specific stats
-	AssessmentsTaken  *int     `json:"assessments_taken,omitempty"`
-	AttemptsCompleted *int     `json:"attempts_completed,omitempty"`
-	AverageScore      *float64 `json:"average_score,omitempty"`
-	TotalTimeSpent    *int     `json:"total_time_spent,omitempty"`
-
-	// Common stats
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	IsActive(ctx context.Context, id string) (bool, error)
+	HasRole(ctx context.Context, id string, role models.UserRole) (bool, error)
 }

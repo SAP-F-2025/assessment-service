@@ -195,7 +195,7 @@ func (q *QuestionPostgreSQL) List(ctx context.Context, tx *gorm.DB, filters repo
 }
 
 // GetByCreator retrieves questions created by a specific user
-func (q *QuestionPostgreSQL) GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
+func (q *QuestionPostgreSQL) GetByCreator(ctx context.Context, tx *gorm.DB, creatorID string, filters repositories.QuestionFilters) ([]*models.Question, int64, error) {
 	filters.CreatedBy = &creatorID
 	return q.List(ctx, tx, filters)
 }
@@ -320,7 +320,7 @@ func (q *QuestionPostgreSQL) GetRandomQuestions(ctx context.Context, tx *gorm.DB
 }
 
 // GetQuestionBank retrieves questions for question bank
-func (q *QuestionPostgreSQL) GetQuestionBank(ctx context.Context, tx *gorm.DB, creatorID uint, filters repositories.QuestionBankFilters) ([]*models.Question, int64, error) {
+func (q *QuestionPostgreSQL) GetQuestionBank(ctx context.Context, tx *gorm.DB, creatorID string, filters repositories.QuestionBankFilters) ([]*models.Question, int64, error) {
 	db := q.getDB(tx)
 	query := db.WithContext(ctx).Model(&models.Question{}).Where("created_by = ?", creatorID)
 
@@ -443,12 +443,12 @@ func (q *QuestionPostgreSQL) GetQuestionStats(ctx context.Context, tx *gorm.DB, 
 	// Get performance statistics from answers table if exists
 	var correctAnswers, totalAnswers int64
 	err := db.WithContext(ctx).
-		Table("answers").
+		Table("student_answers").
 		Where("question_id = ?", id).
 		Count(&totalAnswers).Error
 	if err == nil && totalAnswers > 0 {
 		db.WithContext(ctx).
-			Table("answers").
+			Table("student_answers").
 			Where("question_id = ? AND score > 0", id).
 			Count(&correctAnswers)
 
@@ -459,7 +459,7 @@ func (q *QuestionPostgreSQL) GetQuestionStats(ctx context.Context, tx *gorm.DB, 
 }
 
 // GetUsageStats retrieves usage statistics for a creator
-func (q *QuestionPostgreSQL) GetUsageStats(ctx context.Context, tx *gorm.DB, creatorID uint) (*repositories.QuestionUsageStats, error) {
+func (q *QuestionPostgreSQL) GetUsageStats(ctx context.Context, tx *gorm.DB, creatorID string) (*repositories.QuestionUsageStats, error) {
 	db := q.getDB(tx)
 	stats := &repositories.QuestionUsageStats{
 		QuestionsByType: make(map[models.QuestionType]int),
@@ -528,7 +528,7 @@ func (q *QuestionPostgreSQL) GetPerformanceStats(ctx context.Context, tx *gorm.D
 // ===== VALIDATION AND CHECKS =====
 
 // ExistsByText checks if a question with the same text exists for the creator
-func (q *QuestionPostgreSQL) ExistsByText(ctx context.Context, tx *gorm.DB, text string, creatorID uint, excludeID *uint) (bool, error) {
+func (q *QuestionPostgreSQL) ExistsByText(ctx context.Context, tx *gorm.DB, text string, creatorID string, excludeID *uint) (bool, error) {
 	db := q.getDB(tx)
 	query := db.WithContext(ctx).
 		Model(&models.Question{}).

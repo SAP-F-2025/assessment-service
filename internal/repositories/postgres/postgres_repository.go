@@ -60,7 +60,7 @@ func NewPostgreSQLRepository(config RepositoryConfig) repositories.Repository {
 	repo.user = casdoor.NewUserCasdoor(config.CasdoorConfig, config.RedisClient)
 
 	// TODO: Initialize other repositories
-	// repo.assessmentSettings = NewAssessmentSettingsPostgreSQL(config.DB, config.RedisClient)
+	repo.assessmentSettings = NewAssessmentSettingsPostgreSQL(config.DB, cacheManager)
 	// repo.questionCategory = NewQuestionCategoryPostgreSQL(config.DB, config.RedisClient)
 	// repo.questionAttachment = NewQuestionAttachmentPostgreSQL(config.DB, config.RedisClient)
 	repo.answer = NewAnswerPostgreSQL(config.DB, config.RedisClient)

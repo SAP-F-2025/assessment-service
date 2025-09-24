@@ -1,0 +1,150 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: assessment-service-hpa
+  namespace: default
+  labels:
+    app: assessment-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: assessment-service
+
+  minReplicas: 2
+  maxReplicas: 10
+
+  metrics:
+  # CPU utilization scaling
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+  # Memory utilization scaling
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+  # Custom metrics scaling (requests per second)
+  # Requires metrics-server and custom metrics API
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"
+
+  # External metrics scaling (queue length)
+  # Requires external metrics adapter
+  - type: External
+    external:
+      metric:
+        name: redis_queue_length
+        selector:
+          matchLabels:
+            queue: assessment-processing
+      target:
+        type: Value
+        value: "50"
+
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 5 minutes
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Min
+
+    scaleUp:
+      stabilizationWindowSeconds: 60   # 1 minute
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+      - type: Pods
+        value: 4
+        periodSeconds: 60
+      selectPolicy: Max
+
+---
+# Vertical Pod Autoscaler (VPA) - Optional
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: assessment-service-vpa
+  namespace: default
+  labels:
+    app: assessment-service
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: assessment-service
+
+  updatePolicy:
+    updateMode: "Auto"  # Options: "Off", "Initial", "Auto"
+
+  resourcePolicy:
+    containerPolicies:
+    - containerName: assessment-service
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      maxAllowed:
+        cpu: 1000m
+        memory: 1Gi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+
+---
+# PodDisruptionBudget to ensure availability during updates
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: assessment-service-pdb
+  namespace: default
+  labels:
+    app: assessment-service
+spec:
+  minAvailable: 1  # Always keep at least 1 pod running
+  # Alternative: maxUnavailable: 50%
+  selector:
+    matchLabels:
+      app: assessment-service
+
+---
+# Custom metrics for advanced scaling (example)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: assessment-service-metrics
+  namespace: default
+  labels:
+    app: assessment-service
+data:
+  prometheus-config.yaml: |
+    # Prometheus scraping configuration
+    scrape_configs:
+    - job_name: 'assessment-service'
+      static_configs:
+      - targets: ['assessment-service:8080']
+      metrics_path: '/metrics'
+      scrape_interval: 15s
+
+    # Custom metrics for HPA
+    - job_name: 'assessment-service-custom'
+      static_configs:
+      - targets: ['assessment-service:8080']
+      metrics_path: '/custom-metrics'
+      scrape_interval: 30s

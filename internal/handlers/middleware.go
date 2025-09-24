@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	uuid2 "github.com/google/uuid"
@@ -27,6 +26,7 @@ func SetupMiddleware(router *gin.Engine) {
 }
 
 // AuthMiddleware provides authentication middleware
+// Deprecated: Use CasdoorAuthMiddleware.AuthMiddleware() instead
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// For now, this is a placeholder implementation
@@ -106,10 +106,10 @@ func CORSMiddleware() gin.HandlerFunc {
 }
 
 // HealthCheck endpoint
-func HealthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "healthy",
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"service":   "assessment-service",
-	})
-}
+//func HealthCheck(c *gin.Context) {
+//	c.JSON(http.StatusOK, gin.H{
+//		"status":    "healthy",
+//		"timestamp": time.Now().UTC().Format(time.RFC3339),
+//		"service":   "assessment-service",
+//	})
+//}

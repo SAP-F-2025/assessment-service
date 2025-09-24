@@ -30,7 +30,7 @@ func (h *SharedHelpers) CountAttempts(ctx context.Context, assessmentID uint) (i
 }
 
 // CountAttemptsByStudent counts attempts by student for an assessment
-func (h *SharedHelpers) CountAttemptsByStudent(ctx context.Context, assessmentID, studentID uint) (int64, error) {
+func (h *SharedHelpers) CountAttemptsByStudent(ctx context.Context, assessmentID uint, studentID string) (int64, error) {
 	var count int64
 	err := h.db.WithContext(ctx).
 		Model(&models.AssessmentAttempt{}).
@@ -136,7 +136,7 @@ func (h *SharedHelpers) BulkUpdateAttemptStatus(ctx context.Context, ids []uint,
 }
 
 // ValidateAttemptEligibility checks if student can start new attempt
-func (h *SharedHelpers) ValidateAttemptEligibility(ctx context.Context, assessmentID, studentID uint) (*repositories.AttemptValidation, error) {
+func (h *SharedHelpers) ValidateAttemptEligibility(ctx context.Context, assessmentID uint, studentID string) (*repositories.AttemptValidation, error) {
 	validation := &repositories.AttemptValidation{CanStart: true}
 
 	// Get assessment info
@@ -192,7 +192,7 @@ func (h *SharedHelpers) ValidateAttemptEligibility(ctx context.Context, assessme
 }
 
 // GetRemainingAttempts calculates remaining attempts for a student
-func (h *SharedHelpers) GetRemainingAttempts(ctx context.Context, assessmentID, studentID uint) (int, error) {
+func (h *SharedHelpers) GetRemainingAttempts(ctx context.Context, assessmentID uint, studentID string) (int, error) {
 	assessment, err := h.GetAssessmentBasicInfo(ctx, assessmentID)
 	if err != nil {
 		return 0, err

@@ -23,7 +23,7 @@ const (
 type AssessmentAttempt struct {
 	ID            uint          `json:"id" gorm:"primaryKey"`
 	AssessmentID  uint          `json:"assessment_id" gorm:"not null;index"`
-	StudentID     uint          `json:"student_id" gorm:"not null;index"`
+	StudentID     string        `json:"student_id" gorm:"not null;index;size:255"`
 	AttemptNumber int           `json:"attempt_number" gorm:"not null"`
 	Status        AttemptStatus `json:"status" gorm:"default:in_progress;index"`
 
@@ -76,8 +76,8 @@ type StudentAnswer struct {
 	// Grading
 	Score     float64    `json:"score"`
 	MaxScore  int        `json:"max_score"`
-	IsCorrect *bool      `json:"is_correct"` // null for essay/manual grading
-	GradedBy  *uint      `json:"graded_by"`  // Teacher ID for manual grading
+	IsCorrect *bool      `json:"is_correct"`                // null for essay/manual grading
+	GradedBy  *string    `json:"graded_by" gorm:"size:255"` // Teacher ID for manual grading
 	GradedAt  *time.Time `json:"graded_at"`
 	Feedback  *string    `json:"feedback" gorm:"type:text"`
 

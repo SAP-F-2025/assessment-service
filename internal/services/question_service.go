@@ -8,7 +8,7 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
-	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -17,10 +17,10 @@ type questionService struct {
 	repo      repositories.Repository
 	db        *gorm.DB
 	logger    *slog.Logger
-	validator *utils.Validator
+	validator *validator.Validator
 }
 
-func NewQuestionService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *utils.Validator) QuestionService {
+func NewQuestionService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *validator.Validator) QuestionService {
 	return &questionService{
 		repo:      repo,
 		db:        db,
@@ -31,7 +31,7 @@ func NewQuestionService(repo repositories.Repository, db *gorm.DB, logger *slog.
 
 // ===== CORE CRUD OPERATIONS =====
 
-func (s *questionService) Create(ctx context.Context, req *CreateQuestionRequest, creatorID uint) (*QuestionResponse, error) {
+func (s *questionService) Create(ctx context.Context, req *CreateQuestionRequest, creatorID string) (*QuestionResponse, error) {
 	s.logger.Info("Creating question", "creator_id", creatorID, "type", req.Type)
 
 	// Validate request with business rules
@@ -55,9 +55,10 @@ func (s *questionService) Create(ctx context.Context, req *CreateQuestionRequest
 
 	// Validate category exists if provided
 	if req.CategoryID != nil {
-		if err := s.validateCategoryAccess(ctx, *req.CategoryID, creatorID); err != nil {
-			return nil, err
-		}
+		// TODO: Enable category access validation when categories are implemented
+		//if err := s.validateCategoryAccess(ctx, *req.CategoryID, creatorID); err != nil {
+		//	return nil, err
+		//}
 	}
 
 	// Convert content to JSON
@@ -100,7 +101,7 @@ func (s *questionService) Create(ctx context.Context, req *CreateQuestionRequest
 	return s.buildQuestionResponse(ctx, question, creatorID), nil
 }
 
-func (s *questionService) GetByID(ctx context.Context, id uint, userID uint) (*QuestionResponse, error) {
+func (s *questionService) GetByID(ctx context.Context, id uint, userID string) (*QuestionResponse, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, id, userID)
 	if err != nil {
@@ -122,7 +123,7 @@ func (s *questionService) GetByID(ctx context.Context, id uint, userID uint) (*Q
 	return s.buildQuestionResponse(ctx, question, userID), nil
 }
 
-func (s *questionService) GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*QuestionResponse, error) {
+func (s *questionService) GetByIDWithDetails(ctx context.Context, id uint, userID string) (*QuestionResponse, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, id, userID)
 	if err != nil {
@@ -144,7 +145,7 @@ func (s *questionService) GetByIDWithDetails(ctx context.Context, id uint, userI
 	return s.buildQuestionResponse(ctx, question, userID), nil
 }
 
-func (s *questionService) Update(ctx context.Context, id uint, req *UpdateQuestionRequest, userID uint) (*QuestionResponse, error) {
+func (s *questionService) Update(ctx context.Context, id uint, req *UpdateQuestionRequest, userID string) (*QuestionResponse, error) {
 	s.logger.Info("Updating question", "question_id", id, "user_id", userID)
 
 	// Validate request
@@ -201,7 +202,7 @@ func (s *questionService) Update(ctx context.Context, id uint, req *UpdateQuesti
 	return s.buildQuestionResponse(ctx, question, userID), nil
 }
 
-func (s *questionService) Delete(ctx context.Context, id uint, userID uint) error {
+func (s *questionService) Delete(ctx context.Context, id uint, userID string) error {
 	s.logger.Info("Deleting question", "question_id", id, "user_id", userID)
 
 	// Check delete permission
@@ -224,7 +225,7 @@ func (s *questionService) Delete(ctx context.Context, id uint, userID uint) erro
 
 // ===== LIST AND SEARCH OPERATIONS =====
 
-func (s *questionService) List(ctx context.Context, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error) {
+func (s *questionService) List(ctx context.Context, filters repositories.QuestionFilters, userID string) (*QuestionListResponse, error) {
 	// For non-admin users, limit to their own questions
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -255,7 +256,7 @@ func (s *questionService) List(ctx context.Context, filters repositories.Questio
 	return response, nil
 }
 
-func (s *questionService) GetByCreator(ctx context.Context, creatorID uint, filters repositories.QuestionFilters) (*QuestionListResponse, error) {
+func (s *questionService) GetByCreator(ctx context.Context, creatorID string, filters repositories.QuestionFilters) (*QuestionListResponse, error) {
 	// Set creator filter
 	filters.CreatedBy = &creatorID
 
@@ -279,7 +280,7 @@ func (s *questionService) GetByCreator(ctx context.Context, creatorID uint, filt
 	return response, nil
 }
 
-func (s *questionService) Search(ctx context.Context, query string, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error) {
+func (s *questionService) Search(ctx context.Context, query string, filters repositories.QuestionFilters, userID string) (*QuestionListResponse, error) {
 	// For non-admin users, limit to their own questions
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -310,7 +311,7 @@ func (s *questionService) Search(ctx context.Context, query string, filters repo
 	return response, nil
 }
 
-func (s *questionService) GetRandomQuestions(ctx context.Context, filters repositories.RandomQuestionFilters, userID uint) ([]*models.Question, error) {
+func (s *questionService) GetRandomQuestions(ctx context.Context, filters repositories.RandomQuestionFilters, userID string) ([]*models.Question, error) {
 	// For non-admin users, add permission filter
 	_, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -329,7 +330,7 @@ func (s *questionService) GetRandomQuestions(ctx context.Context, filters reposi
 
 // ===== BULK OPERATIONS =====
 
-func (s *questionService) CreateBatch(ctx context.Context, questions []*CreateQuestionRequest, creatorID uint) ([]*QuestionResponse, []error) {
+func (s *questionService) CreateBatch(ctx context.Context, questions []*CreateQuestionRequest, creatorID string) ([]*QuestionResponse, []error) {
 	s.logger.Info("Creating batch questions", "creator_id", creatorID, "count", len(questions))
 
 	results := make([]*QuestionResponse, len(questions))
@@ -361,7 +362,7 @@ func (s *questionService) CreateBatch(ctx context.Context, questions []*CreateQu
 	return results, errors
 }
 
-func (s *questionService) UpdateBatch(ctx context.Context, updates map[uint]*UpdateQuestionRequest, userID uint) (map[uint]*QuestionResponse, map[uint]error) {
+func (s *questionService) UpdateBatch(ctx context.Context, updates map[uint]*UpdateQuestionRequest, userID string) (map[uint]*QuestionResponse, map[uint]error) {
 	s.logger.Info("Updating batch questions", "user_id", userID, "count", len(updates))
 
 	results := make(map[uint]*QuestionResponse)
@@ -379,7 +380,7 @@ func (s *questionService) UpdateBatch(ctx context.Context, updates map[uint]*Upd
 
 // ===== QUESTION BANKING =====
 
-func (s *questionService) GetByBank(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error) {
+func (s *questionService) GetByBank(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID string) (*QuestionListResponse, error) {
 	// Check access to question bank
 	canAccess, err := s.canAccessQuestionBank(ctx, bankID, userID)
 	if err != nil {
@@ -409,7 +410,7 @@ func (s *questionService) GetByBank(ctx context.Context, bankID uint, filters re
 	return response, nil
 }
 
-func (s *questionService) AddToBank(ctx context.Context, questionID, bankID uint, userID uint) error {
+func (s *questionService) AddToBank(ctx context.Context, questionID, bankID uint, userID string) error {
 	s.logger.Info("Adding question to bank", "question_id", questionID, "bank_id", bankID, "user_id", userID)
 
 	// Check question access
@@ -439,7 +440,7 @@ func (s *questionService) AddToBank(ctx context.Context, questionID, bankID uint
 	return nil
 }
 
-func (s *questionService) RemoveFromBank(ctx context.Context, questionID, bankID uint, userID uint) error {
+func (s *questionService) RemoveFromBank(ctx context.Context, questionID, bankID uint, userID string) error {
 	s.logger.Info("Removing question from bank", "question_id", questionID, "bank_id", bankID, "user_id", userID)
 
 	// Check bank edit permission

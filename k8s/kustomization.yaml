@@ -1,0 +1,67 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: assessment-service
+  namespace: default
+
+# Common labels applied to all resources
+commonLabels:
+  app: assessment-service
+  project: sap-f-2025
+  managed-by: kustomize
+
+# Common annotations applied to all resources
+commonAnnotations:
+  contact: "devops@example.com"
+  documentation: "https://docs.example.com/assessment-service"
+
+# Resources to deploy
+resources:
+- configmap.yaml
+- secret.yaml
+- deployment.yaml
+- service.yaml
+- ingress.yaml
+- hpa.yaml
+
+# Images to update
+images:
+- name: assessment-service
+  newName: your-registry/assessment-service
+  newTag: latest
+
+# ConfigMap generator for additional configurations
+configMapGenerator:
+- name: assessment-service-env
+  literals:
+  - DEPLOYMENT_VERSION=v1.0.0
+  - DEPLOYMENT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Secret generator for additional secrets
+secretGenerator:
+- name: assessment-service-api-keys
+  literals:
+  - API_KEY=your-api-key-here
+  - WEBHOOK_SECRET=your-webhook-secret-here
+
+# Namespace for all resources
+namespace: default
+
+# Resource name prefix
+namePrefix: ""
+
+# Resource name suffix
+nameSuffix: ""
+
+# Patches for different environments
+patchesStrategicMerge:
+- patches/production.yaml
+
+# JSON patches
+patchesJson6902:
+- target:
+    version: v1
+    kind: Deployment
+    name: assessment-service
+  path: patches/deployment-replicas.yaml

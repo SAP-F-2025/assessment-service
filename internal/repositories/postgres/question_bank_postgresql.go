@@ -98,7 +98,7 @@ func (r *questionBankRepository) List(ctx context.Context, tx *gorm.DB, filters 
 	return banks, total, nil
 }
 
-func (r *questionBankRepository) GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint, filters repositories.QuestionBankFilters) ([]*models.QuestionBank, int64, error) {
+func (r *questionBankRepository) GetByCreator(ctx context.Context, tx *gorm.DB, creatorID string, filters repositories.QuestionBankFilters) ([]*models.QuestionBank, int64, error) {
 	filters.CreatedBy = &creatorID
 	return r.List(ctx, tx, filters)
 }
@@ -109,7 +109,7 @@ func (r *questionBankRepository) GetPublicBanks(ctx context.Context, tx *gorm.DB
 	return r.List(ctx, tx, filters)
 }
 
-func (r *questionBankRepository) GetSharedWithUser(ctx context.Context, tx *gorm.DB, userID uint, filters repositories.QuestionBankFilters) ([]*models.QuestionBank, int64, error) {
+func (r *questionBankRepository) GetSharedWithUser(ctx context.Context, tx *gorm.DB, userID string, filters repositories.QuestionBankFilters) ([]*models.QuestionBank, int64, error) {
 	db := r.getDB(tx)
 	var banks []*models.QuestionBank
 	var total int64
@@ -180,7 +180,7 @@ func (r *questionBankRepository) ShareBank(ctx context.Context, tx *gorm.DB, sha
 	return nil
 }
 
-func (r *questionBankRepository) UnshareBank(ctx context.Context, tx *gorm.DB, bankID, userID uint) error {
+func (r *questionBankRepository) UnshareBank(ctx context.Context, tx *gorm.DB, bankID uint, userID string) error {
 	db := r.getDB(tx)
 	if err := db.WithContext(ctx).
 		Where("bank_id = ? AND user_id = ?", bankID, userID).
@@ -190,7 +190,7 @@ func (r *questionBankRepository) UnshareBank(ctx context.Context, tx *gorm.DB, b
 	return nil
 }
 
-func (r *questionBankRepository) UpdateSharePermissions(ctx context.Context, tx *gorm.DB, bankID, userID uint, canEdit, canDelete bool) error {
+func (r *questionBankRepository) UpdateSharePermissions(ctx context.Context, tx *gorm.DB, bankID uint, userID string, canEdit, canDelete bool) error {
 	db := r.getDB(tx)
 	if err := db.WithContext(ctx).
 		Model(&models.QuestionBankShare{}).
@@ -219,7 +219,7 @@ func (r *questionBankRepository) GetBankShares(ctx context.Context, tx *gorm.DB,
 	return shares, nil
 }
 
-func (r *questionBankRepository) GetUserShares(ctx context.Context, tx *gorm.DB, userID uint, filters repositories.QuestionBankShareFilters) ([]*models.QuestionBankShare, int64, error) {
+func (r *questionBankRepository) GetUserShares(ctx context.Context, tx *gorm.DB, userID string, filters repositories.QuestionBankShareFilters) ([]*models.QuestionBankShare, int64, error) {
 	db := r.getDB(tx)
 	var shares []*models.QuestionBankShare
 	var total int64
@@ -363,7 +363,7 @@ func (r *questionBankRepository) IsQuestionInBank(ctx context.Context, tx *gorm.
 
 // ===== PERMISSION CHECKS =====
 
-func (r *questionBankRepository) CanAccess(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error) {
+func (r *questionBankRepository) CanAccess(ctx context.Context, tx *gorm.DB, bankID uint, userID string) (bool, error) {
 	db := r.getDB(tx)
 
 	// Check if user is owner
@@ -400,7 +400,7 @@ func (r *questionBankRepository) CanAccess(ctx context.Context, tx *gorm.DB, ban
 	return count > 0, nil
 }
 
-func (r *questionBankRepository) CanEdit(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error) {
+func (r *questionBankRepository) CanEdit(ctx context.Context, tx *gorm.DB, bankID uint, userID string) (bool, error) {
 	db := r.getDB(tx)
 
 	// Check if user is owner
@@ -426,7 +426,7 @@ func (r *questionBankRepository) CanEdit(ctx context.Context, tx *gorm.DB, bankI
 	return count > 0, nil
 }
 
-func (r *questionBankRepository) CanDelete(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error) {
+func (r *questionBankRepository) CanDelete(ctx context.Context, tx *gorm.DB, bankID uint, userID string) (bool, error) {
 	db := r.getDB(tx)
 
 	// Check if user is owner
@@ -452,7 +452,7 @@ func (r *questionBankRepository) CanDelete(ctx context.Context, tx *gorm.DB, ban
 	return count > 0, nil
 }
 
-func (r *questionBankRepository) IsOwner(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error) {
+func (r *questionBankRepository) IsOwner(ctx context.Context, tx *gorm.DB, bankID uint, userID string) (bool, error) {
 	db := r.getDB(tx)
 	var count int64
 
@@ -468,7 +468,7 @@ func (r *questionBankRepository) IsOwner(ctx context.Context, tx *gorm.DB, bankI
 
 // ===== VALIDATION =====
 
-func (r *questionBankRepository) ExistsByName(ctx context.Context, tx *gorm.DB, name string, creatorID uint) (bool, error) {
+func (r *questionBankRepository) ExistsByName(ctx context.Context, tx *gorm.DB, name string, creatorID string) (bool, error) {
 	db := r.getDB(tx)
 	var count int64
 

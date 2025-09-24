@@ -12,7 +12,7 @@ import (
 
 // ===== PERMISSION CHECKS =====
 
-func (s *assessmentService) CanAccess(ctx context.Context, assessmentID uint, userID uint) (bool, error) {
+func (s *assessmentService) CanAccess(ctx context.Context, assessmentID uint, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *assessmentService) CanAccess(ctx context.Context, assessmentID uint, us
 	return false, nil
 }
 
-func (s *assessmentService) CanEdit(ctx context.Context, assessmentID uint, userID uint) (bool, error) {
+func (s *assessmentService) CanEdit(ctx context.Context, assessmentID uint, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -84,7 +84,7 @@ func (s *assessmentService) CanEdit(ctx context.Context, assessmentID uint, user
 	return false, nil
 }
 
-func (s *assessmentService) CanDelete(ctx context.Context, assessmentID uint, userID uint) (bool, error) {
+func (s *assessmentService) CanDelete(ctx context.Context, assessmentID uint, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -116,7 +116,7 @@ func (s *assessmentService) CanDelete(ctx context.Context, assessmentID uint, us
 	return true, nil
 }
 
-func (s *assessmentService) CanTake(ctx context.Context, assessmentID uint, userID uint) (bool, error) {
+func (s *assessmentService) CanTake(ctx context.Context, assessmentID uint, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -145,7 +145,7 @@ func (s *assessmentService) CanTake(ctx context.Context, assessmentID uint, user
 	}
 
 	// Check attempt limits
-	attemptCount, err := s.repo.Attempt().GetAttemptCount(ctx, s.db, assessmentID, userID)
+	attemptCount, err := s.repo.Attempt().GetAttemptCount(ctx, s.db, userID, assessmentID)
 	if err != nil {
 		return false, err
 	}
@@ -162,7 +162,7 @@ func (s *assessmentService) CanTake(ctx context.Context, assessmentID uint, user
 
 // ===== HELPER FUNCTIONS =====
 
-func (s *assessmentService) getUserRole(ctx context.Context, userID uint) (models.UserRole, error) {
+func (s *assessmentService) getUserRole(ctx context.Context, userID string) (models.UserRole, error) {
 	user, err := s.repo.User().GetByID(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get user: %w", err)
@@ -170,7 +170,7 @@ func (s *assessmentService) getUserRole(ctx context.Context, userID uint) (model
 	return user.Role, nil
 }
 
-func (s *assessmentService) canCreateAssessment(ctx context.Context, userID uint) (bool, error) {
+func (s *assessmentService) canCreateAssessment(ctx context.Context, userID string) (bool, error) {
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
 		return false, err
@@ -179,7 +179,7 @@ func (s *assessmentService) canCreateAssessment(ctx context.Context, userID uint
 	return userRole == models.RoleTeacher || userRole == models.RoleAdmin, nil
 }
 
-func (s *assessmentService) buildAssessmentResponse(ctx context.Context, assessment *models.Assessment, userID uint) *AssessmentResponse {
+func (s *assessmentService) buildAssessmentResponse(ctx context.Context, assessment *models.Assessment, userID string) *AssessmentResponse {
 	response := &AssessmentResponse{
 		Assessment: assessment,
 	}
@@ -253,6 +253,7 @@ func (s *assessmentService) applyAssessmentUpdates(assessment *models.Assessment
 		assessment.DueDate = req.DueDate
 	}
 
+	assessment.Version += 1
 	assessment.UpdatedAt = time.Now()
 }
 
@@ -319,7 +320,7 @@ func (s *assessmentService) applySettingsUpdates(settings *models.AssessmentSett
 	}
 }
 
-func (s *assessmentService) addQuestionsToAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint, questions []AssessmentQuestionRequest, userID uint) error {
+func (s *assessmentService) addQuestionsToAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint, questions []AssessmentQuestionRequest, userID string) error {
 	for _, qReq := range questions {
 		// Add question to assessment
 		if err := s.repo.AssessmentQuestion().AddQuestion(ctx, tx, assessmentID, qReq.QuestionID, qReq.Order, qReq.Points); err != nil {
@@ -332,7 +333,7 @@ func (s *assessmentService) addQuestionsToAssessment(ctx context.Context, tx *go
 
 // ===== VALIDATION FUNCTIONS =====
 
-func (s *assessmentService) validateCreateRequest(ctx context.Context, req *CreateAssessmentRequest, creatorID uint) error {
+func (s *assessmentService) validateCreateRequest(ctx context.Context, req *CreateAssessmentRequest, creatorID string) error {
 	var errors ValidationErrors
 
 	// Check title uniqueness
@@ -378,7 +379,7 @@ func (s *assessmentService) validateCreateRequest(ctx context.Context, req *Crea
 	return nil
 }
 
-func (s *assessmentService) validateUpdateRequest(ctx context.Context, req *UpdateAssessmentRequest, assessment *models.Assessment, userID uint) error {
+func (s *assessmentService) validateUpdateRequest(ctx context.Context, req *UpdateAssessmentRequest, assessment *models.Assessment, userID string) error {
 	var errors ValidationErrors
 
 	// Check title uniqueness if title is being updated

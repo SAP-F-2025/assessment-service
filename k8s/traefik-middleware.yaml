@@ -1,0 +1,278 @@
+# Security Headers Middleware
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers
+  namespace: default
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: "https"
+    customResponseHeaders:
+      X-Robots-Tag: "noindex,nofollow,nosnippet,noarchive"
+      X-Frame-Options: "SAMEORIGIN"
+      X-Content-Type-Options: "nosniff"
+      Referrer-Policy: "strict-origin-when-cross-origin"
+      Permissions-Policy: "camera=(), microphone=(), geolocation=()"
+    contentSecurityPolicy: |
+      default-src 'self';
+      script-src 'self' 'unsafe-inline' 'unsafe-eval';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data: https:;
+      font-src 'self' data:;
+      connect-src 'self' https: wss:;
+      frame-ancestors 'self';
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    stsPreload: true
+
+---
+# Rate Limiting Middleware
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: rate-limit
+  namespace: default
+spec:
+  rateLimit:
+    average: 100
+    burst: 200
+    period: 1m
+    sourceCriterion:
+      ipStrategy:
+        depth: 1
+
+---
+# Rate Limiting for API endpoints
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: api-rate-limit
+  namespace: default
+spec:
+  rateLimit:
+    average: 50
+    burst: 100
+    period: 1m
+    sourceCriterion:
+      ipStrategy:
+        depth: 1
+
+---
+# Rate Limiting for sensitive endpoints (payment, etc.)
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: strict-rate-limit
+  namespace: default
+spec:
+  rateLimit:
+    average: 10
+    burst: 20
+    period: 1m
+    sourceCriterion:
+      ipStrategy:
+        depth: 1
+
+---
+# CORS Middleware
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: cors
+  namespace: default
+spec:
+  headers:
+    accessControlAllowMethods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "PATCH"
+      - "OPTIONS"
+    accessControlAllowHeaders:
+      - "Accept"
+      - "Accept-Language"
+      - "Content-Language"
+      - "Content-Type"
+      - "Authorization"
+      - "X-Requested-With"
+      - "X-Request-ID"
+    accessControlAllowOriginList:
+      - "http://localhost:3000"
+      - "http://localhost:8080"
+      - "https://yourcompany.com"
+      - "https://*.yourcompany.com"
+    accessControlMaxAge: 86400
+    addVaryHeader: true
+
+---
+# Authentication Middleware (ForwardAuth)
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: auth-forward
+  namespace: default
+spec:
+  forwardAuth:
+    address: "http://auth-service:8080/auth/verify"
+    authRequestHeaders:
+      - "Accept"
+      - "Authorization"
+      - "Content-Type"
+      - "X-Requested-With"
+    authResponseHeaders:
+      - "X-User-ID"
+      - "X-User-Role"
+      - "X-User-Email"
+
+---
+# Compress Middleware
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: compress
+  namespace: default
+spec:
+  compress:
+    excludedContentTypes:
+      - "text/event-stream"
+
+---
+# Strip Prefix Middleware (for API versioning)
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-api-prefix
+  namespace: default
+spec:
+  stripPrefix:
+    prefixes:
+      - "/api/v1"
+
+---
+# Retry Middleware
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: retry
+  namespace: default
+spec:
+  retry:
+    attempts: 3
+    initialInterval: 100ms
+
+---
+# Circuit Breaker Middleware
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: circuit-breaker
+  namespace: default
+spec:
+  circuitBreaker:
+    expression: "NetworkErrorRatio() > 0.3 || LatencyAtQuantileMS(50.0) > 1000"
+
+---
+# IP Allow List for Admin endpoints
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: admin-ip-whitelist
+  namespace: default
+spec:
+  ipWhiteList:
+    sourceRange:
+      - "127.0.0.1/32"
+      - "10.0.0.0/8"
+      - "192.168.0.0/16"
+      - "172.16.0.0/12"
+
+---
+# Redirect HTTP to HTTPS
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: https-redirect
+  namespace: default
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+
+---
+# Error Pages Middleware
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: error-pages
+  namespace: default
+spec:
+  errors:
+    status:
+      - "400-599"
+    query: "/{status}.html"
+    service:
+      name: error-pages-service
+      port: 8080
+
+---
+# Basic Auth for Dashboard/Metrics
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: basic-auth
+  namespace: default
+spec:
+  basicAuth:
+    secret: basic-auth-secret
+
+---
+# Chain multiple middlewares for different use cases
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: default-chain
+  namespace: default
+spec:
+  chain:
+    middlewares:
+      - name: https-redirect
+      - name: security-headers
+      - name: rate-limit
+      - name: cors
+      - name: compress
+
+---
+# Chain for API endpoints
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: api-chain
+  namespace: default
+spec:
+  chain:
+    middlewares:
+      - name: https-redirect
+      - name: security-headers
+      - name: api-rate-limit
+      - name: cors
+      - name: compress
+      - name: retry
+      - name: circuit-breaker
+
+---
+# Chain for admin/sensitive endpoints
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: admin-chain
+  namespace: default
+spec:
+  chain:
+    middlewares:
+      - name: https-redirect
+      - name: admin-ip-whitelist
+      - name: basic-auth
+      - name: security-headers
+      - name: strict-rate-limit
