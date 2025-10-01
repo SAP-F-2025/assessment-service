@@ -76,16 +76,28 @@ func (v *Validator) GetQuestionValidator() *QuestionValidator {
 // registerCustomValidators registers all custom validation functions
 func registerCustomValidators(validate *validator.Validate) {
 	// Question type validation
-	validate.RegisterValidation("question_type", validateQuestionType)
+	err := validate.RegisterValidation("question_type", validateQuestionType)
+	if err != nil {
+		return
+	}
 
 	// Difficulty level validation
-	validate.RegisterValidation("difficulty_level", validateDifficultyLevel)
+	err = validate.RegisterValidation("difficulty_level", validateDifficultyLevel)
+	if err != nil {
+		return
+	}
 
 	// User role validation
-	validate.RegisterValidation("user_role", validateUserRole)
+	err = validate.RegisterValidation("user_role", validateUserRole)
+	if err != nil {
+		return
+	}
 
 	// Assessment status validation
-	validate.RegisterValidation("assessment_status", validateAssessmentStatus)
+	err = validate.RegisterValidation("assessment_status", validateAssessmentStatus)
+	if err != nil {
+		return
+	}
 
 	// Custom tag name function for better error messages
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {

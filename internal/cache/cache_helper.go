@@ -274,7 +274,10 @@ func (c *CacheHelper) CacheOrExecute(ctx context.Context, key string, dest inter
 	}
 
 	// Store in cache (ignore cache errors)
-	c.Set(ctx, key, value, ttl)
+	err = c.Set(ctx, key, value, ttl)
+	if err != nil {
+		return fmt.Errorf("cache set error: %w", err)
+	}
 
 	// Set the result to destination
 	data, err := json.Marshal(value)

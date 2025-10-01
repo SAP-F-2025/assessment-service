@@ -38,7 +38,7 @@ func (q *QuestionPostgreSQL) Create(ctx context.Context, tx *gorm.DB, question *
 	}
 
 	// Invalidate related caches
-	q.cacheManager.Question.InvalidatePattern(ctx, fmt.Sprintf("creator:%d:*", question.CreatedBy))
+	q.cacheManager.Question.InvalidatePattern(ctx, fmt.Sprintf("creator:%s:*", question.CreatedBy))
 	q.cacheManager.Question.InvalidatePattern(ctx, "list:*")
 
 	return nil
@@ -80,7 +80,7 @@ func (q *QuestionPostgreSQL) GetByIDWithDetails(ctx context.Context, tx *gorm.DB
 			return db.Select("id, username, email")
 		}).
 		First(&question, id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("question not found with ID %d", id)
 		}
 		return nil, fmt.Errorf("failed to get question with details: %w", err)

@@ -182,37 +182,52 @@ func (bv *BusinessValidator) ValidateDeletePermission(hasAttempts bool, status m
 // registerBusinessRules registers custom business rule validators
 func (bv *BusinessValidator) registerBusinessRules() {
 	// Assessment duration validation (5-300 minutes)
-	bv.validate.RegisterValidation("assessment_duration", func(fl validator.FieldLevel) bool {
+	err := bv.validate.RegisterValidation("assessment_duration", func(fl validator.FieldLevel) bool {
 		duration := fl.Field().Int()
 		return duration >= 5 && duration <= 300
 	})
+	if err != nil {
+		return
+	}
 
 	// Passing score validation (0-100)
-	bv.validate.RegisterValidation("passing_score", func(fl validator.FieldLevel) bool {
+	err = bv.validate.RegisterValidation("passing_score", func(fl validator.FieldLevel) bool {
 		score := fl.Field().Int()
 		return score >= 0 && score <= 100
 	})
+	if err != nil {
+		return
+	}
 
 	// Max attempts validation (1-10)
-	bv.validate.RegisterValidation("max_attempts", func(fl validator.FieldLevel) bool {
+	err = bv.validate.RegisterValidation("max_attempts", func(fl validator.FieldLevel) bool {
 		attempts := fl.Field().Int()
 		return attempts >= 1 && attempts <= 10
 	})
+	if err != nil {
+		return
+	}
 
 	// Title validation (1-200 characters)
-	bv.validate.RegisterValidation("assessment_title", func(fl validator.FieldLevel) bool {
+	err = bv.validate.RegisterValidation("assessment_title", func(fl validator.FieldLevel) bool {
 		title := strings.TrimSpace(fl.Field().String())
 		return len(title) >= 1 && len(title) <= 200
 	})
+	if err != nil {
+		return
+	}
 
 	// Description validation (max 1000 characters)
-	bv.validate.RegisterValidation("assessment_description", func(fl validator.FieldLevel) bool {
+	err = bv.validate.RegisterValidation("assessment_description", func(fl validator.FieldLevel) bool {
 		desc := fl.Field().String()
 		return len(desc) <= 1000
 	})
+	if err != nil {
+		return
+	}
 
 	// Due date validation (must be in future)
-	bv.validate.RegisterValidation("future_date", func(fl validator.FieldLevel) bool {
+	err = bv.validate.RegisterValidation("future_date", func(fl validator.FieldLevel) bool {
 		field := fl.Field()
 
 		// Check if field can be nil and is nil (for pointer types)
@@ -232,21 +247,30 @@ func (bv *BusinessValidator) registerBusinessRules() {
 
 		return dueDate.After(time.Now())
 	})
+	if err != nil {
+		return
+	}
 
 	// Points range validation
-	bv.validate.RegisterValidation("points_range", func(fl validator.FieldLevel) bool {
+	err = bv.validate.RegisterValidation("points_range", func(fl validator.FieldLevel) bool {
 		points := fl.Field().Int()
 		return points >= 1 && points <= 100
 	})
+	if err != nil {
+		return
+	}
 
 	// Time limit validation
-	bv.validate.RegisterValidation("time_limit", func(fl validator.FieldLevel) bool {
+	err = bv.validate.RegisterValidation("time_limit", func(fl validator.FieldLevel) bool {
 		timeLimit := fl.Field().Int()
 		return timeLimit >= 30 && timeLimit <= 3600
 	})
+	if err != nil {
+		return
+	}
 
 	// question type validation
-	bv.validate.RegisterValidation("question_type", func(fl validator.FieldLevel) bool {
+	err = bv.validate.RegisterValidation("question_type", func(fl validator.FieldLevel) bool {
 		qType := fl.Field().String()
 		validTypes := []models.QuestionType{models.TrueFalse, models.MultipleChoice, models.Essay, models.Matching, models.Ordering, models.ShortAnswer}
 		for _, vt := range validTypes {
@@ -256,9 +280,12 @@ func (bv *BusinessValidator) registerBusinessRules() {
 		}
 		return false
 	})
+	if err != nil {
+		return
+	}
 
 	// difficulty level validation
-	bv.validate.RegisterValidation("difficulty_level", func(fl validator.FieldLevel) bool {
+	err = bv.validate.RegisterValidation("difficulty_level", func(fl validator.FieldLevel) bool {
 		level := fl.Field().String()
 		validLevels := []models.DifficultyLevel{models.DifficultyEasy, models.DifficultyMedium, models.DifficultyHard}
 		for _, vl := range validLevels {
@@ -268,6 +295,9 @@ func (bv *BusinessValidator) registerBusinessRules() {
 		}
 		return false
 	})
+	if err != nil {
+		return
+	}
 }
 
 // validateAssessmentBusinessRules validates business rules for assessment creation
