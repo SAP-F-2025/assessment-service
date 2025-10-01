@@ -82,22 +82,13 @@ func registerCustomValidators(validate *validator.Validate) {
 	}
 
 	// Difficulty level validation
-	err = validate.RegisterValidation("difficulty_level", validateDifficultyLevel)
-	if err != nil {
-		return
-	}
+	validate.RegisterValidation("difficulty_level", validateDifficultyLevel)
 
 	// User role validation
-	err = validate.RegisterValidation("user_role", validateUserRole)
-	if err != nil {
-		return
-	}
+	validate.RegisterValidation("user_role", validateUserRole)
 
 	// Assessment status validation
-	err = validate.RegisterValidation("assessment_status", validateAssessmentStatus)
-	if err != nil {
-		return
-	}
+	validate.RegisterValidation("assessment_status", validateAssessmentStatus)
 
 	// Custom tag name function for better error messages
 	validate.RegisterTagNameFunc(func(fld reflect.StructField) string {
