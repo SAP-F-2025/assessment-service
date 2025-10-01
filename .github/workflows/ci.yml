@@ -118,13 +118,13 @@ jobs:
       run: docker push ${{ env.DOCKER_IMAGE }}:$(echo $GITHUB_SHA | head -c7)
 
     - name: Update deployment file
-      run: TAG=$(echo $GITHUB_SHA | head -c7) && sed -i 's|<IMAGE>|${{ env.DOCKER_IMAGE }}:'${TAG}'|' $GITHUB_WORKSPACE/k8s/deployment.yml
+      run: TAG=$(echo $GITHUB_SHA | head -c7) && sed -i 's|<IMAGE>|${{ env.DOCKER_IMAGE }}:'${TAG}'|' $GITHUB_WORKSPACE/k8s/deployment.yaml
 
     - name: Save DigitalOcean kubeconfig
       run: doctl kubernetes cluster kubeconfig save  --expiry-seconds 600 ${{ env.DO_CLUSTER_NAME }}
 
     - name: Deploy to DigitalOcean Kubernetes
-      run: kubectl apply -f $GITHUB_WORKSPACE/k8s/deployment.yml
+      run: kubectl apply -f $GITHUB_WORKSPACE/k8s/deployment.yaml
 
     - name: Verify deployment
       run: kubectl rollout status deployment/assessment-service
