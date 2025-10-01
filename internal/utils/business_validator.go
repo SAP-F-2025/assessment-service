@@ -38,7 +38,7 @@ func (ve ValidationErrors) Error() string {
 // NewBusinessValidator creates a new business validator
 func NewBusinessValidator() *BusinessValidator {
 	validate := validator.New()
-	RegisterCustomValidators(validate)
+	// RegisterCustomValidators(validate)
 
 	bv := &BusinessValidator{validate: validate}
 	bv.registerBusinessRules()
