@@ -8,33 +8,18 @@ metadata:
 data:
   # Application Configuration
   PORT: "8080"
-  ENVIRONMENT: "production"
-  LOG_LEVEL: "INFO"
+  ENVIRONMENT: "staging"  # Options: development, staging, production
+  LOG_LEVEL: "info"  # Options: debug, info, warn, error
 
-  # Database Configuration
-  DB_HOST: "postgres-service"
-  DB_PORT: "5432"
-  DB_NAME: "assessment_db"
-  DB_USER: "assessment_user"
-  DB_SSL_MODE: "require"
+  EVENTS_ENABLED: "false"
+  EVENTS_PUBLISHER: "kafka"
 
-  # Redis Configuration
-  REDIS_HOST: "redis-service"
-  REDIS_PORT: "6379"
-  REDIS_DB: "0"
+  KAFKA_BROKERS: "localhost:9092"
 
   # Casdoor Configuration
-  CASDOOR_ENDPOINT: "https://casdoor.example.com"
-  CASDOOR_ORGANIZATION: "assessment-org"
-  CASDOOR_APPLICATION: "assessment-app"
-
-  # Health Check Configuration
-  HEALTH_CHECK_PATH: "/health"
-
-  # CORS Configuration
-  CORS_ALLOWED_ORIGINS: "*"
-  CORS_ALLOWED_METHODS: "GET,POST,PUT,DELETE,OPTIONS"
-  CORS_ALLOWED_HEADERS: "Content-Type,Authorization"
+  CASDOOR_ENDPOINT: "casdoor-service"
+  CASDOOR_ORGANIZATION: "sap"
+  CASDOOR_APPLICATION: "assessment-service"
 
   # File Upload Configuration
   MAX_UPLOAD_SIZE: "10MB"

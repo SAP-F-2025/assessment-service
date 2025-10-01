@@ -5,9 +5,8 @@ metadata:
   namespace: default
   labels:
     app: assessment-service
-    version: v1
 spec:
-  replicas: 3
+  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -20,206 +19,113 @@ spec:
     metadata:
       labels:
         app: assessment-service
-        version: v1
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
-        prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: assessment-service
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1001
-        runAsGroup: 1001
-        fsGroup: 1001
       containers:
-      - name: assessment-service
-        image: your-registry/assessment-service:latest
-        imagePullPolicy: Always
-        ports:
-        - name: http
-          containerPort: 8080
-          protocol: TCP
-        env:
-        # Load configuration from ConfigMap
-        - name: PORT
-          valueFrom:
-            configMapKeyRef:
-              name: assessment-service-config
-              key: PORT
-        - name: ENVIRONMENT
-          valueFrom:
-            configMapKeyRef:
-              name: assessment-service-config
-              key: ENVIRONMENT
-        - name: LOG_LEVEL
-          valueFrom:
-            configMapKeyRef:
-              name: assessment-service-config
-              key: LOG_LEVEL
-        - name: TZ
-          valueFrom:
-            configMapKeyRef:
-              name: assessment-service-config
-              key: TZ
+        - name: assessment-service
+          image: <IMAGE>
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # ConfigMap values
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: PORT
+            - name: ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: ENVIRONMENT
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: LOG_LEVEL
+            - name: EVENTS_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: EVENTS_ENABLED
+            - name: EVENTS_PUBLISHER
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: EVENTS_PUBLISHER
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: KAFKA_BROKERS
+            - name:  CASDOOR_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: CASDOOR_ENDPOINT
+            - name: CASDOOR_ORGANIZATION
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: CASDOOR_ORGANIZATION
+            - name: CASDOOR_APPLICATION
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: CASDOOR_APPLICATION
 
-        # Load secrets
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: assessment-service-secret
-              key: DATABASE_URL
-        - name: REDIS_URL
-          valueFrom:
-            secretKeyRef:
-              name: assessment-service-secret
-              key: REDIS_URL
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: assessment-service-secret
-              key: JWT_SECRET
-        - name: CASDOOR_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: assessment-service-secret
-              key: CASDOOR_CLIENT_ID
-        - name: CASDOOR_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: assessment-service-secret
-              key: CASDOOR_CLIENT_SECRET
-        - name: CASDOOR_CERT
-          valueFrom:
-            secretKeyRef:
-              name: assessment-service-secret
-              key: CASDOOR_CERT
+            # Secret values
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: REDIS_URL
+            - name: CASDOOR_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: CASDOOR_CLIENT_ID
+            - name: CASDOOR_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: CASDOOR_CLIENT_SECRET
+            - name: CASDOOR_CERT
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: CASDOOR_CERT
 
-        # Casdoor configuration from ConfigMap
-        - name: CASDOOR_ENDPOINT
-          valueFrom:
-            configMapKeyRef:
-              name: assessment-service-config
-              key: CASDOOR_ENDPOINT
-        - name: CASDOOR_ORGANIZATION
-          valueFrom:
-            configMapKeyRef:
-              name: assessment-service-config
-              key: CASDOOR_ORGANIZATION
-        - name: CASDOOR_APPLICATION
-          valueFrom:
-            configMapKeyRef:
-              name: assessment-service-config
-              key: CASDOOR_APPLICATION
+          # Health checks
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
 
-        # Health checks
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: http
-            scheme: HTTP
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-          successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
 
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: http
-            scheme: HTTP
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
-          successThreshold: 1
-
-        # Startup probe for slow starting containers
-        startupProbe:
-          httpGet:
-            path: /health
-            port: http
-            scheme: HTTP
-          initialDelaySeconds: 10
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 12
-          successThreshold: 1
-
-        # Resource limits and requests
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-
-        # Security context
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop:
-            - ALL
-
-        # Volume mounts for temporary files
-        volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-        - name: uploads
-          mountPath: /uploads
-
-      # Volumes
-      volumes:
-      - name: tmp
-        emptyDir: {}
-      - name: uploads
-        emptyDir:
-          sizeLimit: 1Gi
-
-      # Pod disruption policy
-      terminationGracePeriodSeconds: 60
-
-      # Image pull secrets (if using private registry)
-      imagePullSecrets:
-      - name: registry-secret
-
----
-# ServiceAccount for the deployment
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: assessment-service
-  namespace: default
-  labels:
-    app: assessment-service
-
----
-# Role for the service account
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: assessment-service
-  namespace: default
-rules:
-- apiGroups: [""]
-  resources: ["configmaps", "secrets"]
-  verbs: ["get", "list"]
-
----
-# RoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: assessment-service
-  namespace: default
-subjects:
-- kind: ServiceAccount
-  name: assessment-service
-  namespace: default
-roleRef:
-  kind: Role
-  name: assessment-service
-  apiGroup: rbac.authorization.k8s.io
+          # Resource limits
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
