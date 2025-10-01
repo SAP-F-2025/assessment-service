@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"log/slog"
 	"os"
 	"strings"
@@ -31,7 +32,7 @@ type CasdoorConfig struct {
 func LoadConfig() (*Config, error) {
 	err := godotenv.Load()
 	if err != nil {
-		return nil, err
+		log.Println("Error loading .env file, proceeding with environment variables: ", err)
 	}
 
 	return &Config{
