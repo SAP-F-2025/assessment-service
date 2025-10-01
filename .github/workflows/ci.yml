@@ -93,12 +93,6 @@ jobs:
         CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
           -o assessment-service main.go
 
-    - name: Upload build artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: assessment-service-binary
-        path: assessment-service
-
   deploy-digitalocean:
     name: Deploy to DigitalOcean Kubernetes
     runs-on: ubuntu-latest
