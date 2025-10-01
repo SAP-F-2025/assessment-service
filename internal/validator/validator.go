@@ -76,7 +76,10 @@ func (v *Validator) GetQuestionValidator() *QuestionValidator {
 // registerCustomValidators registers all custom validation functions
 func registerCustomValidators(validate *validator.Validate) {
 	// Question type validation
-	validate.RegisterValidation("question_type", validateQuestionType)
+	err := validate.RegisterValidation("question_type", validateQuestionType)
+	if err != nil {
+		return
+	}
 
 	// Difficulty level validation
 	validate.RegisterValidation("difficulty_level", validateDifficultyLevel)
