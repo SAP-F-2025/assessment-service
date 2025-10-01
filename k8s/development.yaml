@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: assessment-service
+  namespace: default
+  labels:
+    app: assessment-service
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: assessment-service
+  template:
+    metadata:
+      labels:
+        app: assessment-service
+    spec:
+      containers:
+        - name: assessment-service
+          image: <IMAGE>
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # ConfigMap values
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: PORT
+            - name: ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: ENVIRONMENT
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: LOG_LEVEL
+            - name: EVENTS_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: EVENTS_ENABLED
+            - name: EVENTS_PUBLISHER
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: EVENTS_PUBLISHER
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: KAFKA_BROKERS
+            - name:  CASDOOR_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: CASDOOR_ENDPOINT
+            - name: CASDOOR_ORGANIZATION
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: CASDOOR_ORGANIZATION
+            - name: CASDOOR_APPLICATION
+              valueFrom:
+                configMapKeyRef:
+                  name: assessment-service-config
+                  key: CASDOOR_APPLICATION
+
+            # Secret values
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: REDIS_URL
+            - name: CASDOOR_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: CASDOOR_CLIENT_ID
+            - name: CASDOOR_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: CASDOOR_CLIENT_SECRET
+            - name: CASDOOR_CERT
+              valueFrom:
+                secretKeyRef:
+                  name: assessment-service-secret
+                  key: CASDOOR_CERT
+
+          # Health checks
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # Resource limits
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
