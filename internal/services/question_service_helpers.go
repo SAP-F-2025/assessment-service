@@ -11,7 +11,7 @@ import (
 
 // ===== STATISTICS =====
 
-func (s *questionService) GetStats(ctx context.Context, questionID uint, userID uint) (*repositories.QuestionStats, error) {
+func (s *questionService) GetStats(ctx context.Context, questionID uint, userID string) (*repositories.QuestionStats, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, questionID, userID)
 	if err != nil {
@@ -29,7 +29,7 @@ func (s *questionService) GetStats(ctx context.Context, questionID uint, userID 
 	return stats, nil
 }
 
-func (s *questionService) GetUsageStats(ctx context.Context, creatorID uint) (*repositories.QuestionUsageStats, error) {
+func (s *questionService) GetUsageStats(ctx context.Context, creatorID string) (*repositories.QuestionUsageStats, error) {
 	stats, err := s.repo.Question().GetUsageStats(ctx, nil, creatorID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get usage stats: %w", err)
@@ -40,7 +40,7 @@ func (s *questionService) GetUsageStats(ctx context.Context, creatorID uint) (*r
 
 // ===== PERMISSION CHECKS =====
 
-func (s *questionService) CanAccess(ctx context.Context, questionID uint, userID uint) (bool, error) {
+func (s *questionService) CanAccess(ctx context.Context, questionID uint, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -83,7 +83,7 @@ func (s *questionService) CanAccess(ctx context.Context, questionID uint, userID
 	return false, nil
 }
 
-func (s *questionService) CanEdit(ctx context.Context, questionID uint, userID uint) (bool, error) {
+func (s *questionService) CanEdit(ctx context.Context, questionID uint, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -114,7 +114,7 @@ func (s *questionService) CanEdit(ctx context.Context, questionID uint, userID u
 	return false, nil
 }
 
-func (s *questionService) CanDelete(ctx context.Context, questionID uint, userID uint) (bool, error) {
+func (s *questionService) CanDelete(ctx context.Context, questionID uint, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -148,7 +148,7 @@ func (s *questionService) CanDelete(ctx context.Context, questionID uint, userID
 
 // ===== HELPER FUNCTIONS =====
 
-func (s *questionService) getUserRole(ctx context.Context, userID uint) (models.UserRole, error) {
+func (s *questionService) getUserRole(ctx context.Context, userID string) (models.UserRole, error) {
 	user, err := s.repo.User().GetByID(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get user: %w", err)
@@ -156,7 +156,7 @@ func (s *questionService) getUserRole(ctx context.Context, userID uint) (models.
 	return user.Role, nil
 }
 
-func (s *questionService) canCreateQuestion(ctx context.Context, userID uint) (bool, error) {
+func (s *questionService) canCreateQuestion(ctx context.Context, userID string) (bool, error) {
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
 		return false, err
@@ -165,7 +165,7 @@ func (s *questionService) canCreateQuestion(ctx context.Context, userID uint) (b
 	return userRole == models.RoleTeacher || userRole == models.RoleAdmin, nil
 }
 
-func (s *questionService) canAccessQuestionBank(ctx context.Context, bankID uint, userID uint) (bool, error) {
+func (s *questionService) canAccessQuestionBank(ctx context.Context, bankID uint, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -201,7 +201,7 @@ func (s *questionService) canAccessQuestionBank(ctx context.Context, bankID uint
 	return false, nil
 }
 
-func (s *questionService) canEditQuestionBank(ctx context.Context, bankID uint, userID uint) (bool, error) {
+func (s *questionService) canEditQuestionBank(ctx context.Context, bankID uint, userID string) (bool, error) {
 	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -223,7 +223,7 @@ func (s *questionService) canEditQuestionBank(ctx context.Context, bankID uint, 
 	return bank.CreatedBy == userID, nil
 }
 
-func (s *questionService) buildQuestionResponse(ctx context.Context, question *models.Question, userID uint) *QuestionResponse {
+func (s *questionService) buildQuestionResponse(ctx context.Context, question *models.Question, userID string) *QuestionResponse {
 	response := &QuestionResponse{
 		Question: question,
 	}
@@ -289,7 +289,7 @@ func (s *questionService) applyQuestionUpdates(question *models.Question, req *U
 	return nil
 }
 
-func (s *questionService) validateCategoryAccess(ctx context.Context, categoryID uint, userID uint) error {
+func (s *questionService) validateCategoryAccess(ctx context.Context, categoryID uint, userID string) error {
 	// Get category
 	category, err := s.repo.QuestionCategory().GetByID(ctx, nil, categoryID)
 	if err != nil {

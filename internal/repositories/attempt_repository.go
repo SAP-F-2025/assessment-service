@@ -19,14 +19,14 @@ type AttemptRepository interface {
 
 	// Query operations
 	List(ctx context.Context, tx *gorm.DB, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
-	GetByStudent(ctx context.Context, tx *gorm.DB, studentID uint, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
+	GetByStudent(ctx context.Context, tx *gorm.DB, studentID string, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
 	GetByAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint, filters AttemptFilters) ([]*models.AssessmentAttempt, int64, error)
-	GetByStudentAndAssessment(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) ([]*models.AssessmentAttempt, error)
+	GetByStudentAndAssessment(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) ([]*models.AssessmentAttempt, error)
 
 	// Active attempt management
-	GetActiveAttempt(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (*models.AssessmentAttempt, error)
-	HasActiveAttempt(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (bool, error)
-	GetActiveAttempts(ctx context.Context, tx *gorm.DB, studentID uint) ([]*models.AssessmentAttempt, error)
+	GetActiveAttempt(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (*models.AssessmentAttempt, error)
+	HasActiveAttempt(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (bool, error)
+	GetActiveAttempts(ctx context.Context, tx *gorm.DB, studentID string) ([]*models.AssessmentAttempt, error)
 
 	// Status management
 	UpdateStatus(ctx context.Context, tx *gorm.DB, id uint, status models.AttemptStatus) error
@@ -48,15 +48,15 @@ type AttemptRepository interface {
 	CompleteAttempt(ctx context.Context, tx *gorm.DB, id uint, completedAt time.Time, finalScore float64) error
 
 	// Statistics and analytics
-	GetAttemptCount(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (int, error)
+	GetAttemptCount(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (int, error)
 	GetAssessmentAttemptStats(ctx context.Context, tx *gorm.DB, assessmentID uint) (*AttemptStats, error)
-	GetStudentAttemptStats(ctx context.Context, tx *gorm.DB, studentID uint) (*StudentAttemptStats, error)
+	GetStudentAttemptStats(ctx context.Context, tx *gorm.DB, studentID string) (*StudentAttemptStats, error)
 	GetAttemptsByDateRange(ctx context.Context, tx *gorm.DB, from, to time.Time) ([]*models.AssessmentAttempt, error)
 
 	// Validation and checks
-	CanStartAttempt(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (*AttemptValidation, error)
-	GetNextAttemptNumber(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (int, error)
-	HasCompletedAttempts(ctx context.Context, tx *gorm.DB, studentID, assessmentID uint) (bool, error)
+	CanStartAttempt(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (*AttemptValidation, error)
+	GetNextAttemptNumber(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (int, error)
+	HasCompletedAttempts(ctx context.Context, tx *gorm.DB, studentID string, assessmentID uint) (bool, error)
 
 	// Session management
 	UpdateSessionData(ctx context.Context, tx *gorm.DB, id uint, sessionData interface{}) error
@@ -80,13 +80,13 @@ type AnswerRepository interface {
 	GetByAttempt(ctx context.Context, tx *gorm.DB, attemptID uint) ([]*models.StudentAnswer, error)
 	GetByAttemptAndQuestion(ctx context.Context, tx *gorm.DB, attemptID, questionID uint) (*models.StudentAnswer, error)
 	GetByQuestion(ctx context.Context, tx *gorm.DB, questionID uint, filters AnswerFilters) ([]*models.StudentAnswer, error)
-	GetByStudent(ctx context.Context, tx *gorm.DB, studentID uint, filters AnswerFilters) ([]*models.StudentAnswer, error)
+	GetByStudent(ctx context.Context, tx *gorm.DB, studentID string, filters AnswerFilters) ([]*models.StudentAnswer, error)
 
 	// Grading operations
-	UpdateGrade(ctx context.Context, tx *gorm.DB, id uint, score float64, isCorrect *bool, feedback *string, graderID uint) error
+	UpdateGrade(ctx context.Context, tx *gorm.DB, id uint, score float64, isCorrect *bool, feedback *string, graderID string) error
 	BulkGrade(ctx context.Context, tx *gorm.DB, grades []AnswerGrade) error
-	GetPendingGrading(ctx context.Context, tx *gorm.DB, teacherID uint) ([]*models.StudentAnswer, error)
-	GetGradedAnswers(ctx context.Context, tx *gorm.DB, graderID uint, filters AnswerFilters) ([]*models.StudentAnswer, error)
+	GetPendingGrading(ctx context.Context, tx *gorm.DB, teacherID string) ([]*models.StudentAnswer, error)
+	GetGradedAnswers(ctx context.Context, tx *gorm.DB, graderID string, filters AnswerFilters) ([]*models.StudentAnswer, error)
 
 	// Answer tracking
 	UpdateAnswerHistory(ctx context.Context, tx *gorm.DB, id uint, newAnswer interface{}) error
@@ -100,7 +100,7 @@ type AnswerRepository interface {
 
 	// Statistics and analytics
 	GetAnswerStats(ctx context.Context, tx *gorm.DB, questionID uint) (*AnswerStats, error)
-	GetStudentAnswerStats(ctx context.Context, tx *gorm.DB, studentID uint) (*StudentAnswerStats, error)
+	GetStudentAnswerStats(ctx context.Context, tx *gorm.DB, studentID string) (*StudentAnswerStats, error)
 	GetAnswerDistribution(ctx context.Context, tx *gorm.DB, questionID uint) (*AnswerDistribution, error)
 	GetGradingStats(ctx context.Context, tx *gorm.DB, assessmentID uint) (*GradingStats, error)
 	GetByIDWithDetails(ctx context.Context, tx *gorm.DB, id uint) (*models.StudentAnswer, error)
@@ -165,7 +165,7 @@ type AnswerStats struct {
 }
 
 type StudentAnswerStats struct {
-	StudentID         uint                               `json:"student_id"`
+	StudentID         string                             `json:"student_id"`
 	TotalAnswers      int                                `json:"total_answers"`
 	CorrectAnswers    int                                `json:"correct_answers"`
 	CorrectRate       float64                            `json:"correct_rate"`

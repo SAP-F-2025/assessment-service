@@ -16,6 +16,16 @@ type Config struct {
 	Environment string
 	LogLevel    slog.Level
 	Events      EventConfig
+	Casdoor     CasdoorConfig
+}
+
+type CasdoorConfig struct {
+	Endpoint     string
+	ClientID     string
+	ClientSecret string
+	Cert         string
+	Organization string
+	Application  string
 }
 
 func LoadConfig() (*Config, error) {
@@ -36,6 +46,14 @@ func LoadConfig() (*Config, error) {
 			Publisher:         getEnv("EVENTS_PUBLISHER", "kafka"),
 			KafkaBrokers:      getEnv("KAFKA_BROKERS", "localhost:9092"),
 			NotificationTopic: getEnv("NOTIFICATION_TOPIC", "notifications"),
+		},
+		Casdoor: CasdoorConfig{
+			Endpoint:     getEnv("CASDOOR_ENDPOINT", "http://localhost:8000"),
+			ClientID:     getEnv("CASDOOR_CLIENT_ID", ""),
+			ClientSecret: getEnv("CASDOOR_CLIENT_SECRET", ""),
+			Organization: getEnv("CASDOOR_ORGANIZATION", ""),
+			Application:  getEnv("CASDOOR_APPLICATION", ""),
+			Cert:         getEnv("CASDOOR_CERT", ""),
 		},
 	}, nil
 }

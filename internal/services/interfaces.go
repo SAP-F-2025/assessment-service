@@ -7,18 +7,18 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
-	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 )
 
 // ===== REQUEST/RESPONSE DTOs =====
 
 // Use business validator types
-type CreateAssessmentRequest = utils.AssessmentCreateRequest
-type UpdateAssessmentRequest = utils.AssessmentUpdateRequest
-type AssessmentSettingsRequest = utils.AssessmentSettingsRequest
+type CreateAssessmentRequest = validator.AssessmentCreateRequest
+type UpdateAssessmentRequest = validator.AssessmentUpdateRequest
+type AssessmentSettingsRequest = validator.AssessmentSettingsRequest
 
 // Use business validator types
-type AssessmentQuestionRequest = utils.AssessmentQuestionRequest
+type AssessmentQuestionRequest = validator.AssessmentQuestionRequest
 
 type AssessmentResponse struct {
 	*models.Assessment
@@ -74,7 +74,7 @@ type QuestionForAttempt struct {
 // ===== QUESTION RELATED DTOs =====
 
 // Use business validator types
-type CreateQuestionRequest = utils.QuestionCreateRequest
+type CreateQuestionRequest = validator.QuestionCreateRequest
 
 type UpdateQuestionRequest struct {
 	Text        *string                 `json:"text" validate:"omitempty,max=2000"`
@@ -112,7 +112,7 @@ type GradingResult struct {
 	PartialCredit bool      `json:"partial_credit"`
 	Feedback      *string   `json:"feedback"`
 	GradedAt      time.Time `json:"graded_at"`
-	GradedBy      *uint     `json:"graded_by"`
+	GradedBy      *string   `json:"graded_by"`
 }
 
 type AttemptGradingResult struct {
@@ -124,7 +124,7 @@ type AttemptGradingResult struct {
 	Grade      *string         `json:"grade"`
 	Questions  []GradingResult `json:"questions"`
 	GradedAt   time.Time       `json:"graded_at"`
-	GradedBy   uint            `json:"graded_by"`
+	GradedBy   string          `json:"graded_by"`
 }
 
 // ===== QUESTION BANK RELATED DTOs =====
@@ -144,9 +144,9 @@ type UpdateQuestionBankRequest struct {
 }
 
 type ShareQuestionBankRequest struct {
-	UserID    uint `json:"user_id" validate:"required"`
-	CanEdit   bool `json:"can_edit"`
-	CanDelete bool `json:"can_delete"`
+	UserID    string `json:"user_id" validate:"required"`
+	CanEdit   bool   `json:"can_edit"`
+	CanDelete bool   `json:"can_delete"`
 }
 
 type QuestionBankResponse struct {
@@ -179,144 +179,144 @@ type AddQuestionsTobankRequest struct {
 
 type AssessmentService interface {
 	// Core CRUD operations
-	Create(ctx context.Context, req *CreateAssessmentRequest, creatorID uint) (*AssessmentResponse, error)
-	GetByID(ctx context.Context, id uint, userID uint) (*AssessmentResponse, error)
-	GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*AssessmentResponse, error)
-	Update(ctx context.Context, id uint, req *UpdateAssessmentRequest, userID uint) (*AssessmentResponse, error)
-	Delete(ctx context.Context, id uint, userID uint) error
+	Create(ctx context.Context, req *CreateAssessmentRequest, creatorID string) (*AssessmentResponse, error)
+	GetByID(ctx context.Context, id uint, userID string) (*AssessmentResponse, error)
+	GetByIDWithDetails(ctx context.Context, id uint, userID string) (*AssessmentResponse, error)
+	Update(ctx context.Context, id uint, req *UpdateAssessmentRequest, userID string) (*AssessmentResponse, error)
+	Delete(ctx context.Context, id uint, userID string) error
 
 	// List and search operations
-	List(ctx context.Context, filters repositories.AssessmentFilters, userID uint) (*AssessmentListResponse, error)
-	GetByCreator(ctx context.Context, creatorID uint, filters repositories.AssessmentFilters) (*AssessmentListResponse, error)
-	Search(ctx context.Context, query string, filters repositories.AssessmentFilters, userID uint) (*AssessmentListResponse, error)
+	List(ctx context.Context, filters repositories.AssessmentFilters, userID string) (*AssessmentListResponse, error)
+	GetByCreator(ctx context.Context, creatorID string, filters repositories.AssessmentFilters) (*AssessmentListResponse, error)
+	Search(ctx context.Context, query string, filters repositories.AssessmentFilters, userID string) (*AssessmentListResponse, error)
 
 	// Status management
-	UpdateStatus(ctx context.Context, id uint, req *UpdateStatusRequest, userID uint) error
-	Publish(ctx context.Context, id uint, userID uint) error
-	Archive(ctx context.Context, id uint, userID uint) error
+	UpdateStatus(ctx context.Context, id uint, req *UpdateStatusRequest, userID string) error
+	Publish(ctx context.Context, id uint, userID string) error
+	Archive(ctx context.Context, id uint, userID string) error
 
 	// Question management
-	AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points *int, userID uint) error
-	RemoveQuestion(ctx context.Context, assessmentID, questionID uint, userID uint) error
-	ReorderQuestions(ctx context.Context, assessmentID uint, orders []repositories.QuestionOrder, userID uint) error
+	AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points *int, userID string) error
+	RemoveQuestion(ctx context.Context, assessmentID, questionID uint, userID string) error
+	ReorderQuestions(ctx context.Context, assessmentID uint, orders []repositories.QuestionOrder, userID string) error
 
 	// Statistics and analytics
-	GetStats(ctx context.Context, id uint, userID uint) (*repositories.AssessmentStats, error)
-	GetCreatorStats(ctx context.Context, creatorID uint) (*repositories.CreatorStats, error)
+	GetStats(ctx context.Context, id uint, userID string) (*repositories.AssessmentStats, error)
+	GetCreatorStats(ctx context.Context, creatorID string) (*repositories.CreatorStats, error)
 
 	// Permission checks
-	CanAccess(ctx context.Context, assessmentID uint, userID uint) (bool, error)
-	CanEdit(ctx context.Context, assessmentID uint, userID uint) (bool, error)
-	CanDelete(ctx context.Context, assessmentID uint, userID uint) (bool, error)
-	CanTake(ctx context.Context, assessmentID uint, userID uint) (bool, error)
+	CanAccess(ctx context.Context, assessmentID uint, userID string) (bool, error)
+	CanEdit(ctx context.Context, assessmentID uint, userID string) (bool, error)
+	CanDelete(ctx context.Context, assessmentID uint, userID string) (bool, error)
+	CanTake(ctx context.Context, assessmentID uint, userID string) (bool, error)
 }
 
 type QuestionService interface {
 	// Core CRUD operations
-	Create(ctx context.Context, req *CreateQuestionRequest, creatorID uint) (*QuestionResponse, error)
-	GetByID(ctx context.Context, id uint, userID uint) (*QuestionResponse, error)
-	GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*QuestionResponse, error)
-	Update(ctx context.Context, id uint, req *UpdateQuestionRequest, userID uint) (*QuestionResponse, error)
-	Delete(ctx context.Context, id uint, userID uint) error
+	Create(ctx context.Context, req *CreateQuestionRequest, creatorID string) (*QuestionResponse, error)
+	GetByID(ctx context.Context, id uint, userID string) (*QuestionResponse, error)
+	GetByIDWithDetails(ctx context.Context, id uint, userID string) (*QuestionResponse, error)
+	Update(ctx context.Context, id uint, req *UpdateQuestionRequest, userID string) (*QuestionResponse, error)
+	Delete(ctx context.Context, id uint, userID string) error
 
 	// List and search operations
-	List(ctx context.Context, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error)
-	GetByCreator(ctx context.Context, creatorID uint, filters repositories.QuestionFilters) (*QuestionListResponse, error)
-	Search(ctx context.Context, query string, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error)
-	GetRandomQuestions(ctx context.Context, filters repositories.RandomQuestionFilters, userID uint) ([]*models.Question, error)
+	List(ctx context.Context, filters repositories.QuestionFilters, userID string) (*QuestionListResponse, error)
+	GetByCreator(ctx context.Context, creatorID string, filters repositories.QuestionFilters) (*QuestionListResponse, error)
+	Search(ctx context.Context, query string, filters repositories.QuestionFilters, userID string) (*QuestionListResponse, error)
+	GetRandomQuestions(ctx context.Context, filters repositories.RandomQuestionFilters, userID string) ([]*models.Question, error)
 
 	// Bulk operations
-	CreateBatch(ctx context.Context, questions []*CreateQuestionRequest, creatorID uint) ([]*QuestionResponse, []error)
-	UpdateBatch(ctx context.Context, updates map[uint]*UpdateQuestionRequest, userID uint) (map[uint]*QuestionResponse, map[uint]error)
+	CreateBatch(ctx context.Context, questions []*CreateQuestionRequest, creatorID string) ([]*QuestionResponse, []error)
+	UpdateBatch(ctx context.Context, updates map[uint]*UpdateQuestionRequest, userID string) (map[uint]*QuestionResponse, map[uint]error)
 
 	// Question banking
-	GetByBank(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error)
-	AddToBank(ctx context.Context, questionID, bankID uint, userID uint) error
-	RemoveFromBank(ctx context.Context, questionID, bankID uint, userID uint) error
+	GetByBank(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID string) (*QuestionListResponse, error)
+	AddToBank(ctx context.Context, questionID, bankID uint, userID string) error
+	RemoveFromBank(ctx context.Context, questionID, bankID uint, userID string) error
 
 	// Statistics
-	GetStats(ctx context.Context, questionID uint, userID uint) (*repositories.QuestionStats, error)
-	GetUsageStats(ctx context.Context, creatorID uint) (*repositories.QuestionUsageStats, error)
+	GetStats(ctx context.Context, questionID uint, userID string) (*repositories.QuestionStats, error)
+	GetUsageStats(ctx context.Context, creatorID string) (*repositories.QuestionUsageStats, error)
 
 	// Permission checks
-	CanAccess(ctx context.Context, questionID uint, userID uint) (bool, error)
-	CanEdit(ctx context.Context, questionID uint, userID uint) (bool, error)
-	CanDelete(ctx context.Context, questionID uint, userID uint) (bool, error)
+	CanAccess(ctx context.Context, questionID uint, userID string) (bool, error)
+	CanEdit(ctx context.Context, questionID uint, userID string) (bool, error)
+	CanDelete(ctx context.Context, questionID uint, userID string) (bool, error)
 }
 
 type QuestionBankService interface {
 	// Core CRUD operations
-	Create(ctx context.Context, req *CreateQuestionBankRequest, creatorID uint) (*QuestionBankResponse, error)
-	GetByID(ctx context.Context, id uint, userID uint) (*QuestionBankResponse, error)
-	GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*QuestionBankResponse, error)
-	Update(ctx context.Context, id uint, req *UpdateQuestionBankRequest, userID uint) (*QuestionBankResponse, error)
-	Delete(ctx context.Context, id uint, userID uint) error
+	Create(ctx context.Context, req *CreateQuestionBankRequest, creatorID string) (*QuestionBankResponse, error)
+	GetByID(ctx context.Context, id uint, userID string) (*QuestionBankResponse, error)
+	GetByIDWithDetails(ctx context.Context, id uint, userID string) (*QuestionBankResponse, error)
+	Update(ctx context.Context, id uint, req *UpdateQuestionBankRequest, userID string) (*QuestionBankResponse, error)
+	Delete(ctx context.Context, id uint, userID string) error
 
 	// List and search operations
-	List(ctx context.Context, filters repositories.QuestionBankFilters, userID uint) (*QuestionBankListResponse, error)
-	GetByCreator(ctx context.Context, creatorID uint, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error)
+	List(ctx context.Context, filters repositories.QuestionBankFilters, userID string) (*QuestionBankListResponse, error)
+	GetByCreator(ctx context.Context, creatorID string, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error)
 	GetPublic(ctx context.Context, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error)
-	GetSharedWithUser(ctx context.Context, userID uint, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error)
-	Search(ctx context.Context, query string, filters repositories.QuestionBankFilters, userID uint) (*QuestionBankListResponse, error)
+	GetSharedWithUser(ctx context.Context, userID string, filters repositories.QuestionBankFilters) (*QuestionBankListResponse, error)
+	Search(ctx context.Context, query string, filters repositories.QuestionBankFilters, userID string) (*QuestionBankListResponse, error)
 
 	// Sharing operations
-	ShareBank(ctx context.Context, bankID uint, req *ShareQuestionBankRequest, sharerID uint) error
-	UnshareBank(ctx context.Context, bankID, userID uint, sharerID uint) error
-	UpdateSharePermissions(ctx context.Context, bankID, userID uint, canEdit, canDelete bool, sharerID uint) error
-	GetBankShares(ctx context.Context, bankID uint, userID uint) ([]*QuestionBankShareResponse, error)
-	GetUserShares(ctx context.Context, userID uint, filters repositories.QuestionBankShareFilters) ([]*QuestionBankShareResponse, int64, error)
+	ShareBank(ctx context.Context, bankID uint, req *ShareQuestionBankRequest, sharerID string) error
+	UnshareBank(ctx context.Context, bankID uint, userID string, sharerID string) error
+	UpdateSharePermissions(ctx context.Context, bankID uint, userID string, canEdit, canDelete bool, sharerID string) error
+	GetBankShares(ctx context.Context, bankID uint, userID string) ([]*QuestionBankShareResponse, error)
+	GetUserShares(ctx context.Context, userID string, filters repositories.QuestionBankShareFilters) ([]*QuestionBankShareResponse, int64, error)
 
 	// Question management
-	AddQuestions(ctx context.Context, bankID uint, req *AddQuestionsTobankRequest, userID uint) error
-	RemoveQuestions(ctx context.Context, bankID uint, questionIDs []uint, userID uint) error
-	GetBankQuestions(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID uint) (*QuestionListResponse, error)
+	AddQuestions(ctx context.Context, bankID uint, req *AddQuestionsTobankRequest, userID string) error
+	RemoveQuestions(ctx context.Context, bankID uint, questionIDs []uint, userID string) error
+	GetBankQuestions(ctx context.Context, bankID uint, filters repositories.QuestionFilters, userID string) (*QuestionListResponse, error)
 
 	// Statistics
-	GetStats(ctx context.Context, bankID uint, userID uint) (*repositories.QuestionBankStats, error)
+	GetStats(ctx context.Context, bankID uint, userID string) (*repositories.QuestionBankStats, error)
 
 	// Permission checks
-	CanAccess(ctx context.Context, bankID, userID uint) (bool, error)
-	CanEdit(ctx context.Context, bankID, userID uint) (bool, error)
-	CanDelete(ctx context.Context, bankID, userID uint) (bool, error)
-	IsOwner(ctx context.Context, bankID, userID uint) (bool, error)
+	CanAccess(ctx context.Context, bankID uint, userID string) (bool, error)
+	CanEdit(ctx context.Context, bankID uint, userID string) (bool, error)
+	CanDelete(ctx context.Context, bankID uint, userID string) (bool, error)
+	IsOwner(ctx context.Context, bankID uint, userID string) (bool, error)
 }
 
 type AttemptService interface {
 	// Core attempt operations
-	Start(ctx context.Context, req *StartAttemptRequest, studentID uint) (*AttemptResponse, error)
-	Resume(ctx context.Context, attemptID uint, studentID uint) (*AttemptResponse, error)
-	Submit(ctx context.Context, req *SubmitAttemptRequest, studentID uint) (*AttemptResponse, error)
-	SubmitAnswer(ctx context.Context, attemptID uint, req *SubmitAnswerRequest, studentID uint) error
+	Start(ctx context.Context, req *StartAttemptRequest, studentID string) (*AttemptResponse, error)
+	Resume(ctx context.Context, attemptID uint, studentID string) (*AttemptResponse, error)
+	Submit(ctx context.Context, req *SubmitAttemptRequest, studentID string) (*AttemptResponse, error)
+	SubmitAnswer(ctx context.Context, attemptID uint, req *SubmitAnswerRequest, studentID string) error
 
 	// Get operations
-	GetByID(ctx context.Context, id uint, userID uint) (*AttemptResponse, error)
-	GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*AttemptResponse, error)
-	GetCurrentAttempt(ctx context.Context, assessmentID uint, studentID uint) (*AttemptResponse, error)
+	GetByID(ctx context.Context, id uint, userID string) (*AttemptResponse, error)
+	GetByIDWithDetails(ctx context.Context, id uint, userID string) (*AttemptResponse, error)
+	GetCurrentAttempt(ctx context.Context, assessmentID uint, studentID string) (*AttemptResponse, error)
 
 	// List operations
-	List(ctx context.Context, filters repositories.AttemptFilters, userID uint) ([]*AttemptResponse, int64, error)
-	GetByStudent(ctx context.Context, studentID uint, filters repositories.AttemptFilters) ([]*AttemptResponse, int64, error)
-	GetByAssessment(ctx context.Context, assessmentID uint, filters repositories.AttemptFilters, userID uint) ([]*AttemptResponse, int64, error)
+	List(ctx context.Context, filters repositories.AttemptFilters, userID string) ([]*AttemptResponse, int64, error)
+	GetByStudent(ctx context.Context, studentID string, filters repositories.AttemptFilters) ([]*AttemptResponse, int64, error)
+	GetByAssessment(ctx context.Context, assessmentID uint, filters repositories.AttemptFilters, userID string) ([]*AttemptResponse, int64, error)
 
 	// Time management
-	GetTimeRemaining(ctx context.Context, attemptID uint, studentID uint) (int, error) // seconds
-	ExtendTime(ctx context.Context, attemptID uint, minutes int, userID uint) error
+	GetTimeRemaining(ctx context.Context, attemptID uint, studentID string) (int, error) // seconds
+	ExtendTime(ctx context.Context, attemptID uint, minutes int, userID string) error
 	HandleTimeout(ctx context.Context, attemptID uint) error
 
 	// Validation
-	CanStart(ctx context.Context, assessmentID uint, studentID uint) (bool, error)
-	GetAttemptCount(ctx context.Context, assessmentID uint, studentID uint) (int, error)
+	CanStart(ctx context.Context, assessmentID uint, studentID string) (bool, error)
+	GetAttemptCount(ctx context.Context, assessmentID uint, studentID string) (int, error)
 	IsAttemptActive(ctx context.Context, attemptID uint) (bool, error)
 
 	// Statistics
-	GetStats(ctx context.Context, assessmentID uint, userID uint) (*repositories.AttemptStats, error)
+	GetStats(ctx context.Context, assessmentID uint, userID string) (*repositories.AttemptStats, error)
 }
 
 type GradingService interface {
 	// Manual grading
-	GradeAnswer(ctx context.Context, answerID uint, score float64, feedback *string, graderID uint) (*GradingResult, error)
-	GradeAttempt(ctx context.Context, attemptID uint, graderID uint) (*AttemptGradingResult, error)
-	GradeMultipleAnswers(ctx context.Context, grades []repositories.AnswerGrade, graderID uint) ([]GradingResult, error)
+	GradeAnswer(ctx context.Context, answerID uint, score float64, feedback *string, graderID string) (*GradingResult, error)
+	GradeAttempt(ctx context.Context, attemptID uint, graderID string) (*AttemptGradingResult, error)
+	GradeMultipleAnswers(ctx context.Context, grades []repositories.AnswerGrade, graderID string) ([]GradingResult, error)
 
 	// Auto grading
 	AutoGradeAnswer(ctx context.Context, answerID uint) (*GradingResult, error)
@@ -328,11 +328,11 @@ type GradingService interface {
 	GenerateFeedback(ctx context.Context, questionType models.QuestionType, questionContent json.RawMessage, studentAnswer json.RawMessage, isCorrect bool) (*string, error)
 
 	// Bulk operations
-	ReGradeQuestion(ctx context.Context, questionID uint, userID uint) ([]GradingResult, error)
-	ReGradeAssessment(ctx context.Context, assessmentID uint, userID uint) (map[uint]*AttemptGradingResult, error)
+	ReGradeQuestion(ctx context.Context, questionID uint, userID string) ([]GradingResult, error)
+	ReGradeAssessment(ctx context.Context, assessmentID uint, userID string) (map[uint]*AttemptGradingResult, error)
 
 	// Statistics
-	GetGradingOverview(ctx context.Context, assessmentID uint, userID uint) (*repositories.GradingStats, error)
+	GetGradingOverview(ctx context.Context, assessmentID uint, userID string) (*repositories.GradingStats, error)
 }
 
 // ===== SERVICE MANAGER =====

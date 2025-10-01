@@ -9,7 +9,7 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
-	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"gorm.io/gorm"
 )
 
@@ -17,10 +17,10 @@ type gradingService struct {
 	db        *gorm.DB
 	repo      repositories.Repository
 	logger    *slog.Logger
-	validator *utils.Validator
+	validator *validator.Validator
 }
 
-func NewGradingService(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *utils.Validator) GradingService {
+func NewGradingService(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *validator.Validator) GradingService {
 	return &gradingService{
 		db:        db,
 		repo:      repo,
@@ -31,7 +31,7 @@ func NewGradingService(db *gorm.DB, repo repositories.Repository, logger *slog.L
 
 // ===== MANUAL GRADING =====
 
-func (s *gradingService) GradeAnswer(ctx context.Context, answerID uint, score float64, feedback *string, graderID uint) (*GradingResult, error) {
+func (s *gradingService) GradeAnswer(ctx context.Context, answerID uint, score float64, feedback *string, graderID string) (*GradingResult, error) {
 	s.logger.Info("Manually grading answer",
 		"answer_id", answerID,
 		"score", score,
@@ -91,7 +91,7 @@ func (s *gradingService) GradeAnswer(ctx context.Context, answerID uint, score f
 	return result, nil
 }
 
-func (s *gradingService) GradeAttempt(ctx context.Context, attemptID uint, graderID uint) (*AttemptGradingResult, error) {
+func (s *gradingService) GradeAttempt(ctx context.Context, attemptID uint, graderID string) (*AttemptGradingResult, error) {
 	s.logger.Info("Manually grading attempt",
 		"attempt_id", attemptID,
 		"grader_id", graderID)
@@ -210,7 +210,7 @@ func (s *gradingService) GradeAttempt(ctx context.Context, attemptID uint, grade
 	return result, nil
 }
 
-func (s *gradingService) GradeMultipleAnswers(ctx context.Context, grades []repositories.AnswerGrade, graderID uint) ([]GradingResult, error) {
+func (s *gradingService) GradeMultipleAnswers(ctx context.Context, grades []repositories.AnswerGrade, graderID string) ([]GradingResult, error) {
 	s.logger.Info("Grading multiple answers",
 		"count", len(grades),
 		"grader_id", graderID)
@@ -408,7 +408,7 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 		Grade:      &grade,
 		Questions:  questionResults,
 		GradedAt:   time.Now(),
-		GradedBy:   0, // Auto-graded
+		GradedBy:   "", // Auto-graded
 	}
 
 	s.logger.Info("Attempt auto-graded successfully",

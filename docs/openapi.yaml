@@ -1,0 +1,4242 @@
+openapi: 3.0.3
+info:
+  title: Assessment Service API
+  description: |
+    API dịch vụ đánh giá giáo dục - Cung cấp các tính năng CRUD cho bài thi/kiểm tra giáo dục.
+
+    Dịch vụ hỗ trợ:
+    - 7 loại câu hỏi (trắc nghiệm, đúng/sai, tự luận, điền khuyết, ghép cặp, sắp xếp, câu trả lời ngắn)
+    - Quản lý bài thi với các tính năng giám sát (proctoring)
+    - Hệ thống chấm điểm toàn diện
+    - Ngân hàng câu hỏi và chia sẻ
+    - Thống kê và phân tích chi tiết
+  version: 1.0.0
+  contact:
+    name: Assessment Service Team
+    url: https://github.com/SAP-F-2025/assessment-service
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8888
+    description: Development server
+  - url: https://api.assessment.example.com
+    description: Production server
+
+tags:
+  - name: assessments
+    description: Quản lý bài thi/đánh giá
+  - name: questions
+    description: Quản lý câu hỏi
+  - name: question-banks
+    description: Quản lý ngân hàng câu hỏi
+  - name: attempts
+    description: Quản lý lần thử bài thi
+  - name: grading
+    description: Hệ thống chấm điểm
+  - name: health
+    description: Health check endpoints
+
+security:
+  - BearerAuth: []
+
+paths:
+  # Health Check
+  /health:
+    get:
+      tags:
+        - health
+      summary: Health check
+      description: Kiểm tra trạng thái dịch vụ
+      security: []
+      responses:
+        '200':
+          description: Dịch vụ hoạt động bình thường
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  service:
+                    type: string
+                    example: "assessment-service"
+
+  # Assessment Endpoints
+  /api/v1/assessments:
+    post:
+      tags:
+        - assessments
+      summary: Tạo bài thi mới
+      description: Tạo một bài thi/đánh giá mới
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssessmentCreateRequest'
+      responses:
+        '201':
+          description: Tạo bài thi thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags:
+        - assessments
+      summary: Danh sách bài thi
+      description: Lấy danh sách bài thi với bộ lọc
+      parameters:
+        - name: page
+          in: query
+          description: Số trang
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          description: Kích thước trang
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: status
+          in: query
+          description: Trạng thái bài thi
+          schema:
+            $ref: '#/components/schemas/AssessmentStatus'
+        - name: search
+          in: query
+          description: Tìm kiếm theo tiêu đề
+          schema:
+            type: string
+        - name: creator_id
+          in: query
+          description: ID người tạo
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Danh sách bài thi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAssessmentResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assessments/search:
+    get:
+      tags:
+        - assessments
+      summary: Tìm kiếm bài thi
+      description: Tìm kiếm bài thi theo từ khóa
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Từ khóa tìm kiếm
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Kết quả tìm kiếm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAssessmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assessments/{id}:
+    get:
+      tags:
+        - assessments
+      summary: Lấy chi tiết bài thi
+      description: Lấy thông tin chi tiết bài thi theo ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chi tiết bài thi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - assessments
+      summary: Cập nhật bài thi
+      description: Cập nhật thông tin bài thi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssessmentUpdateRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - assessments
+      summary: Xóa bài thi
+      description: Xóa bài thi (soft delete)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Xóa thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assessments/{id}/details:
+    get:
+      tags:
+        - assessments
+      summary: Lấy chi tiết đầy đủ bài thi
+      description: Lấy thông tin chi tiết bài thi bao gồm câu hỏi và cài đặt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chi tiết đầy đủ bài thi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assessments/{id}/status:
+    put:
+      tags:
+        - assessments
+      summary: Cập nhật trạng thái bài thi
+      description: Thay đổi trạng thái bài thi (Draft/Active/Expired/Archived)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeStatusRequest'
+      responses:
+        '200':
+          description: Cập nhật trạng thái thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusChangeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assessments/{id}/publish:
+    post:
+      tags:
+        - assessments
+      summary: Xuất bản bài thi
+      description: Chuyển trạng thái bài thi từ Draft sang Active
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Xuất bản thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assessments/{id}/archive:
+    post:
+      tags:
+        - assessments
+      summary: Lưu trữ bài thi
+      description: Chuyển trạng thái bài thi sang Archived
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Lưu trữ thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assessments/{id}/stats:
+    get:
+      tags:
+        - assessments
+      summary: Thống kê bài thi
+      description: Lấy thống kê chi tiết về bài thi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Thống kê bài thi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Question Management in Assessments
+  /api/v1/assessments/{id}/questions/{question_id}:
+    post:
+      tags:
+        - assessments
+      summary: Thêm câu hỏi vào bài thi
+      description: Thêm câu hỏi vào bài thi với thứ tự và cài đặt riêng
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+        - name: question_id
+          in: path
+          required: true
+          description: ID câu hỏi
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order:
+                  type: integer
+                  description: Thứ tự câu hỏi trong bài thi
+                points:
+                  type: integer
+                  description: Điểm ghi đè cho câu hỏi này
+                time_limit:
+                  type: integer
+                  description: Giới hạn thời gian ghi đè (giây)
+      responses:
+        '200':
+          description: Thêm câu hỏi thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - assessments
+      summary: Xóa câu hỏi khỏi bài thi
+      description: Xóa câu hỏi khỏi bài thi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+        - name: question_id
+          in: path
+          required: true
+          description: ID câu hỏi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Xóa câu hỏi thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assessments/{id}/questions/reorder:
+    put:
+      tags:
+        - assessments
+      summary: Sắp xếp lại thứ tự câu hỏi
+      description: Thay đổi thứ tự các câu hỏi trong bài thi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                question_orders:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      question_id:
+                        type: integer
+                        format: uint32
+                      order:
+                        type: integer
+      responses:
+        '200':
+          description: Sắp xếp thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Question Endpoints
+  /api/v1/questions:
+    post:
+      tags:
+        - questions
+      summary: Tạo câu hỏi mới
+      description: Tạo một câu hỏi mới với nội dung tùy theo loại
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionCreateRequest'
+      responses:
+        '201':
+          description: Tạo câu hỏi thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags:
+        - questions
+      summary: Danh sách câu hỏi
+      description: Lấy danh sách câu hỏi với bộ lọc
+      parameters:
+        - name: page
+          in: query
+          description: Số trang
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          description: Kích thước trang
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: type
+          in: query
+          description: Loại câu hỏi
+          schema:
+            $ref: '#/components/schemas/QuestionType'
+        - name: difficulty
+          in: query
+          description: Độ khó
+          schema:
+            $ref: '#/components/schemas/DifficultyLevel'
+        - name: creator_id
+          in: query
+          description: ID người tạo
+          schema:
+            type: integer
+            format: uint32
+        - name: category_id
+          in: query
+          description: ID danh mục
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Danh sách câu hỏi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/questions/batch:
+    post:
+      tags:
+        - questions
+      summary: Tạo nhiều câu hỏi cùng lúc
+      description: Tạo nhiều câu hỏi trong một lần gọi API
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/QuestionCreateRequest'
+      responses:
+        '201':
+          description: Tạo câu hỏi thành công
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - questions
+      summary: Cập nhật nhiều câu hỏi
+      description: Cập nhật nhiều câu hỏi trong một lần gọi API
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/QuestionUpdateRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/QuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/questions/search:
+    get:
+      tags:
+        - questions
+      summary: Tìm kiếm câu hỏi
+      description: Tìm kiếm câu hỏi theo từ khóa
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Từ khóa tìm kiếm
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Kết quả tìm kiếm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/questions/random:
+    get:
+      tags:
+        - questions
+      summary: Lấy câu hỏi ngẫu nhiên
+      description: Lấy câu hỏi ngẫu nhiên theo bộ lọc
+      parameters:
+        - name: count
+          in: query
+          description: Số lượng câu hỏi
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+        - name: type
+          in: query
+          description: Loại câu hỏi
+          schema:
+            $ref: '#/components/schemas/QuestionType'
+        - name: difficulty
+          in: query
+          description: Độ khó
+          schema:
+            $ref: '#/components/schemas/DifficultyLevel'
+        - name: category_id
+          in: query
+          description: ID danh mục
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Danh sách câu hỏi ngẫu nhiên
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/questions/{id}:
+    get:
+      tags:
+        - questions
+      summary: Lấy chi tiết câu hỏi
+      description: Lấy thông tin chi tiết câu hỏi theo ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID câu hỏi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chi tiết câu hỏi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - questions
+      summary: Cập nhật câu hỏi
+      description: Cập nhật thông tin câu hỏi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID câu hỏi
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionUpdateRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - questions
+      summary: Xóa câu hỏi
+      description: Xóa câu hỏi (soft delete)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID câu hỏi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Xóa thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Question endpoints for bank management
+  /api/v1/questions/bank/{bank_id}:
+    get:
+      tags:
+        - questions
+      summary: Lấy câu hỏi theo ngân hàng
+      description: Lấy danh sách câu hỏi từ một ngân hàng cụ thể
+      parameters:
+        - name: bank_id
+          in: path
+          required: true
+          description: ID ngân hàng câu hỏi
+          schema:
+            type: integer
+            format: uint32
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách câu hỏi từ ngân hàng
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/questions/{id}/details:
+    get:
+      tags:
+        - questions
+      summary: Lấy chi tiết đầy đủ câu hỏi
+      description: Lấy thông tin chi tiết đầy đủ của câu hỏi bao gồm attachments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID câu hỏi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chi tiết đầy đủ câu hỏi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/questions/{id}/stats:
+    get:
+      tags:
+        - questions
+      summary: Thống kê câu hỏi
+      description: Lấy thống kê chi tiết về câu hỏi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID câu hỏi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Thống kê câu hỏi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/questions/creator/{creator_id}:
+    get:
+      tags:
+        - questions
+      summary: Lấy câu hỏi theo người tạo
+      description: Lấy danh sách câu hỏi được tạo bởi một người dùng cụ thể
+      parameters:
+        - name: creator_id
+          in: path
+          required: true
+          description: ID người tạo
+          schema:
+            type: integer
+            format: uint32
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách câu hỏi của người tạo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/questions/creator/{creator_id}/usage-stats:
+    get:
+      tags:
+        - questions
+      summary: Thống kê sử dụng câu hỏi theo người tạo
+      description: Lấy thống kê sử dụng câu hỏi của một người tạo
+      parameters:
+        - name: creator_id
+          in: path
+          required: true
+          description: ID người tạo
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Thống kê sử dụng câu hỏi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionUsageStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Question Bank Endpoints
+  /api/v1/question-banks:
+    post:
+      tags:
+        - question-banks
+      summary: Tạo ngân hàng câu hỏi
+      description: Tạo ngân hàng câu hỏi mới
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionBankCreateRequest'
+      responses:
+        '201':
+          description: Tạo ngân hàng thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionBankResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags:
+        - question-banks
+      summary: Danh sách ngân hàng câu hỏi
+      description: Lấy danh sách ngân hàng câu hỏi
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách ngân hàng câu hỏi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionBankResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/public:
+    get:
+      tags:
+        - question-banks
+      summary: Ngân hàng câu hỏi công khai
+      description: Lấy danh sách ngân hàng câu hỏi công khai
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách ngân hàng công khai
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionBankResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/shared:
+    get:
+      tags:
+        - question-banks
+      summary: Ngân hàng được chia sẻ
+      description: Lấy danh sách ngân hàng câu hỏi được chia sẻ với người dùng hiện tại
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách ngân hàng được chia sẻ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionBankResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/search:
+    get:
+      tags:
+        - question-banks
+      summary: Tìm kiếm ngân hàng câu hỏi
+      description: Tìm kiếm ngân hàng câu hỏi theo từ khóa
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Từ khóa tìm kiếm
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Kết quả tìm kiếm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionBankResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/{id}:
+    get:
+      tags:
+        - question-banks
+      summary: Lấy chi tiết ngân hàng
+      description: Lấy thông tin chi tiết ngân hàng câu hỏi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chi tiết ngân hàng
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionBankResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - question-banks
+      summary: Cập nhật ngân hàng
+      description: Cập nhật thông tin ngân hàng câu hỏi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionBankUpdateRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionBankResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - question-banks
+      summary: Xóa ngân hàng
+      description: Xóa ngân hàng câu hỏi (soft delete)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Xóa thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/{id}/details:
+    get:
+      tags:
+        - question-banks
+      summary: Chi tiết đầy đủ ngân hàng
+      description: Lấy thông tin chi tiết đầy đủ của ngân hàng bao gồm câu hỏi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chi tiết đầy đủ ngân hàng
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionBankDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/{id}/stats:
+    get:
+      tags:
+        - question-banks
+      summary: Thống kê ngân hàng
+      description: Lấy thống kê chi tiết về ngân hàng câu hỏi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Thống kê ngân hàng
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionBankStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Question Bank Sharing
+  /api/v1/question-banks/{id}/share:
+    post:
+      tags:
+        - question-banks
+      summary: Chia sẻ ngân hàng
+      description: Chia sẻ ngân hàng câu hỏi với người dùng khác
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShareQuestionBankRequest'
+      responses:
+        '200':
+          description: Chia sẻ thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/{id}/share/{user_id}:
+    delete:
+      tags:
+        - question-banks
+      summary: Hủy chia sẻ ngân hàng
+      description: Hủy chia sẻ ngân hàng với một người dùng cụ thể
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+        - name: user_id
+          in: path
+          required: true
+          description: ID người dùng
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Hủy chia sẻ thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - question-banks
+      summary: Cập nhật quyền chia sẻ
+      description: Cập nhật quyền chia sẻ cho một người dùng cụ thể
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+        - name: user_id
+          in: path
+          required: true
+          description: ID người dùng
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSharePermissionsRequest'
+      responses:
+        '200':
+          description: Cập nhật quyền thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/{id}/shares:
+    get:
+      tags:
+        - question-banks
+      summary: Danh sách chia sẻ
+      description: Lấy danh sách người được chia sẻ ngân hàng
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Danh sách chia sẻ
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuestionBankShare'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/user/{user_id}/shares:
+    get:
+      tags:
+        - question-banks
+      summary: Ngân hàng được chia sẻ của user
+      description: Lấy danh sách ngân hàng được chia sẻ với một người dùng cụ thể
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: ID người dùng
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Danh sách ngân hàng được chia sẻ
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuestionBankShare'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Question Bank - Question Management
+  /api/v1/question-banks/{id}/questions:
+    get:
+      tags:
+        - question-banks
+      summary: Câu hỏi trong ngân hàng
+      description: Lấy danh sách câu hỏi trong ngân hàng
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách câu hỏi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags:
+        - question-banks
+      summary: Thêm câu hỏi vào ngân hàng
+      description: Thêm nhiều câu hỏi vào ngân hàng
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddQuestionsRequest'
+      responses:
+        '200':
+          description: Thêm câu hỏi thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - question-banks
+      summary: Xóa câu hỏi khỏi ngân hàng
+      description: Xóa nhiều câu hỏi khỏi ngân hàng
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID ngân hàng
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveQuestionsRequest'
+      responses:
+        '200':
+          description: Xóa câu hỏi thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/question-banks/creator/{creator_id}:
+    get:
+      tags:
+        - question-banks
+      summary: Ngân hàng theo người tạo
+      description: Lấy danh sách ngân hàng câu hỏi được tạo bởi một người dùng
+      parameters:
+        - name: creator_id
+          in: path
+          required: true
+          description: ID người tạo
+          schema:
+            type: integer
+            format: uint32
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách ngân hàng của người tạo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQuestionBankResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Assessment Creator Routes
+  /api/v1/assessments/creator/{creator_id}:
+    get:
+      tags:
+        - assessments
+      summary: Bài thi theo người tạo
+      description: Lấy danh sách bài thi được tạo bởi một người dùng
+      parameters:
+        - name: creator_id
+          in: path
+          required: true
+          description: ID người tạo
+          schema:
+            type: integer
+            format: uint32
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách bài thi của người tạo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAssessmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/assessments/creator/{creator_id}/stats:
+    get:
+      tags:
+        - assessments
+      summary: Thống kê người tạo bài thi
+      description: Lấy thống kê về bài thi của một người tạo
+      parameters:
+        - name: creator_id
+          in: path
+          required: true
+          description: ID người tạo
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Thống kê người tạo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatorStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Attempt Endpoints
+  /api/v1/attempts/start:
+    post:
+      tags:
+        - attempts
+      summary: Bắt đầu bài thi
+      description: Bắt đầu một lần thử bài thi mới
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttemptStartRequest'
+      responses:
+        '201':
+          description: Bắt đầu bài thi thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/submit:
+    post:
+      tags:
+        - attempts
+      summary: Nộp bài thi
+      description: Hoàn thành và nộp bài thi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteAttemptRequest'
+      responses:
+        '200':
+          description: Nộp bài thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts:
+    get:
+      tags:
+        - attempts
+      summary: Danh sách lần thử
+      description: Lấy danh sách lần thử với bộ lọc
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: assessment_id
+          in: query
+          description: Lọc theo ID bài thi
+          schema:
+            type: integer
+            format: uint32
+        - name: student_id
+          in: query
+          description: Lọc theo ID học sinh
+          schema:
+            type: integer
+            format: uint32
+        - name: status
+          in: query
+          description: Lọc theo trạng thái
+          schema:
+            $ref: '#/components/schemas/AttemptStatus'
+      responses:
+        '200':
+          description: Danh sách lần thử
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAttemptResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/{id}:
+    get:
+      tags:
+        - attempts
+      summary: Chi tiết lần thử
+      description: Lấy thông tin chi tiết lần thử
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chi tiết lần thử
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/{id}/details:
+    get:
+      tags:
+        - attempts
+      summary: Chi tiết đầy đủ lần thử
+      description: Lấy thông tin chi tiết đầy đủ của lần thử bao gồm câu trả lời
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chi tiết đầy đủ lần thử
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/{id}/resume:
+    post:
+      tags:
+        - attempts
+      summary: Tiếp tục bài thi
+      description: Tiếp tục lần thử bài thi đã tạm dừng
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Tiếp tục thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/{id}/answer:
+    post:
+      tags:
+        - attempts
+      summary: Trả lời câu hỏi
+      description: Gửi câu trả lời cho một câu hỏi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitAnswerRequest'
+      responses:
+        '200':
+          description: Lưu câu trả lời thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/{id}/time-remaining:
+    get:
+      tags:
+        - attempts
+      summary: Thời gian còn lại
+      description: Lấy thời gian còn lại của lần thử
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Thời gian còn lại
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  time_remaining:
+                    type: integer
+                    description: Thời gian còn lại (giây)
+                  total_time:
+                    type: integer
+                    description: Tổng thời gian (giây)
+                  percentage:
+                    type: number
+                    format: float
+                    description: Phần trăm thời gian đã sử dụng
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/{id}/extend:
+    post:
+      tags:
+        - attempts
+      summary: Gia hạn thời gian
+      description: Gia hạn thời gian làm bài cho lần thử
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - additional_time
+              properties:
+                additional_time:
+                  type: integer
+                  description: Thời gian gia hạn thêm (phút)
+                  minimum: 1
+                  maximum: 120
+                reason:
+                  type: string
+                  description: Lý do gia hạn
+      responses:
+        '200':
+          description: Gia hạn thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/{id}/timeout:
+    post:
+      tags:
+        - attempts
+      summary: Xử lý hết giờ
+      description: Xử lý khi lần thử hết thời gian
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Xử lý hết giờ thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/{id}/is-active:
+    get:
+      tags:
+        - attempts
+      summary: Kiểm tra trạng thái hoạt động
+      description: Kiểm tra xem lần thử có đang hoạt động không
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Trạng thái hoạt động
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  is_active:
+                    type: boolean
+                    description: Có đang hoạt động không
+                  status:
+                    $ref: '#/components/schemas/AttemptStatus'
+                  time_remaining:
+                    type: integer
+                    description: Thời gian còn lại (giây)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Assessment-specific attempt routes
+  /api/v1/attempts/current/{assessment_id}:
+    get:
+      tags:
+        - attempts
+      summary: Lần thử hiện tại
+      description: Lấy lần thử hiện tại của học sinh cho bài thi
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Lần thử hiện tại
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptResponse'
+        '404':
+          description: Không có lần thử hiện tại
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/can-start/{assessment_id}:
+    get:
+      tags:
+        - attempts
+      summary: Có thể bắt đầu bài thi
+      description: Kiểm tra xem học sinh có thể bắt đầu bài thi không
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Kết quả kiểm tra
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  can_start:
+                    type: boolean
+                    description: Có thể bắt đầu không
+                  reason:
+                    type: string
+                    description: Lý do nếu không thể bắt đầu
+                  attempts_used:
+                    type: integer
+                    description: Số lần thử đã sử dụng
+                  max_attempts:
+                    type: integer
+                    description: Số lần thử tối đa
+                  next_attempt_time:
+                    type: string
+                    format: date-time
+                    description: Thời gian có thể thử lần tiếp theo
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/count/{assessment_id}:
+    get:
+      tags:
+        - attempts
+      summary: Số lần thử
+      description: Lấy số lần thử của học sinh cho bài thi
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Số lần thử
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_attempts:
+                    type: integer
+                    description: Tổng số lần thử
+                  completed_attempts:
+                    type: integer
+                    description: Số lần thử hoàn thành
+                  in_progress_attempts:
+                    type: integer
+                    description: Số lần thử đang thực hiện
+                  max_attempts:
+                    type: integer
+                    description: Số lần thử tối đa
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/assessment/{assessment_id}:
+    get:
+      tags:
+        - attempts
+      summary: Lần thử theo bài thi
+      description: Lấy danh sách lần thử cho một bài thi cụ thể
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách lần thử
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAttemptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/attempts/stats/{assessment_id}:
+    get:
+      tags:
+        - attempts
+      summary: Thống kê lần thử theo bài thi
+      description: Lấy thống kê chi tiết về các lần thử của bài thi
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Thống kê lần thử
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttemptStats'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Student-specific attempt routes
+  /api/v1/attempts/student/{student_id}:
+    get:
+      tags:
+        - attempts
+      summary: Lần thử theo học sinh
+      description: Lấy danh sách lần thử của một học sinh cụ thể
+      parameters:
+        - name: student_id
+          in: path
+          required: true
+          description: ID học sinh
+          schema:
+            type: integer
+            format: uint32
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Danh sách lần thử của học sinh
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAttemptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Grading Endpoints
+  /api/v1/grading/answers/{answer_id}:
+    post:
+      tags:
+        - grading
+      summary: Chấm điểm câu trả lời
+      description: Chấm điểm thủ công cho một câu trả lời
+      parameters:
+        - name: answer_id
+          in: path
+          required: true
+          description: ID câu trả lời
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GradeAnswerRequest'
+      responses:
+        '200':
+          description: Chấm điểm thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/grading/answers/batch:
+    post:
+      tags:
+        - grading
+      summary: Chấm điểm nhiều câu trả lời
+      description: Chấm điểm thủ công cho nhiều câu trả lời cùng lúc
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - grades
+              properties:
+                grades:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - answer_id
+                      - score
+                    properties:
+                      answer_id:
+                        type: integer
+                        format: uint32
+                      score:
+                        type: number
+                        format: float
+                        minimum: 0
+                      feedback:
+                        type: string
+      responses:
+        '200':
+          description: Chấm điểm thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success_count:
+                    type: integer
+                    description: Số câu trả lời chấm thành công
+                  failure_count:
+                    type: integer
+                    description: Số câu trả lời chấm thất bại
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        answer_id:
+                          type: integer
+                          format: uint32
+                        error:
+                          type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/grading/attempts/{attempt_id}:
+    post:
+      tags:
+        - grading
+      summary: Chấm điểm lần thử
+      description: Chấm điểm thủ công cho toàn bộ lần thử
+      parameters:
+        - name: attempt_id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                final_score:
+                  type: number
+                  format: float
+                  description: Điểm tổng kết (tùy chọn)
+                feedback:
+                  type: string
+                  description: Phản hồi chung
+      responses:
+        '200':
+          description: Chấm điểm thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Auto Grading
+  /api/v1/grading/answers/{answer_id}/auto:
+    post:
+      tags:
+        - grading
+      summary: Chấm điểm tự động câu trả lời
+      description: Chấm điểm tự động cho một câu trả lời cụ thể
+      parameters:
+        - name: answer_id
+          in: path
+          required: true
+          description: ID câu trả lời
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chấm điểm tự động thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  score:
+                    type: number
+                    format: float
+                    description: Điểm số được chấm
+                  is_correct:
+                    type: boolean
+                    description: Có đúng không
+                  feedback:
+                    type: string
+                    description: Phản hồi tự động
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/grading/attempts/{attempt_id}/auto:
+    post:
+      tags:
+        - grading
+      summary: Chấm điểm tự động lần thử
+      description: Chấm điểm tự động cho toàn bộ lần thử
+      parameters:
+        - name: attempt_id
+          in: path
+          required: true
+          description: ID lần thử
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chấm điểm tự động thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_score:
+                    type: number
+                    format: float
+                    description: Tổng điểm
+                  percentage:
+                    type: number
+                    format: float
+                    description: Phần trăm điểm
+                  passed:
+                    type: boolean
+                    description: Đã qua không
+                  graded_answers:
+                    type: integer
+                    description: Số câu trả lời đã chấm
+                  pending_manual_grading:
+                    type: integer
+                    description: Số câu cần chấm thủ công
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/grading/assessments/{assessment_id}/auto:
+    post:
+      tags:
+        - grading
+      summary: Chấm điểm tự động bài thi
+      description: Chấm điểm tự động cho tất cả lần thử của bài thi
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Chấm điểm tự động thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  processed_attempts:
+                    type: integer
+                    description: Số lần thử đã xử lý
+                  auto_graded:
+                    type: integer
+                    description: Số lần thử chấm tự động được
+                  manual_required:
+                    type: integer
+                    description: Số lần thử cần chấm thủ công
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Grading Utilities
+  /api/v1/grading/calculate-score:
+    post:
+      tags:
+        - grading
+      summary: Tính điểm
+      description: Tính điểm dựa trên các câu trả lời
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - answers
+              properties:
+                answers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      question_id:
+                        type: integer
+                        format: uint32
+                      score:
+                        type: number
+                        format: float
+                      max_score:
+                        type: number
+                        format: float
+                grading_method:
+                  type: string
+                  enum: [weighted, simple, curved]
+                  description: Phương pháp tính điểm
+      responses:
+        '200':
+          description: Tính điểm thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_score:
+                    type: number
+                    format: float
+                  max_score:
+                    type: number
+                    format: float
+                  percentage:
+                    type: number
+                    format: float
+                  grade_letter:
+                    type: string
+                    description: Điểm chữ (A, B, C, D, F)
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/grading/generate-feedback:
+    post:
+      tags:
+        - grading
+      summary: Tạo phản hồi
+      description: Tạo phản hồi tự động cho lần thử
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - attempt_id
+              properties:
+                attempt_id:
+                  type: integer
+                  format: uint32
+                feedback_type:
+                  type: string
+                  enum: [summary, detailed, improvement]
+                  description: Loại phản hồi
+                include_suggestions:
+                  type: boolean
+                  description: Có đưa ra gợi ý cải thiện không
+      responses:
+        '200':
+          description: Tạo phản hồi thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedback:
+                    type: string
+                    description: Nội dung phản hồi
+                  suggestions:
+                    type: array
+                    items:
+                      type: string
+                    description: Gợi ý cải thiện
+                  strengths:
+                    type: array
+                    items:
+                      type: string
+                    description: Điểm mạnh
+                  weaknesses:
+                    type: array
+                    items:
+                      type: string
+                    description: Điểm yếu
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Re-grading
+  /api/v1/grading/questions/{question_id}/regrade:
+    post:
+      tags:
+        - grading
+      summary: Chấm lại câu hỏi
+      description: Chấm lại tất cả câu trả lời của một câu hỏi
+      parameters:
+        - name: question_id
+          in: path
+          required: true
+          description: ID câu hỏi
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Lý do chấm lại
+                new_correct_answer:
+                  type: object
+                  description: Đáp án đúng mới (nếu có)
+                point_adjustment:
+                  type: number
+                  format: float
+                  description: Điều chỉnh điểm
+      responses:
+        '200':
+          description: Chấm lại thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  affected_answers:
+                    type: integer
+                    description: Số câu trả lời bị ảnh hưởng
+                  score_changes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        answer_id:
+                          type: integer
+                          format: uint32
+                        old_score:
+                          type: number
+                          format: float
+                        new_score:
+                          type: number
+                          format: float
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/grading/assessments/{assessment_id}/regrade:
+    post:
+      tags:
+        - grading
+      summary: Chấm lại bài thi
+      description: Chấm lại tất cả lần thử của bài thi
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Lý do chấm lại
+                question_adjustments:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      question_id:
+                        type: integer
+                        format: uint32
+                      point_adjustment:
+                        type: number
+                        format: float
+      responses:
+        '200':
+          description: Chấm lại thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  affected_attempts:
+                    type: integer
+                    description: Số lần thử bị ảnh hưởng
+                  total_score_changes:
+                    type: number
+                    format: float
+                    description: Tổng thay đổi điểm
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Grading Overview
+  /api/v1/grading/assessments/{assessment_id}/overview:
+    get:
+      tags:
+        - grading
+      summary: Tổng quan chấm điểm
+      description: Lấy tổng quan về tình hình chấm điểm của bài thi
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Tổng quan chấm điểm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GradingOverview'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Yêu cầu không hợp lệ
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Không có quyền truy cập
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Forbidden:
+      description: Bị cấm truy cập
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFound:
+      description: Không tìm thấy tài nguyên
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    InternalServerError:
+      description: Lỗi server nội bộ
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # Base Types
+    AssessmentStatus:
+      type: string
+      enum: [Draft, Active, Expired, Archived]
+      description: Trạng thái bài thi
+
+    QuestionType:
+      type: string
+      enum: [multiple_choice, true_false, essay, fill_blank, matching, ordering, short_answer]
+      description: Loại câu hỏi
+
+    DifficultyLevel:
+      type: string
+      enum: [easy, medium, hard]
+      description: Độ khó câu hỏi
+
+    AttemptStatus:
+      type: string
+      enum: [in_progress, completed, abandoned, timeout]
+      description: Trạng thái lần thử
+
+    # Request Schemas
+    AssessmentCreateRequest:
+      type: object
+      required: [title, duration, passing_score]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Tiêu đề bài thi
+          example: "Bài kiểm tra Toán học lớp 12"
+        description:
+          type: string
+          maxLength: 1000
+          description: Mô tả bài thi
+          example: "Bài kiểm tra cuối kỳ môn Toán học"
+        duration:
+          type: integer
+          minimum: 5
+          maximum: 300
+          description: Thời gian làm bài (phút)
+          example: 90
+        passing_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Điểm qua môn (%)
+          example: 70
+        max_attempts:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Số lần thử tối đa
+          example: 3
+        time_warning:
+          type: integer
+          minimum: 60
+          maximum: 3600
+          description: Thời gian cảnh báo trước khi hết giờ (giây)
+          example: 300
+        due_date:
+          type: string
+          format: date-time
+          description: Hạn nộp bài
+        settings:
+          $ref: '#/components/schemas/AssessmentSettingsRequest'
+        category_id:
+          type: integer
+          format: uint32
+          description: ID danh mục
+
+    AssessmentUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Tiêu đề bài thi
+        description:
+          type: string
+          maxLength: 1000
+          description: Mô tả bài thi
+        duration:
+          type: integer
+          minimum: 5
+          maximum: 300
+          description: Thời gian làm bài (phút)
+        passing_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Điểm qua môn (%)
+        max_attempts:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Số lần thử tối đa
+        time_warning:
+          type: integer
+          minimum: 60
+          maximum: 3600
+          description: Thời gian cảnh báo trước khi hết giờ (giây)
+        due_date:
+          type: string
+          format: date-time
+          description: Hạn nộp bài
+        settings:
+          $ref: '#/components/schemas/AssessmentSettingsRequest'
+        category_id:
+          type: integer
+          format: uint32
+          description: ID danh mục
+
+    AssessmentSettingsRequest:
+      type: object
+      properties:
+        randomize_questions:
+          type: boolean
+          description: Xáo trộn thứ tự câu hỏi
+        randomize_options:
+          type: boolean
+          description: Xáo trộn thứ tự đáp án
+        questions_per_page:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Số câu hỏi trên mỗi trang
+        show_progress_bar:
+          type: boolean
+          description: Hiển thị thanh tiến trình
+        show_results:
+          type: boolean
+          description: Hiển thị kết quả sau khi hoàn thành
+        show_correct_answers:
+          type: boolean
+          description: Hiển thị đáp án đúng
+        show_score_breakdown:
+          type: boolean
+          description: Hiển thị chi tiết điểm số
+        allow_retake:
+          type: boolean
+          description: Cho phép làm lại
+        retake_delay:
+          type: integer
+          minimum: 0
+          maximum: 10080
+          description: Thời gian chờ giữa các lần thử (phút)
+        time_limit_enforced:
+          type: boolean
+          description: Bắt buộc giới hạn thời gian
+        auto_submit_on_timeout:
+          type: boolean
+          description: Tự động nộp bài khi hết giờ
+        require_webcam:
+          type: boolean
+          description: Yêu cầu camera
+        prevent_tab_switching:
+          type: boolean
+          description: Ngăn chuyển tab
+        prevent_right_click:
+          type: boolean
+          description: Ngăn chuột phải
+        prevent_copy_paste:
+          type: boolean
+          description: Ngăn sao chép dán
+        require_identity_verification:
+          type: boolean
+          description: Yêu cầu xác thực danh tính
+        require_full_screen:
+          type: boolean
+          description: Yêu cầu toàn màn hình
+        allow_screen_reader:
+          type: boolean
+          description: Cho phép đọc màn hình
+        font_size_adjustment:
+          type: integer
+          minimum: -2
+          maximum: 2
+          description: Điều chỉnh kích thước font
+        high_contrast_mode:
+          type: boolean
+          description: Chế độ tương phản cao
+
+    QuestionCreateRequest:
+      type: object
+      required: [type, text, points, content, difficulty]
+      properties:
+        type:
+          $ref: '#/components/schemas/QuestionType'
+        text:
+          type: string
+          minLength: 1
+          description: Nội dung câu hỏi
+          example: "2 + 2 = ?"
+        points:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Điểm số
+          example: 10
+        time_limit:
+          type: integer
+          minimum: 10
+          maximum: 7200
+          description: Giới hạn thời gian (giây)
+        content:
+          type: object
+          description: Nội dung câu hỏi (tùy theo loại)
+          example:
+            options:
+              - id: "a"
+                text: "3"
+                order: 1
+              - id: "b"
+                text: "4"
+                order: 2
+              - id: "c"
+                text: "5"
+                order: 3
+            correct_answers: ["b"]
+            multiple_correct: false
+        category_id:
+          type: integer
+          format: uint32
+          description: ID danh mục
+        difficulty:
+          $ref: '#/components/schemas/DifficultyLevel'
+        tags:
+          type: array
+          items:
+            type: string
+          description: Thẻ câu hỏi
+        explanation:
+          type: string
+          description: Giải thích câu hỏi
+
+    QuestionUpdateRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+          description: Nội dung câu hỏi
+        points:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Điểm số
+        time_limit:
+          type: integer
+          minimum: 10
+          maximum: 7200
+          description: Giới hạn thời gian (giây)
+        content:
+          type: object
+          description: Nội dung câu hỏi
+        category_id:
+          type: integer
+          format: uint32
+          description: ID danh mục
+        difficulty:
+          $ref: '#/components/schemas/DifficultyLevel'
+        tags:
+          type: array
+          items:
+            type: string
+          description: Thẻ câu hỏi
+        explanation:
+          type: string
+          description: Giải thích câu hỏi
+
+    QuestionBankCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Tên ngân hàng câu hỏi
+        description:
+          type: string
+          maxLength: 1000
+          description: Mô tả ngân hàng
+        is_public:
+          type: boolean
+          description: Công khai
+        is_shared:
+          type: boolean
+          description: Được chia sẻ
+
+    QuestionBankUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Tên ngân hàng câu hỏi
+        description:
+          type: string
+          maxLength: 1000
+          description: Mô tả ngân hàng
+        is_public:
+          type: boolean
+          description: Công khai
+        is_shared:
+          type: boolean
+          description: Được chia sẻ
+
+    ShareQuestionBankRequest:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: integer
+          format: uint32
+          description: ID người được chia sẻ
+        can_edit:
+          type: boolean
+          default: false
+          description: Quyền chỉnh sửa
+        can_delete:
+          type: boolean
+          default: false
+          description: Quyền xóa
+
+    UpdateSharePermissionsRequest:
+      type: object
+      properties:
+        can_edit:
+          type: boolean
+          description: Quyền chỉnh sửa
+        can_delete:
+          type: boolean
+          description: Quyền xóa
+
+    AddQuestionsRequest:
+      type: object
+      required: [question_ids]
+      properties:
+        question_ids:
+          type: array
+          items:
+            type: integer
+            format: uint32
+          minItems: 1
+          description: Danh sách ID câu hỏi
+
+    RemoveQuestionsRequest:
+      type: object
+      required: [question_ids]
+      properties:
+        question_ids:
+          type: array
+          items:
+            type: integer
+            format: uint32
+          minItems: 1
+          description: Danh sách ID câu hỏi
+
+    AttemptStartRequest:
+      type: object
+      required: [assessment_id]
+      properties:
+        assessment_id:
+          type: integer
+          format: uint32
+          description: ID bài thi
+
+    SubmitAnswerRequest:
+      type: object
+      required: [question_id, answer]
+      properties:
+        question_id:
+          type: integer
+          format: uint32
+          description: ID câu hỏi
+        answer:
+          type: object
+          description: Câu trả lời (tùy theo loại câu hỏi)
+        time_spent:
+          type: integer
+          minimum: 0
+          description: Thời gian trả lời (giây)
+        flagged:
+          type: boolean
+          description: Đánh dấu để xem lại
+
+    CompleteAttemptRequest:
+      type: object
+      properties:
+        final_answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmitAnswerRequest'
+          description: Câu trả lời cuối cùng
+        time_spent:
+          type: integer
+          minimum: 0
+          description: Tổng thời gian làm bài (giây)
+
+    GradeAnswerRequest:
+      type: object
+      required: [score]
+      properties:
+        score:
+          type: number
+          format: float
+          minimum: 0
+          description: Điểm số
+        feedback:
+          type: string
+          description: Phản hồi từ giám khảo
+
+    ChangeStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/AssessmentStatus'
+        reason:
+          type: string
+          maxLength: 500
+          description: Lý do thay đổi trạng thái
+
+    # Response Schemas
+    AssessmentResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+          description: ID bài thi
+        title:
+          type: string
+          description: Tiêu đề bài thi
+        description:
+          type: string
+          description: Mô tả bài thi
+        duration:
+          type: integer
+          description: Thời gian làm bài (phút)
+        status:
+          $ref: '#/components/schemas/AssessmentStatus'
+        passing_score:
+          type: integer
+          description: Điểm qua môn (%)
+        max_attempts:
+          type: integer
+          description: Số lần thử tối đa
+        time_warning:
+          type: integer
+          description: Thời gian cảnh báo (giây)
+        due_date:
+          type: string
+          format: date-time
+          description: Hạn nộp bài
+        created_by:
+          type: integer
+          format: uint32
+          description: ID người tạo
+        created_at:
+          type: string
+          format: date-time
+          description: Thời gian tạo
+        updated_at:
+          type: string
+          format: date-time
+          description: Thời gian cập nhật
+        version:
+          type: integer
+          description: Phiên bản
+        questions_count:
+          type: integer
+          description: Số câu hỏi
+        total_points:
+          type: integer
+          description: Tổng điểm
+        attempt_count:
+          type: integer
+          description: Số lần thử
+        avg_score:
+          type: number
+          format: float
+          description: Điểm trung bình
+
+    AssessmentDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/AssessmentResponse'
+        - type: object
+          properties:
+            settings:
+              $ref: '#/components/schemas/AssessmentSettingsResponse'
+            questions:
+              type: array
+              items:
+                $ref: '#/components/schemas/AssessmentQuestionResponse'
+
+    AssessmentSettingsResponse:
+      type: object
+      properties:
+        assessment_id:
+          type: integer
+          format: uint32
+        randomize_questions:
+          type: boolean
+        randomize_options:
+          type: boolean
+        questions_per_page:
+          type: integer
+        show_progress_bar:
+          type: boolean
+        show_results:
+          type: boolean
+        show_correct_answers:
+          type: boolean
+        show_score_breakdown:
+          type: boolean
+        allow_retake:
+          type: boolean
+        retake_delay:
+          type: integer
+        time_limit_enforced:
+          type: boolean
+        auto_submit_on_timeout:
+          type: boolean
+        require_webcam:
+          type: boolean
+        prevent_tab_switching:
+          type: boolean
+        prevent_right_click:
+          type: boolean
+        prevent_copy_paste:
+          type: boolean
+        require_identity_verification:
+          type: boolean
+        require_full_screen:
+          type: boolean
+        allow_screen_reader:
+          type: boolean
+        font_size_adjustment:
+          type: integer
+        high_contrast_mode:
+          type: boolean
+
+    AssessmentQuestionResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+        assessment_id:
+          type: integer
+          format: uint32
+        question_id:
+          type: integer
+          format: uint32
+        order:
+          type: integer
+        points:
+          type: integer
+        time_limit:
+          type: integer
+        required:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        question:
+          $ref: '#/components/schemas/QuestionResponse'
+
+    QuestionResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+          description: ID câu hỏi
+        type:
+          $ref: '#/components/schemas/QuestionType'
+        text:
+          type: string
+          description: Nội dung câu hỏi
+        points:
+          type: integer
+          description: Điểm số
+        time_limit:
+          type: integer
+          description: Giới hạn thời gian (giây)
+        order:
+          type: integer
+          description: Thứ tự
+        content:
+          type: object
+          description: Nội dung câu hỏi
+        answer:
+          type: object
+          description: Đáp án đúng
+        category_id:
+          type: integer
+          format: uint32
+          description: ID danh mục
+        difficulty:
+          $ref: '#/components/schemas/DifficultyLevel'
+        tags:
+          type: array
+          items:
+            type: string
+          description: Thẻ câu hỏi
+        explanation:
+          type: string
+          description: Giải thích
+        created_by:
+          type: integer
+          format: uint32
+          description: ID người tạo
+        created_at:
+          type: string
+          format: date-time
+          description: Thời gian tạo
+        updated_at:
+          type: string
+          format: date-time
+          description: Thời gian cập nhật
+        usage_count:
+          type: integer
+          description: Số lần sử dụng
+        avg_score:
+          type: number
+          format: float
+          description: Điểm trung bình
+        difficulty_actual:
+          type: number
+          format: float
+          description: Độ khó thực tế
+
+    QuestionBankResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+        name:
+          type: string
+        description:
+          type: string
+        is_public:
+          type: boolean
+        is_shared:
+          type: boolean
+        created_by:
+          type: integer
+          format: uint32
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        question_count:
+          type: integer
+          description: Số câu hỏi trong ngân hàng
+
+    QuestionBankDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/QuestionBankResponse'
+        - type: object
+          properties:
+            questions:
+              type: array
+              items:
+                $ref: '#/components/schemas/QuestionResponse'
+            shares:
+              type: array
+              items:
+                $ref: '#/components/schemas/QuestionBankShare'
+
+    QuestionBankShare:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+        bank_id:
+          type: integer
+          format: uint32
+        user_id:
+          type: integer
+          format: uint32
+        user_name:
+          type: string
+        user_email:
+          type: string
+        can_edit:
+          type: boolean
+        can_delete:
+          type: boolean
+        shared_at:
+          type: string
+          format: date-time
+
+    QuestionBankStats:
+      type: object
+      properties:
+        total_questions:
+          type: integer
+          description: Tổng số câu hỏi
+        questions_by_type:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Phân bố câu hỏi theo loại
+        questions_by_difficulty:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Phân bố câu hỏi theo độ khó
+        usage_stats:
+          type: object
+          properties:
+            total_usage:
+              type: integer
+              description: Tổng số lần sử dụng
+            recent_usage:
+              type: integer
+              description: Sử dụng gần đây (30 ngày)
+        contributors:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id:
+                type: integer
+                format: uint32
+              user_name:
+                type: string
+              question_count:
+                type: integer
+
+    QuestionDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/QuestionResponse'
+        - type: object
+          properties:
+            attachments:
+              type: array
+              items:
+                $ref: '#/components/schemas/QuestionAttachment'
+            statistics:
+              $ref: '#/components/schemas/QuestionStats'
+
+    QuestionAttachment:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+        question_id:
+          type: integer
+          format: uint32
+        file_name:
+          type: string
+        file_type:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        mime_type:
+          type: string
+        url:
+          type: string
+        thumbnail_url:
+          type: string
+        alt:
+          type: string
+        caption:
+          type: string
+        order:
+          type: integer
+
+    QuestionStats:
+      type: object
+      properties:
+        usage_count:
+          type: integer
+          description: Số lần sử dụng
+        correct_rate:
+          type: number
+          format: float
+          description: Tỷ lệ trả lời đúng
+        average_score:
+          type: number
+          format: float
+          description: Điểm trung bình
+        difficulty_actual:
+          type: number
+          format: float
+          description: Độ khó thực tế
+        time_distribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeBucket'
+          description: Phân bố thời gian trả lời
+
+    QuestionUsageStats:
+      type: object
+      properties:
+        creator_id:
+          type: integer
+          format: uint32
+        total_questions:
+          type: integer
+          description: Tổng số câu hỏi tạo
+        total_usage:
+          type: integer
+          description: Tổng số lần sử dụng
+        popular_questions:
+          type: array
+          items:
+            type: object
+            properties:
+              question_id:
+                type: integer
+                format: uint32
+              question_text:
+                type: string
+              usage_count:
+                type: integer
+          description: Câu hỏi phổ biến nhất
+
+    CreatorStats:
+      type: object
+      properties:
+        creator_id:
+          type: integer
+          format: uint32
+        total_assessments:
+          type: integer
+          description: Tổng số bài thi
+        total_attempts:
+          type: integer
+          description: Tổng số lần thử
+        average_score:
+          type: number
+          format: float
+          description: Điểm trung bình
+        pass_rate:
+          type: number
+          format: float
+          description: Tỷ lệ qua môn
+        assessments_by_status:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Phân bố bài thi theo trạng thái
+        monthly_stats:
+          type: array
+          items:
+            type: object
+            properties:
+              month:
+                type: string
+              assessments_created:
+                type: integer
+              total_attempts:
+                type: integer
+          description: Thống kê theo tháng
+
+    AttemptDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/AttemptResponse'
+        - type: object
+          properties:
+            answers:
+              type: array
+              items:
+                $ref: '#/components/schemas/StudentAnswer'
+            proctoring_events:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProctoringEvent'
+
+    StudentAnswer:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+        attempt_id:
+          type: integer
+          format: uint32
+        question_id:
+          type: integer
+          format: uint32
+        answer:
+          type: object
+          description: Câu trả lời (JSON)
+        score:
+          type: number
+          format: float
+        max_score:
+          type: integer
+        is_correct:
+          type: boolean
+        graded_by:
+          type: integer
+          format: uint32
+        graded_at:
+          type: string
+          format: date-time
+        feedback:
+          type: string
+        time_spent:
+          type: integer
+          description: Thời gian trả lời (giây)
+        first_answered_at:
+          type: string
+          format: date-time
+        last_modified_at:
+          type: string
+          format: date-time
+        flagged:
+          type: boolean
+        is_graded:
+          type: boolean
+
+    ProctoringEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+        attempt_id:
+          type: integer
+          format: uint32
+        event_type:
+          type: string
+          enum: [tab_switch, window_blur, copy_paste, right_click, suspicious_activity]
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: object
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+
+    AttemptStats:
+      type: object
+      properties:
+        assessment_id:
+          type: integer
+          format: uint32
+        total_attempts:
+          type: integer
+        completed_attempts:
+          type: integer
+        in_progress_attempts:
+          type: integer
+        abandoned_attempts:
+          type: integer
+        timeout_attempts:
+          type: integer
+        average_score:
+          type: number
+          format: float
+        pass_rate:
+          type: number
+          format: float
+        average_time:
+          type: integer
+          description: Thời gian trung bình (giây)
+        score_distribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoreBucket'
+        time_distribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeBucket'
+        violation_stats:
+          type: object
+          properties:
+            total_violations:
+              type: integer
+            violations_by_type:
+              type: object
+              additionalProperties:
+                type: integer
+
+    GradingOverview:
+      type: object
+      properties:
+        assessment_id:
+          type: integer
+          format: uint32
+        total_attempts:
+          type: integer
+        graded_attempts:
+          type: integer
+        pending_attempts:
+          type: integer
+        auto_gradable:
+          type: integer
+          description: Số lần thử có thể chấm tự động
+        manual_required:
+          type: integer
+          description: Số lần thử cần chấm thủ công
+        average_grading_time:
+          type: integer
+          description: Thời gian chấm trung bình (giây)
+        grading_progress:
+          type: object
+          properties:
+            questions_graded:
+              type: integer
+            questions_pending:
+              type: integer
+            graders_assigned:
+              type: array
+              items:
+                type: object
+                properties:
+                  grader_id:
+                    type: integer
+                    format: uint32
+                  grader_name:
+                    type: string
+                  assigned_count:
+                    type: integer
+                  completed_count:
+                    type: integer
+
+    PaginatedAttemptResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttemptResponse'
+        total_elements:
+          type: integer
+          format: int64
+        total_pages:
+          type: integer
+        size:
+          type: integer
+        page:
+          type: integer
+        first:
+          type: boolean
+        last:
+          type: boolean
+        number_of_elements:
+          type: integer
+        empty:
+          type: boolean
+
+    TimeBucket:
+      type: object
+      properties:
+        range:
+          type: string
+          description: Khoảng thời gian
+          example: "0-5 min"
+        count:
+          type: integer
+          description: Số lượng
+          example: 25
+
+    AttemptResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+        assessment_id:
+          type: integer
+          format: uint32
+        student_id:
+          type: integer
+          format: uint32
+        attempt_number:
+          type: integer
+        status:
+          $ref: '#/components/schemas/AttemptStatus'
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        time_spent:
+          type: integer
+          description: Thời gian đã dùng (giây)
+        time_remaining:
+          type: integer
+          description: Thời gian còn lại (giây)
+        score:
+          type: number
+          format: float
+        max_score:
+          type: integer
+        percentage:
+          type: number
+          format: float
+        passed:
+          type: boolean
+        current_question_index:
+          type: integer
+        questions_answered:
+          type: integer
+        total_questions:
+          type: integer
+        is_review:
+          type: boolean
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+        session_data:
+          type: object
+        end_reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AssessmentStats:
+      type: object
+      properties:
+        total_attempts:
+          type: integer
+          description: Tổng số lần thử
+        completed_attempts:
+          type: integer
+          description: Số lần thử hoàn thành
+        average_score:
+          type: number
+          format: float
+          description: Điểm trung bình
+        pass_rate:
+          type: number
+          format: float
+          description: Tỷ lệ qua môn
+        average_time:
+          type: integer
+          description: Thời gian trung bình (giây)
+        score_distribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoreBucket'
+          description: Phân bố điểm số
+        question_stats:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionStatsItem'
+          description: Thống kê câu hỏi
+        category_breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryStatsItem'
+          description: Phân tích theo danh mục
+
+    ScoreBucket:
+      type: object
+      properties:
+        range:
+          type: string
+          description: Khoảng điểm
+          example: "80-90"
+        count:
+          type: integer
+          description: Số lượng
+          example: 15
+
+    QuestionStatsItem:
+      type: object
+      properties:
+        question_id:
+          type: integer
+          format: uint32
+        question_text:
+          type: string
+        correct_rate:
+          type: number
+          format: float
+          description: Tỷ lệ trả lời đúng
+        average_score:
+          type: number
+          format: float
+          description: Điểm trung bình
+        difficulty_index:
+          type: number
+          format: float
+          description: Chỉ số độ khó
+
+    CategoryStatsItem:
+      type: object
+      properties:
+        category_id:
+          type: integer
+          format: uint32
+        category_name:
+          type: string
+        question_count:
+          type: integer
+        average_score:
+          type: number
+          format: float
+
+    StatusChangeResponse:
+      type: object
+      properties:
+        old_status:
+          $ref: '#/components/schemas/AssessmentStatus'
+        new_status:
+          $ref: '#/components/schemas/AssessmentStatus'
+        changed_at:
+          type: string
+          format: date-time
+        changed_by:
+          type: integer
+          format: uint32
+        reason:
+          type: string
+
+    # Pagination
+    PaginatedAssessmentResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssessmentResponse'
+        total_elements:
+          type: integer
+          format: int64
+        total_pages:
+          type: integer
+        size:
+          type: integer
+        page:
+          type: integer
+        first:
+          type: boolean
+        last:
+          type: boolean
+        number_of_elements:
+          type: integer
+        empty:
+          type: boolean
+
+    PaginatedQuestionResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionResponse'
+        total_elements:
+          type: integer
+          format: int64
+        total_pages:
+          type: integer
+        size:
+          type: integer
+        page:
+          type: integer
+        first:
+          type: boolean
+        last:
+          type: boolean
+        number_of_elements:
+          type: integer
+        empty:
+          type: boolean
+
+    PaginatedQuestionBankResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionBankResponse'
+        total_elements:
+          type: integer
+          format: int64
+        total_pages:
+          type: integer
+        size:
+          type: integer
+        page:
+          type: integer
+        first:
+          type: boolean
+        last:
+          type: boolean
+        number_of_elements:
+          type: integer
+        empty:
+          type: boolean
+
+    # Common Response Types
+    SuccessResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          description: Thông báo thành công
+          example: "Thao tác thành công"
+        data:
+          type: object
+          description: Dữ liệu trả về (tùy chọn)
+        timestamp:
+          type: string
+          format: date-time
+          description: Thời gian
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Mã lỗi
+          example: "VALIDATION_FAILED"
+        message:
+          type: string
+          description: Thông báo lỗi
+          example: "Dữ liệu đầu vào không hợp lệ"
+        code:
+          type: string
+          description: Mã lỗi chi tiết
+          example: "INVALID_INPUT"
+        details:
+          type: object
+          description: Chi tiết lỗi (tùy chọn)
+        timestamp:
+          type: string
+          format: date-time
+          description: Thời gian
+        path:
+          type: string
+          description: Đường dẫn API gây lỗi
+        validation_errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+          description: Lỗi validation chi tiết
+        business_rule_violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessRuleViolation'
+          description: Vi phạm quy tắc nghiệp vụ
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        field:
+          type: string
+          description: Trường bị lỗi
+        message:
+          type: string
+          description: Thông báo lỗi
+        value:
+          type: string
+          description: Giá trị bị lỗi
+        code:
+          type: string
+          description: Mã lỗi
+
+    BusinessRuleViolation:
+      type: object
+      properties:
+        rule:
+          type: string
+          description: Quy tắc bị vi phạm
+        message:
+          type: string
+          description: Thông báo vi phạm
+        severity:
+          type: string
+          enum: [error, warning, info]
+          description: Mức độ nghiêm trọng
+        can_override:
+          type: boolean
+          description: Có thể ghi đè không

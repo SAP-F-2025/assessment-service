@@ -46,7 +46,7 @@ type Question struct {
 
 	// Metadata
 	Explanation *string        `json:"explanation" gorm:"type:text"`
-	CreatedBy   uint           `json:"created_by" gorm:"not null;index"`
+	CreatedBy   string         `json:"created_by" gorm:"not null;index;size:255"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
@@ -97,7 +97,7 @@ type QuestionCategory struct {
 	Path     string `json:"path" gorm:"size:500"` // "/parent/child/grandchild"
 
 	// Metadata
-	CreatedBy uint           `json:"created_by" gorm:"not null;index"`
+	CreatedBy string         `json:"created_by" gorm:"not null;index;size:255"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`

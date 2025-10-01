@@ -11,14 +11,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/SAP-F-2025/assessment-service/internal/config"
 	"github.com/SAP-F-2025/assessment-service/internal/handlers"
+	"github.com/SAP-F-2025/assessment-service/internal/repositories/casdoor"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories/postgres"
 	"github.com/SAP-F-2025/assessment-service/internal/services"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"github.com/SAP-F-2025/assessment-service/pkg"
-	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -53,6 +56,14 @@ func main() {
 	repoConfig := postgres.RepositoryConfig{
 		DB:          db,
 		RedisClient: redisClient,
+		CasdoorConfig: casdoor.CasdoorConfig{
+			Endpoint:         cfg.Casdoor.Endpoint,
+			ClientID:         cfg.Casdoor.ClientID,
+			ClientSecret:     cfg.Casdoor.ClientSecret,
+			Certificate:      cfg.Casdoor.Cert,
+			OrganizationName: cfg.Casdoor.Organization,
+			ApplicationName:  cfg.Casdoor.Application,
+		},
 	}
 	repoManager := postgres.NewRepositoryManager(repoConfig)
 	if err := repoManager.Initialize(); err != nil {
@@ -60,7 +71,7 @@ func main() {
 	}
 
 	// Initialize validator
-	validator := utils.NewValidator()
+	validator := validator.New()
 
 	// Initialize services
 	serviceManager := services.NewDefaultServiceManager(db, repoManager.GetRepository(), slogLogger, validator)
@@ -69,7 +80,7 @@ func main() {
 	}
 
 	// Initialize handlers
-	handlerManager := handlers.NewHandlerManager(serviceManager, validator, logger)
+	handlerManager := handlers.NewHandlerManager(serviceManager, validator, logger, cfg.Casdoor, repoManager.GetRepository().User())
 
 	// Setup Gin router
 	if cfg.Environment == "production" {
@@ -81,9 +92,7 @@ func main() {
 	// Setup middleware
 	handlers.SetupMiddleware(router)
 
-	// Add authentication middleware for protected routes
-	// Note: You'll need to implement proper authentication
-	router.Use(handlers.AuthMiddleware())
+	// Note: Authentication middleware is now applied per route group in SetupRoutes
 
 	// Setup routes
 	handlerManager.SetupRoutes(router)

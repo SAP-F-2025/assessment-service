@@ -1,9 +1,14 @@
 package handlers
 
 import (
+	"github.com/gin-gonic/gin"
+
+	"github.com/SAP-F-2025/assessment-service/internal/config"
+	"github.com/SAP-F-2025/assessment-service/internal/models"
+	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/services"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
-	"github.com/gin-gonic/gin"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 )
 
 type HandlerManager struct {
@@ -12,53 +17,65 @@ type HandlerManager struct {
 	questionBankHandler *QuestionBankHandler
 	attemptHandler      *AttemptHandler
 	gradingHandler      *GradingHandler
+	authMiddleware      *CasdoorAuthMiddleware
 }
 
 func NewHandlerManager(
 	serviceManager services.ServiceManager,
-	validator *utils.Validator,
+	validator *validator.Validator,
 	logger utils.Logger,
+	casdoorConfig config.CasdoorConfig,
+	userRepo repositories.UserRepository,
 ) *HandlerManager {
+	authMiddleware := NewCasdoorAuthMiddleware(casdoorConfig, userRepo)
+
 	return &HandlerManager{
 		assessmentHandler:   NewAssessmentHandler(serviceManager.Assessment(), validator, logger),
 		questionHandler:     NewQuestionHandler(serviceManager.Question(), validator, logger),
 		questionBankHandler: NewQuestionBankHandler(serviceManager.QuestionBank(), logger),
 		attemptHandler:      NewAttemptHandler(serviceManager.Attempt(), validator, logger),
 		gradingHandler:      NewGradingHandler(serviceManager.Grading(), validator, logger),
+		authMiddleware:      authMiddleware,
 	}
 }
 
 // SetupRoutes sets up all API routes
 func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 	// Health check endpoint
-	router.GET("/health", HealthCheck)
+	// router.GET("/health", HealthCheck)
 
-	// API v1 routes
+	// API v1 routes with authentication
 	v1 := router.Group("/api/v1")
+	v1.Use(hm.authMiddleware.AuthMiddleware()) // Apply authentication to all API routes
 	{
 		// Assessment routes
 		assessments := v1.Group("/assessments")
 		{
-			assessments.POST("", hm.assessmentHandler.CreateAssessment)
+			// Create/modify assessments - Teachers and Admins only
+			assessments.POST("", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.CreateAssessment)
+			assessments.PUT("/:id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.UpdateAssessment)
+			assessments.DELETE("/:id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.DeleteAssessment)
+			assessments.PUT("/:id/status", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.UpdateAssessmentStatus)
+			assessments.POST("/:id/publish", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.PublishAssessment)
+			assessments.POST("/:id/archive", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.ArchiveAssessment)
+
+			// View assessments - All authenticated users
 			assessments.GET("", hm.assessmentHandler.ListAssessments)
 			assessments.GET("/search", hm.assessmentHandler.SearchAssessments)
 			assessments.GET("/:id", hm.assessmentHandler.GetAssessment)
 			assessments.GET("/:id/details", hm.assessmentHandler.GetAssessmentWithDetails)
-			assessments.PUT("/:id", hm.assessmentHandler.UpdateAssessment)
-			assessments.DELETE("/:id", hm.assessmentHandler.DeleteAssessment)
-			assessments.PUT("/:id/status", hm.assessmentHandler.UpdateAssessmentStatus)
-			assessments.POST("/:id/publish", hm.assessmentHandler.PublishAssessment)
-			assessments.POST("/:id/archive", hm.assessmentHandler.ArchiveAssessment)
-			assessments.GET("/:id/stats", hm.assessmentHandler.GetAssessmentStats)
 
-			// Assessment question management
-			assessments.POST("/:id/questions/:question_id", hm.assessmentHandler.AddQuestionToAssessment)
-			assessments.DELETE("/:id/questions/:question_id", hm.assessmentHandler.RemoveQuestionFromAssessment)
-			assessments.PUT("/:id/questions/reorder", hm.assessmentHandler.ReorderAssessmentQuestions)
+			// Stats - Teachers and Admins only
+			assessments.GET("/:id/stats", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.GetAssessmentStats)
 
-			// Creator-specific routes
-			assessments.GET("/creator/:creator_id", hm.assessmentHandler.GetAssessmentsByCreator)
-			assessments.GET("/creator/:creator_id/stats", hm.assessmentHandler.GetCreatorStats)
+			// Assessment question management - Teachers and Admins only
+			assessments.POST("/:id/questions/:question_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.AddQuestionToAssessment)
+			assessments.DELETE("/:id/questions/:question_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.RemoveQuestionFromAssessment)
+			assessments.PUT("/:id/questions/reorder", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.ReorderAssessmentQuestions)
+
+			// Creator-specific routes - Teachers and Admins only
+			assessments.GET("/creator/:creator_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.GetAssessmentsByCreator)
+			assessments.GET("/creator/:creator_id/stats", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.GetCreatorStats)
 		}
 
 		// Question routes
@@ -142,8 +159,9 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			attempts.GET("/student/:student_id", hm.attemptHandler.GetAttemptsByStudent)
 		}
 
-		// Grading routes
+		// Grading routes - Teachers, Proctors and Admins only
 		grading := v1.Group("/grading")
+		grading.Use(hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleProctor, models.RoleAdmin))
 		{
 			// Manual grading
 			grading.POST("/answers/:answer_id", hm.gradingHandler.GradeAnswer)

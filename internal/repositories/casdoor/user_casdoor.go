@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
+	"slices"
 	"strings"
 	"time"
 
@@ -123,11 +123,10 @@ func (u *UserCasdoor) convertCasdoorUserToModel(casdoorUser *casdoorsdk.User) *m
 		return nil
 	}
 
-	// Parse ID from string to uint
-	id, _ := strconv.ParseUint(casdoorUser.Id, 10, 32)
+	// Use ID as string directly
+	id := casdoorUser.Id
 
 	// Determine role from Casdoor user type or custom field
-	role := u.mapCasdoorRoleToUserRole(casdoorUser.Type)
 
 	// Parse timestamps
 	var createdAt, updatedAt time.Time
@@ -153,10 +152,10 @@ func (u *UserCasdoor) convertCasdoorUserToModel(casdoorUser *casdoorsdk.User) *m
 	}
 
 	return &models.User{
-		ID:            uint(id),
+		ID:            id,
 		FullName:      casdoorUser.DisplayName,
 		Email:         casdoorUser.Email,
-		Role:          role,
+		Role:          u.convertCasdoorRolesToModel(casdoorUser.Roles),
 		AvatarURL:     &casdoorUser.Avatar,
 		PhoneNumber:   &casdoorUser.Phone,
 		Organization:  &casdoorUser.Affiliation,
@@ -172,8 +171,30 @@ func (u *UserCasdoor) convertCasdoorUserToModel(casdoorUser *casdoorsdk.User) *m
 	}
 }
 
-// mapCasdoorRoleToUserRole maps Casdoor user type to internal role
-func (u *UserCasdoor) mapCasdoorRoleToUserRole(casdoorType string) models.UserRole {
+func (u *UserCasdoor) convertCasdoorRolesToModel(casdoorRoles []*casdoorsdk.Role) models.UserRole {
+	var roles []models.UserRole
+	isExist := make(map[models.UserRole]bool)
+	for _, casdoorRole := range casdoorRoles {
+		mappedRole := u.mapSingleCasdoorRoleToUserRole(casdoorRole.Name)
+		if !isExist[mappedRole] {
+			roles = append(roles, mappedRole)
+			isExist[mappedRole] = true
+		}
+	}
+
+	// Ensure at least one role
+	// if contain admin, only keep admin
+	if slices.Contains(roles, models.RoleAdmin) {
+		return models.RoleAdmin
+	}
+
+	if len(roles) == 0 {
+		return models.RoleStudent // Default role
+	}
+	return roles[0] // Return the first role as primary
+}
+
+func (u *UserCasdoor) mapSingleCasdoorRoleToUserRole(casdoorType string) models.UserRole {
 	switch strings.ToLower(casdoorType) {
 	case "student":
 		return models.RoleStudent
@@ -199,21 +220,21 @@ func (u *UserCasdoor) getPropertyOrDefault(properties map[string]string, key, de
 // ===== BASIC READ OPERATIONS =====
 
 // GetByID retrieves a user by ID
-func (u *UserCasdoor) GetByID(ctx context.Context, id uint) (*models.User, error) {
+func (u *UserCasdoor) GetByID(ctx context.Context, id string) (*models.User, error) {
 	// Try cache first
-	cacheKey := fmt.Sprintf("id:%d", id)
+	cacheKey := fmt.Sprintf("id:%s", id)
 	if cachedUser, err := u.getUserFromCache(ctx, cacheKey); err == nil && cachedUser != nil {
 		return cachedUser, nil
 	}
 
 	// Get from Casdoor
-	casdoorUser, err := u.client.GetUserByUserId(strconv.FormatUint(uint64(id), 10))
+	casdoorUser, err := u.client.GetUserByUserId(id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user from Casdoor: %w", err)
 	}
 
 	if casdoorUser == nil {
-		return nil, fmt.Errorf("user not found with ID %d", id)
+		return nil, fmt.Errorf("user not found with ID %s", id)
 	}
 
 	user := u.convertCasdoorUserToModel(casdoorUser)
@@ -253,23 +274,23 @@ func (u *UserCasdoor) GetByEmail(ctx context.Context, email string) (*models.Use
 
 	// Cache the result
 	u.setUserCache(ctx, cacheKey, user)
-	u.setUserCache(ctx, fmt.Sprintf("id:%d", user.ID), user)
+	u.setUserCache(ctx, fmt.Sprintf("id:%s", user.ID), user)
 
 	return user, nil
 }
 
 // GetByIDs retrieves multiple users by their IDs
-func (u *UserCasdoor) GetByIDs(ctx context.Context, ids []uint) ([]*models.User, error) {
+func (u *UserCasdoor) GetByIDs(ctx context.Context, ids []string) ([]*models.User, error) {
 	if len(ids) == 0 {
 		return []*models.User{}, nil
 	}
 
 	users := make([]*models.User, 0, len(ids))
-	uncachedIDs := make([]uint, 0)
+	uncachedIDs := make([]string, 0)
 
 	// Check cache first
 	for _, id := range ids {
-		cacheKey := fmt.Sprintf("id:%d", id)
+		cacheKey := fmt.Sprintf("id:%s", id)
 		if cachedUser, err := u.getUserFromCache(ctx, cacheKey); err == nil && cachedUser != nil {
 			users = append(users, cachedUser)
 		} else {
@@ -292,9 +313,9 @@ func (u *UserCasdoor) GetByIDs(ctx context.Context, ids []uint) ([]*models.User,
 // ===== VALIDATION AND CHECKS =====
 
 // ExistsByID checks if a user exists by ID
-func (u *UserCasdoor) ExistsByID(ctx context.Context, id uint) (bool, error) {
+func (u *UserCasdoor) ExistsByID(ctx context.Context, id string) (bool, error) {
 	// Check cache first
-	cacheKey := fmt.Sprintf("exists:id:%d", id)
+	cacheKey := fmt.Sprintf("exists:id:%s", id)
 	if u.redis != nil {
 		exists, err := u.redis.Get(ctx, cacheKey).Result()
 		if err == nil {
@@ -303,7 +324,7 @@ func (u *UserCasdoor) ExistsByID(ctx context.Context, id uint) (bool, error) {
 	}
 
 	// Check with Casdoor
-	user, err := u.client.GetUser(strconv.FormatUint(uint64(id), 10))
+	user, err := u.client.GetUser(id)
 	if err != nil {
 		return false, fmt.Errorf("failed to check user existence: %w", err)
 	}
@@ -346,7 +367,7 @@ func (u *UserCasdoor) ExistsByEmail(ctx context.Context, email string) (bool, er
 }
 
 // IsActive checks if a user is active
-func (u *UserCasdoor) IsActive(ctx context.Context, id uint) (bool, error) {
+func (u *UserCasdoor) IsActive(ctx context.Context, id string) (bool, error) {
 	user, err := u.GetByID(ctx, id)
 	if err != nil {
 		return false, err
@@ -355,10 +376,10 @@ func (u *UserCasdoor) IsActive(ctx context.Context, id uint) (bool, error) {
 }
 
 // HasRole checks if a user has a specific role
-func (u *UserCasdoor) HasRole(ctx context.Context, id uint, role models.UserRole) (bool, error) {
+func (u *UserCasdoor) HasRole(ctx context.Context, id string, role models.UserRole) (bool, error) {
 	user, err := u.GetByID(ctx, id)
 	if err != nil {
 		return false, err
 	}
-	return user.Role == role, nil
+	return role == user.Role, nil
 }

@@ -40,7 +40,7 @@ func (a *AssessmentPostgreSQL) Create(ctx context.Context, tx *gorm.DB, assessme
 		return fmt.Errorf("failed to create assessment: %w", err)
 	}
 	// Invalidate related caches
-	a.cacheManager.Assessment.InvalidatePattern(ctx, fmt.Sprintf("creator:%d:*", assessment.CreatedBy))
+	a.cacheManager.Assessment.InvalidatePattern(ctx, fmt.Sprintf("creator:%s:*", assessment.CreatedBy))
 	a.cacheManager.Assessment.InvalidatePattern(ctx, "list:*")
 
 	return nil
@@ -82,7 +82,7 @@ func (a *AssessmentPostgreSQL) GetByIDWithDetails(ctx context.Context, tx *gorm.
 			Preload("Creator").
 			Preload("Settings").
 			Preload("Questions", func(db *gorm.DB) *gorm.DB {
-				return db.Order("order ASC")
+				return db.Order("assessment_questions.order ASC")
 			}).
 			Preload("Questions.Question").
 			First(&dbAssessment, id).Error
@@ -101,53 +101,64 @@ func (a *AssessmentPostgreSQL) GetByIDWithDetails(ctx context.Context, tx *gorm.
 // Update updates an assessment and invalidates cache
 func (a *AssessmentPostgreSQL) Update(ctx context.Context, tx *gorm.DB, assessment *models.Assessment) error {
 	// Get current assessment for validation
-	var currentAssessment models.Assessment
-	if err := tx.WithContext(ctx).First(&currentAssessment, assessment.ID).Error; err != nil {
-		return fmt.Errorf("assessment not found: %w", err)
-	}
-
-	// Check title uniqueness if title changed
-	if assessment.Title != currentAssessment.Title {
-		exists, err := a.ExistsByTitle(ctx, tx, assessment.Title, assessment.CreatedBy, &assessment.ID)
-		if err != nil {
-			return fmt.Errorf("failed to check title uniqueness: %w", err)
-		}
-		if exists {
-			return fmt.Errorf("assessment with title '%s' already exists for this creator", assessment.Title)
-		}
-	}
-
-	// Validate business rules for active assessments
-	if currentAssessment.Status == models.StatusActive {
-		// Check if assessment has attempts
-		hasAttempts, err := a.HasAttempts(ctx, tx, assessment.ID)
-		if err != nil {
-			return fmt.Errorf("failed to check attempts: %w", err)
-		}
-
-		if hasAttempts {
-			// Restrict modifications for assessments with attempts
-			if assessment.Duration != currentAssessment.Duration {
-				return fmt.Errorf("cannot change duration for active assessment with attempts")
-			}
-			if assessment.MaxAttempts < currentAssessment.MaxAttempts {
-				return fmt.Errorf("cannot decrease max attempts for assessment with existing attempts")
-			}
-		}
-	}
+	//var currentAssessment models.Assessment
+	//if err := tx.WithContext(ctx).First(&currentAssessment, assessment.ID).Error; err != nil {
+	//	return fmt.Errorf("assessment not found: %w", err)
+	//}
+	//
+	//// Check title uniqueness if title changed
+	//if assessment.Title != currentAssessment.Title {
+	//	exists, err := a.ExistsByTitle(ctx, tx, assessment.Title, assessment.CreatedBy, &assessment.ID)
+	//	if err != nil {
+	//		return fmt.Errorf("failed to check title uniqueness: %w", err)
+	//	}
+	//	if exists {
+	//		return fmt.Errorf("assessment with title '%s' already exists for this creator", assessment.Title)
+	//	}
+	//}
+	//
+	//// Validate business rules for active assessments
+	//if currentAssessment.Status == models.StatusActive {
+	//	// Check if assessment has attempts
+	//	hasAttempts, err := a.HasAttempts(ctx, tx, assessment.ID)
+	//	if err != nil {
+	//		return fmt.Errorf("failed to check attempts: %w", err)
+	//	}
+	//
+	//	if hasAttempts {
+	//		// Restrict modifications for assessments with attempts
+	//		if assessment.Duration != currentAssessment.Duration {
+	//			return fmt.Errorf("cannot change duration for active assessment with attempts")
+	//		}
+	//		if assessment.MaxAttempts < currentAssessment.MaxAttempts {
+	//			return fmt.Errorf("cannot decrease max attempts for assessment with existing attempts")
+	//		}
+	//	}
+	//}
 
 	// Increment version
-	assessment.Version = currentAssessment.Version + 1
-	assessment.UpdatedAt = time.Now()
+	//assessment.Version = currentAssessment.Version + 1
+	//assessment.UpdatedAt = time.Now()
 
 	// Update assessment
-	if err := tx.WithContext(ctx).Save(assessment).Error; err != nil {
+	if err := tx.WithContext(ctx).Model(&models.Assessment{}).Where("id = ?", assessment.ID).Updates(map[string]interface{}{
+		"title":         assessment.Title,
+		"description":   assessment.Description,
+		"duration":      assessment.Duration,
+		"max_attempts":  assessment.MaxAttempts,
+		"passing_score": assessment.PassingScore,
+		"time_warning":  assessment.TimeWarning,
+		"due_date":      assessment.DueDate,
+		"status":        assessment.Status,
+		"version":       assessment.Version,
+		"updated_at":    assessment.UpdatedAt,
+	}).Error; err != nil {
 		return fmt.Errorf("failed to update assessment: %w", err)
 	}
 
 	// Invalidate caches
 	a.cacheManager.Assessment.Delete(ctx, fmt.Sprintf("id:%d", assessment.ID), fmt.Sprintf("details:%d", assessment.ID))
-	a.cacheManager.Assessment.InvalidatePattern(ctx, fmt.Sprintf("creator:%d:*", assessment.CreatedBy))
+	a.cacheManager.Assessment.InvalidatePattern(ctx, fmt.Sprintf("creator:%s:*", assessment.CreatedBy))
 	a.cacheManager.Assessment.InvalidatePattern(ctx, "list:*")
 
 	return nil
@@ -199,7 +210,7 @@ func (a *AssessmentPostgreSQL) List(ctx context.Context, tx *gorm.DB, filters re
 }
 
 // GetByCreator retrieves assessments created by a specific user
-func (a *AssessmentPostgreSQL) GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint, filters repositories.AssessmentFilters) ([]*models.Assessment, int64, error) {
+func (a *AssessmentPostgreSQL) GetByCreator(ctx context.Context, tx *gorm.DB, creatorID string, filters repositories.AssessmentFilters) ([]*models.Assessment, int64, error) {
 	filters.CreatedBy = &creatorID
 	return a.List(ctx, tx, filters)
 }
@@ -312,7 +323,7 @@ func (a *AssessmentPostgreSQL) BulkUpdateStatus(ctx context.Context, tx *gorm.DB
 }
 
 // IsOwner checks if a user is the owner of an assessment
-func (a *AssessmentPostgreSQL) IsOwner(ctx context.Context, tx *gorm.DB, assessmentID, userID uint) (bool, error) {
+func (a *AssessmentPostgreSQL) IsOwner(ctx context.Context, tx *gorm.DB, assessmentID uint, userID string) (bool, error) {
 	db := a.getDB(tx)
 	var count int64
 	err := db.WithContext(ctx).
@@ -324,7 +335,7 @@ func (a *AssessmentPostgreSQL) IsOwner(ctx context.Context, tx *gorm.DB, assessm
 }
 
 // CanAccess checks if a user can access an assessment based on role
-func (a *AssessmentPostgreSQL) CanAccess(ctx context.Context, tx *gorm.DB, assessmentID, userID uint, role models.UserRole) (bool, error) {
+func (a *AssessmentPostgreSQL) CanAccess(ctx context.Context, tx *gorm.DB, assessmentID uint, userID string, role models.UserRole) (bool, error) {
 	db := a.getDB(tx)
 	// Admins can access everything
 	if role == models.RoleAdmin {
@@ -414,7 +425,7 @@ func (a *AssessmentPostgreSQL) GetAssessmentStats(ctx context.Context, tx *gorm.
 }
 
 // GetCreatorStats retrieves statistics for a creator
-func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, tx *gorm.DB, creatorID uint) (*repositories.CreatorStats, error) {
+func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, tx *gorm.DB, creatorID string) (*repositories.CreatorStats, error) {
 	db := a.getDB(tx)
 	stats := &repositories.CreatorStats{}
 
@@ -484,7 +495,7 @@ func (a *AssessmentPostgreSQL) GetPopularAssessments(ctx context.Context, tx *go
 }
 
 // ExistsByTitle checks if an assessment with the same title exists for a creator
-func (a *AssessmentPostgreSQL) ExistsByTitle(ctx context.Context, tx *gorm.DB, title string, creatorID uint, excludeID *uint) (bool, error) {
+func (a *AssessmentPostgreSQL) ExistsByTitle(ctx context.Context, tx *gorm.DB, title string, creatorID string, excludeID *uint) (bool, error) {
 	query := tx.WithContext(ctx).
 		Model(&models.Assessment{}).
 		Where("title = ? AND created_by = ?", title, creatorID)

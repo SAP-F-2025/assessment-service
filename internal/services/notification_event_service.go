@@ -9,7 +9,7 @@ import (
 	"github.com/SAP-F-2025/assessment-service/internal/events"
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
-	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 )
 
 // NotificationEventService handles sending notifications through event publishing
@@ -47,14 +47,14 @@ type notificationEventService struct {
 	repo           repositories.Repository
 	eventPublisher events.EventPublisher
 	logger         *slog.Logger
-	validator      *utils.Validator
+	validator      *validator.Validator
 }
 
 func NewNotificationEventService(
 	repo repositories.Repository,
 	eventPublisher events.EventPublisher,
 	logger *slog.Logger,
-	validator *utils.Validator,
+	validator *validator.Validator,
 ) NotificationEventService {
 	return &notificationEventService{
 		repo:           repo,
@@ -364,7 +364,7 @@ func (s *notificationEventService) SendBulkNotification(ctx context.Context, use
 		notification.ActionURL,
 		notification.Metadata,
 		notification.ScheduledAt,
-		0, // TODO: Get sender ID from context
+		"0", // TODO: Get sender ID from context
 	)
 
 	return s.eventPublisher.PublishNotificationEvent(ctx, event)
@@ -375,17 +375,17 @@ func (s *notificationEventService) SendBulkNotification(ctx context.Context, use
 // These methods should be implemented based on your specific business logic
 // For now, they return placeholder data
 
-func (s *notificationEventService) getEnrolledStudentIDs(ctx context.Context, assessmentID uint) []uint {
+func (s *notificationEventService) getEnrolledStudentIDs(ctx context.Context, assessmentID uint) []string {
 	// TODO: Implement based on your enrollment/class management system
 	// This might involve querying a separate enrollment service or database table
 	s.logger.Debug("Getting enrolled student IDs", "assessment_id", assessmentID)
-	return []uint{} // Placeholder
+	return []string{} // Placeholder
 }
 
-func (s *notificationEventService) getStudentsWithIncompleteAssessment(ctx context.Context, assessmentID uint) []uint {
+func (s *notificationEventService) getStudentsWithIncompleteAssessment(ctx context.Context, assessmentID uint) []string {
 	// TODO: Query students who are enrolled but haven't completed the assessment
 	s.logger.Debug("Getting students with incomplete assessment", "assessment_id", assessmentID)
-	return []uint{} // Placeholder
+	return []string{} // Placeholder
 }
 
 func (s *notificationEventService) requiresManualGrading(ctx context.Context, attemptID uint) bool {
@@ -412,8 +412,8 @@ func (s *notificationEventService) getPendingManualGradingAttempts(ctx context.C
 	return []uint{} // Placeholder
 }
 
-func (s *notificationEventService) getAvailableGraderIDs(ctx context.Context, assessmentID uint) []uint {
+func (s *notificationEventService) getAvailableGraderIDs(ctx context.Context, assessmentID uint) []string {
 	// TODO: Get teachers/admins who can grade this assessment
 	s.logger.Debug("Getting available grader IDs", "assessment_id", assessmentID)
-	return []uint{} // Placeholder
+	return []string{} // Placeholder
 }

@@ -16,7 +16,7 @@ type QuestionBank struct {
 	IsShared bool `json:"is_shared" gorm:"default:false"`
 
 	// Metadata
-	CreatedBy uint           `json:"created_by" gorm:"not null;index"`
+	CreatedBy string         `json:"created_by" gorm:"not null;index;size:255"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
@@ -32,9 +32,9 @@ type QuestionBank struct {
 }
 
 type QuestionBankShare struct {
-	ID     uint `json:"id" gorm:"primaryKey"`
-	BankID uint `json:"bank_id" gorm:"not null;index"`
-	UserID uint `json:"user_id" gorm:"not null;index"`
+	ID     uint   `json:"id" gorm:"primaryKey"`
+	BankID uint   `json:"bank_id" gorm:"not null;index"`
+	UserID string `json:"user_id" gorm:"not null;index;size:255"`
 
 	// Permissions
 	CanView   bool `json:"can_view" gorm:"default:true"`
@@ -42,7 +42,7 @@ type QuestionBankShare struct {
 	CanDelete bool `json:"can_delete" gorm:"default:false"`
 
 	SharedAt time.Time `json:"shared_at"`
-	SharedBy uint      `json:"shared_by" gorm:"not null"`
+	SharedBy string    `json:"shared_by" gorm:"not null;size:255"`
 
 	// Relations
 	Bank   QuestionBank `json:"bank" gorm:"foreignKey:BankID"`

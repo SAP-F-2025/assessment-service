@@ -4,23 +4,25 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/services"
 	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"github.com/gin-gonic/gin"
 )
 
 type AttemptHandler struct {
 	BaseHandler
 	attemptService services.AttemptService
-	validator      *utils.Validator
+	validator      *validator.Validator
 }
 
 func NewAttemptHandler(
 	attemptService services.AttemptService,
-	validator *utils.Validator,
+	validator *validator.Validator,
 	logger utils.Logger,
 ) *AttemptHandler {
 	return &AttemptHandler{
@@ -62,7 +64,7 @@ func (h *AttemptHandler) StartAttempt(c *gin.Context) {
 		return
 	}
 
-	attempt, err := h.attemptService.Start(c.Request.Context(), &req, userID.(uint))
+	attempt, err := h.attemptService.Start(c.Request.Context(), &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -98,7 +100,7 @@ func (h *AttemptHandler) ResumeAttempt(c *gin.Context) {
 		})
 		return
 	}
-	attempt, err := h.attemptService.Resume(c.Request.Context(), id, userID.(uint))
+	attempt, err := h.attemptService.Resume(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -146,7 +148,7 @@ func (h *AttemptHandler) SubmitAttempt(c *gin.Context) {
 		})
 		return
 	}
-	attempt, err := h.attemptService.Submit(c.Request.Context(), &req, userID.(uint))
+	attempt, err := h.attemptService.Submit(c.Request.Context(), &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -200,7 +202,7 @@ func (h *AttemptHandler) SubmitAnswer(c *gin.Context) {
 		})
 		return
 	}
-	err := h.attemptService.SubmitAnswer(c.Request.Context(), attemptID, &req, userID.(uint))
+	err := h.attemptService.SubmitAnswer(c.Request.Context(), attemptID, &req, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -238,7 +240,7 @@ func (h *AttemptHandler) GetAttempt(c *gin.Context) {
 		})
 		return
 	}
-	attempt, err := h.attemptService.GetByID(c.Request.Context(), id, userID.(uint))
+	attempt, err := h.attemptService.GetByID(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -274,7 +276,7 @@ func (h *AttemptHandler) GetAttemptWithDetails(c *gin.Context) {
 		})
 		return
 	}
-	attempt, err := h.attemptService.GetByIDWithDetails(c.Request.Context(), id, userID.(uint))
+	attempt, err := h.attemptService.GetByIDWithDetails(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -310,7 +312,7 @@ func (h *AttemptHandler) GetCurrentAttempt(c *gin.Context) {
 		})
 		return
 	}
-	attempt, err := h.attemptService.GetCurrentAttempt(c.Request.Context(), assessmentID, userID.(uint))
+	attempt, err := h.attemptService.GetCurrentAttempt(c.Request.Context(), assessmentID, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -344,7 +346,7 @@ func (h *AttemptHandler) ListAttempts(c *gin.Context) {
 		return
 	}
 
-	attempts, total, err := h.attemptService.List(c.Request.Context(), filters, userID.(uint))
+	attempts, total, err := h.attemptService.List(c.Request.Context(), filters, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -375,8 +377,8 @@ func (h *AttemptHandler) ListAttempts(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /attempts/student/{student_id} [get]
 func (h *AttemptHandler) GetAttemptsByStudent(c *gin.Context) {
-	studentID := h.parseIDParam(c, "student_id")
-	if studentID == 0 {
+	studentID := ParseStringIDParam(c, "student_id")
+	if studentID == "" {
 		return
 	}
 
@@ -430,7 +432,7 @@ func (h *AttemptHandler) GetAttemptsByAssessment(c *gin.Context) {
 		return
 	}
 
-	attempts, total, err := h.attemptService.GetByAssessment(c.Request.Context(), assessmentID, filters, userID.(uint))
+	attempts, total, err := h.attemptService.GetByAssessment(c.Request.Context(), assessmentID, filters, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -474,7 +476,7 @@ func (h *AttemptHandler) GetTimeRemaining(c *gin.Context) {
 		})
 		return
 	}
-	timeRemaining, err := h.attemptService.GetTimeRemaining(c.Request.Context(), id, userID.(uint))
+	timeRemaining, err := h.attemptService.GetTimeRemaining(c.Request.Context(), id, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -531,7 +533,7 @@ func (h *AttemptHandler) ExtendTime(c *gin.Context) {
 		})
 		return
 	}
-	err = h.attemptService.ExtendTime(c.Request.Context(), id, minutes, userID.(uint))
+	err = h.attemptService.ExtendTime(c.Request.Context(), id, minutes, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -599,7 +601,7 @@ func (h *AttemptHandler) CanStartAttempt(c *gin.Context) {
 		})
 		return
 	}
-	canStart, err := h.attemptService.CanStart(c.Request.Context(), assessmentID, userID.(uint))
+	canStart, err := h.attemptService.CanStart(c.Request.Context(), assessmentID, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -637,7 +639,7 @@ func (h *AttemptHandler) GetAttemptCount(c *gin.Context) {
 		})
 		return
 	}
-	count, err := h.attemptService.GetAttemptCount(c.Request.Context(), assessmentID, userID.(uint))
+	count, err := h.attemptService.GetAttemptCount(c.Request.Context(), assessmentID, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -706,7 +708,7 @@ func (h *AttemptHandler) GetAttemptStats(c *gin.Context) {
 		})
 		return
 	}
-	stats, err := h.attemptService.GetStats(c.Request.Context(), assessmentID, userID.(uint))
+	stats, err := h.attemptService.GetStats(c.Request.Context(), assessmentID, userID.(string))
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
@@ -720,15 +722,15 @@ func (h *AttemptHandler) GetAttemptStats(c *gin.Context) {
 
 // Helper methods
 
-func (h *AttemptHandler) getUserID(c *gin.Context) uint {
+func (h *AttemptHandler) getUserID(c *gin.Context) string {
 	userID, exists := c.Get("user_id")
 	if !exists {
-		return 0
+		return ""
 	}
-	if id, ok := userID.(uint); ok {
+	if id, ok := userID.(string); ok {
 		return id
 	}
-	return 0
+	return ""
 }
 
 func (h *AttemptHandler) parseIDParam(c *gin.Context, param string) uint {
@@ -770,11 +772,9 @@ func (h *AttemptHandler) parseAttemptFilters(c *gin.Context) repositories.Attemp
 		filters.Status = &attemptStatus
 	}
 
-	if studentIDStr := c.Query("student_id"); studentIDStr != "" {
-		if studentID, err := strconv.ParseUint(studentIDStr, 10, 32); err == nil {
-			id := uint(studentID)
-			filters.StudentID = &id
-		}
+	if studentIDStr := c.Query("student_id"); strings.TrimSpace(studentIDStr) != "" {
+		studentIDStr = strings.TrimSpace(studentIDStr)
+		filters.StudentID = &studentIDStr
 	}
 
 	return filters

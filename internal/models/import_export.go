@@ -20,7 +20,7 @@ type ImportJob struct {
 	ID           string `json:"id" gorm:"primaryKey;size:36"` // UUID
 	AssessmentID *uint  `json:"assessment_id" gorm:"index"`   // null for question bank import
 	BankID       *uint  `json:"bank_id" gorm:"index"`         // null for assessment import
-	UserID       uint   `json:"user_id" gorm:"not null;index"`
+	UserID       string `json:"user_id" gorm:"not null;index;size:255"`
 
 	// File info
 	FileName string `json:"file_name" gorm:"not null;size:255"`

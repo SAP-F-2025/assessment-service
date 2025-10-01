@@ -18,7 +18,7 @@ type AssessmentRepository interface {
 
 	// Query operations
 	List(ctx context.Context, tx *gorm.DB, filters AssessmentFilters) ([]*models.Assessment, int64, error)
-	GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint, filters AssessmentFilters) ([]*models.Assessment, int64, error)
+	GetByCreator(ctx context.Context, tx *gorm.DB, creatorID string, filters AssessmentFilters) ([]*models.Assessment, int64, error)
 	GetByStatus(ctx context.Context, tx *gorm.DB, status models.AssessmentStatus, limit, offset int) ([]*models.Assessment, error)
 	Search(ctx context.Context, tx *gorm.DB, query string, filters AssessmentFilters) ([]*models.Assessment, int64, error)
 
@@ -28,16 +28,16 @@ type AssessmentRepository interface {
 	BulkUpdateStatus(ctx context.Context, tx *gorm.DB, ids []uint, status models.AssessmentStatus) error
 
 	// Permission checks
-	IsOwner(ctx context.Context, tx *gorm.DB, assessmentID, userID uint) (bool, error)
-	CanAccess(ctx context.Context, tx *gorm.DB, assessmentID, userID uint, role models.UserRole) (bool, error)
+	IsOwner(ctx context.Context, tx *gorm.DB, assessmentID uint, userID string) (bool, error)
+	CanAccess(ctx context.Context, tx *gorm.DB, assessmentID uint, userID string, role models.UserRole) (bool, error)
 
 	// Statistics and analytics
 	GetAssessmentStats(ctx context.Context, tx *gorm.DB, id uint) (*AssessmentStats, error)
-	GetCreatorStats(ctx context.Context, tx *gorm.DB, creatorID uint) (*CreatorStats, error)
+	GetCreatorStats(ctx context.Context, tx *gorm.DB, creatorID string) (*CreatorStats, error)
 	GetPopularAssessments(ctx context.Context, tx *gorm.DB, limit int) ([]*models.Assessment, error)
 
 	// Validation helpers
-	ExistsByTitle(ctx context.Context, tx *gorm.DB, title string, creatorID uint, excludeID *uint) (bool, error)
+	ExistsByTitle(ctx context.Context, tx *gorm.DB, title string, creatorID string, excludeID *uint) (bool, error)
 	HasAttempts(ctx context.Context, tx *gorm.DB, id uint) (bool, error)
 	HasActiveAttempts(ctx context.Context, tx *gorm.DB, id uint) (bool, error)
 

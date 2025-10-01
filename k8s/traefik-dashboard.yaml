@@ -1,0 +1,100 @@
+# Traefik Dashboard Access
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: traefik-dashboard
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: traefik
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`traefik.yourcompany.com`) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))
+      kind: Rule
+      middlewares:
+        - name: admin-chain
+      services:
+        - name: api@internal
+          kind: TraefikService
+  tls:
+    certResolver: letsencrypt
+
+---
+# Basic Auth Secret for Dashboard
+apiVersion: v1
+kind: Secret
+metadata:
+  name: basic-auth-secret
+  namespace: default
+type: Opaque
+data:
+  # admin:admin (change this!)
+  # Generate with: htpasswd -nb admin admin | base64
+  users: YWRtaW46JGFwcjEkSDlubUppZUMkSmg4TC9lUEgvOUtRY01lU2o1UEs1MA==
+
+---
+# Service Monitor for Prometheus (optional)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: traefik
+  namespace: default
+  labels:
+    app: traefik
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  endpoints:
+    - port: traefik
+      interval: 30s
+      path: /metrics
+
+---
+# Error Pages Service (optional)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: error-pages
+  namespace: default
+  labels:
+    app: error-pages
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: error-pages
+  template:
+    metadata:
+      labels:
+        app: error-pages
+    spec:
+      containers:
+        - name: error-pages
+          image: tarampampam/error-pages:2.26.0
+          ports:
+            - containerPort: 8080
+          env:
+            - name: TEMPLATE_NAME
+              value: "ghost"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: error-pages-service
+  namespace: default
+spec:
+  selector:
+    app: error-pages
+  ports:
+    - port: 8080
+      targetPort: 8080

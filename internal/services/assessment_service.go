@@ -8,7 +8,7 @@ import (
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
-	"github.com/SAP-F-2025/assessment-service/internal/utils"
+	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"gorm.io/gorm"
 )
 
@@ -17,10 +17,10 @@ type assessmentService struct {
 	questionService QuestionService
 	db              *gorm.DB
 	logger          *slog.Logger
-	validator       *utils.Validator
+	validator       *validator.Validator
 }
 
-func NewAssessmentService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *utils.Validator) AssessmentService {
+func NewAssessmentService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *validator.Validator) AssessmentService {
 	return &assessmentService{
 		repo:      repo,
 		db:        db,
@@ -31,7 +31,7 @@ func NewAssessmentService(repo repositories.Repository, db *gorm.DB, logger *slo
 
 // ===== CORE CRUD OPERATIONS =====
 
-func (s *assessmentService) Create(ctx context.Context, req *CreateAssessmentRequest, creatorID uint) (*AssessmentResponse, error) {
+func (s *assessmentService) Create(ctx context.Context, req *CreateAssessmentRequest, creatorID string) (*AssessmentResponse, error) {
 	s.logger.Info("Creating assessment", "creator_id", creatorID, "title", req.Title)
 
 	// Validate request with business rules
@@ -104,7 +104,7 @@ func (s *assessmentService) Create(ctx context.Context, req *CreateAssessmentReq
 	return s.GetByIDWithDetails(ctx, assessment.ID, creatorID)
 }
 
-func (s *assessmentService) GetByID(ctx context.Context, id uint, userID uint) (*AssessmentResponse, error) {
+func (s *assessmentService) GetByID(ctx context.Context, id uint, userID string) (*AssessmentResponse, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, id, userID)
 	if err != nil {
@@ -126,7 +126,7 @@ func (s *assessmentService) GetByID(ctx context.Context, id uint, userID uint) (
 	return s.buildAssessmentResponse(ctx, assessment, userID), nil
 }
 
-func (s *assessmentService) GetByIDWithDetails(ctx context.Context, id uint, userID uint) (*AssessmentResponse, error) {
+func (s *assessmentService) GetByIDWithDetails(ctx context.Context, id uint, userID string) (*AssessmentResponse, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, id, userID)
 	if err != nil {
@@ -148,7 +148,7 @@ func (s *assessmentService) GetByIDWithDetails(ctx context.Context, id uint, use
 	return s.buildAssessmentResponse(ctx, assessment, userID), nil
 }
 
-func (s *assessmentService) Update(ctx context.Context, id uint, req *UpdateAssessmentRequest, userID uint) (*AssessmentResponse, error) {
+func (s *assessmentService) Update(ctx context.Context, id uint, req *UpdateAssessmentRequest, userID string) (*AssessmentResponse, error) {
 	s.logger.Info("Updating assessment", "assessment_id", id, "user_id", userID)
 
 	// Get current assessment for validation
@@ -216,7 +216,7 @@ func (s *assessmentService) Update(ctx context.Context, id uint, req *UpdateAsse
 	return s.GetByIDWithDetails(ctx, id, userID)
 }
 
-func (s *assessmentService) Delete(ctx context.Context, id uint, userID uint) error {
+func (s *assessmentService) Delete(ctx context.Context, id uint, userID string) error {
 	s.logger.Info("Deleting assessment", "assessment_id", id, "user_id", userID)
 
 	// Check delete permission
@@ -239,7 +239,7 @@ func (s *assessmentService) Delete(ctx context.Context, id uint, userID uint) er
 
 // ===== LIST AND SEARCH OPERATIONS =====
 
-func (s *assessmentService) List(ctx context.Context, filters repositories.AssessmentFilters, userID uint) (*AssessmentListResponse, error) {
+func (s *assessmentService) List(ctx context.Context, filters repositories.AssessmentFilters, userID string) (*AssessmentListResponse, error) {
 	// For non-admin users, limit to their own assessments
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -270,7 +270,7 @@ func (s *assessmentService) List(ctx context.Context, filters repositories.Asses
 	return response, nil
 }
 
-func (s *assessmentService) GetByCreator(ctx context.Context, creatorID uint, filters repositories.AssessmentFilters) (*AssessmentListResponse, error) {
+func (s *assessmentService) GetByCreator(ctx context.Context, creatorID string, filters repositories.AssessmentFilters) (*AssessmentListResponse, error) {
 	// Set creator filter
 	filters.CreatedBy = &creatorID
 
@@ -294,7 +294,7 @@ func (s *assessmentService) GetByCreator(ctx context.Context, creatorID uint, fi
 	return response, nil
 }
 
-func (s *assessmentService) Search(ctx context.Context, query string, filters repositories.AssessmentFilters, userID uint) (*AssessmentListResponse, error) {
+func (s *assessmentService) Search(ctx context.Context, query string, filters repositories.AssessmentFilters, userID string) (*AssessmentListResponse, error) {
 	// For non-admin users, limit to their own assessments
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
@@ -327,7 +327,7 @@ func (s *assessmentService) Search(ctx context.Context, query string, filters re
 
 // ===== STATUS MANAGEMENT =====
 
-func (s *assessmentService) UpdateStatus(ctx context.Context, id uint, req *UpdateStatusRequest, userID uint) error {
+func (s *assessmentService) UpdateStatus(ctx context.Context, id uint, req *UpdateStatusRequest, userID string) error {
 	s.logger.Info("Updating assessment status", "assessment_id", id, "new_status", req.Status, "user_id", userID)
 
 	// Validate request
@@ -374,7 +374,7 @@ func (s *assessmentService) UpdateStatus(ctx context.Context, id uint, req *Upda
 	return nil
 }
 
-func (s *assessmentService) Publish(ctx context.Context, id uint, userID uint) error {
+func (s *assessmentService) Publish(ctx context.Context, id uint, userID string) error {
 	return s.UpdateStatus(ctx, id, &UpdateStatusRequest{
 		Status: models.StatusActive,
 		Reason: stringPtr("Published by user"),
@@ -385,7 +385,7 @@ func stringPtr(s string) *string {
 	return &s
 }
 
-func (s *assessmentService) Archive(ctx context.Context, id uint, userID uint) error {
+func (s *assessmentService) Archive(ctx context.Context, id uint, userID string) error {
 	return s.UpdateStatus(ctx, id, &UpdateStatusRequest{
 		Status: models.StatusArchived,
 		Reason: stringPtr("Archived by user"),
@@ -394,7 +394,7 @@ func (s *assessmentService) Archive(ctx context.Context, id uint, userID uint) e
 
 // ===== QUESTION MANAGEMENT =====
 
-func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points *int, userID uint) error {
+func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points *int, userID string) error {
 	s.logger.Info("Adding question to assessment",
 		"assessment_id", assessmentID,
 		"question_id", questionID,
@@ -431,7 +431,7 @@ func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, quest
 	return nil
 }
 
-func (s *assessmentService) RemoveQuestion(ctx context.Context, assessmentID, questionID uint, userID uint) error {
+func (s *assessmentService) RemoveQuestion(ctx context.Context, assessmentID, questionID uint, userID string) error {
 	s.logger.Info("Removing question from assessment",
 		"assessment_id", assessmentID,
 		"question_id", questionID,
@@ -458,7 +458,7 @@ func (s *assessmentService) RemoveQuestion(ctx context.Context, assessmentID, qu
 	return nil
 }
 
-func (s *assessmentService) ReorderQuestions(ctx context.Context, assessmentID uint, orders []repositories.QuestionOrder, userID uint) error {
+func (s *assessmentService) ReorderQuestions(ctx context.Context, assessmentID uint, orders []repositories.QuestionOrder, userID string) error {
 	s.logger.Info("Reordering assessment questions",
 		"assessment_id", assessmentID,
 		"question_count", len(orders),
@@ -485,7 +485,7 @@ func (s *assessmentService) ReorderQuestions(ctx context.Context, assessmentID u
 
 // ===== STATISTICS AND ANALYTICS =====
 
-func (s *assessmentService) GetStats(ctx context.Context, id uint, userID uint) (*repositories.AssessmentStats, error) {
+func (s *assessmentService) GetStats(ctx context.Context, id uint, userID string) (*repositories.AssessmentStats, error) {
 	// Check access permission
 	canAccess, err := s.CanAccess(ctx, id, userID)
 	if err != nil {
@@ -503,7 +503,7 @@ func (s *assessmentService) GetStats(ctx context.Context, id uint, userID uint) 
 	return stats, nil
 }
 
-func (s *assessmentService) GetCreatorStats(ctx context.Context, creatorID uint) (*repositories.CreatorStats, error) {
+func (s *assessmentService) GetCreatorStats(ctx context.Context, creatorID string) (*repositories.CreatorStats, error) {
 	stats, err := s.repo.Assessment().GetCreatorStats(ctx, nil, creatorID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get creator stats: %w", err)

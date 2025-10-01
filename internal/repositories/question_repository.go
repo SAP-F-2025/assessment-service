@@ -24,7 +24,7 @@ type QuestionRepository interface {
 
 	// Query operations
 	List(ctx context.Context, tx *gorm.DB, filters QuestionFilters) ([]*models.Question, int64, error)
-	GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint, filters QuestionFilters) ([]*models.Question, int64, error)
+	GetByCreator(ctx context.Context, tx *gorm.DB, creatorID string, filters QuestionFilters) ([]*models.Question, int64, error)
 	GetByCategory(ctx context.Context, tx *gorm.DB, categoryID uint, filters QuestionFilters) ([]*models.Question, error)
 	GetByType(ctx context.Context, tx *gorm.DB, questionType models.QuestionType, filters QuestionFilters) ([]*models.Question, error)
 	GetByDifficulty(ctx context.Context, tx *gorm.DB, difficulty models.DifficultyLevel, limit, offset int) ([]*models.Question, error)
@@ -33,7 +33,7 @@ type QuestionRepository interface {
 	// Assessment-specific queries
 	GetByAssessment(ctx context.Context, tx *gorm.DB, assessmentID uint) ([]*models.Question, error)
 	GetRandomQuestions(ctx context.Context, tx *gorm.DB, filters RandomQuestionFilters) ([]*models.Question, error)
-	GetQuestionBank(ctx context.Context, tx *gorm.DB, creatorID uint, filters QuestionBankFilters) ([]*models.Question, int64, error)
+	GetQuestionBank(ctx context.Context, tx *gorm.DB, creatorID string, filters QuestionBankFilters) ([]*models.Question, int64, error)
 
 	// Advanced filtering
 	GetByTags(ctx context.Context, tx *gorm.DB, tags []string, filters QuestionFilters) ([]*models.Question, error)
@@ -41,11 +41,11 @@ type QuestionRepository interface {
 
 	// Statistics and analytics
 	GetQuestionStats(ctx context.Context, tx *gorm.DB, id uint) (*QuestionStats, error)
-	GetUsageStats(ctx context.Context, tx *gorm.DB, creatorID uint) (*QuestionUsageStats, error)
+	GetUsageStats(ctx context.Context, tx *gorm.DB, creatorID string) (*QuestionUsageStats, error)
 	GetPerformanceStats(ctx context.Context, tx *gorm.DB, questionID uint) (*QuestionPerformanceStats, error)
 
 	// Validation and checks
-	ExistsByText(ctx context.Context, tx *gorm.DB, text string, creatorID uint, excludeID *uint) (bool, error)
+	ExistsByText(ctx context.Context, tx *gorm.DB, text string, creatorID string, excludeID *uint) (bool, error)
 	IsUsedInAssessments(ctx context.Context, tx *gorm.DB, id uint) (bool, error)
 	GetUsageCount(ctx context.Context, tx *gorm.DB, id uint) (int, error)
 
@@ -68,10 +68,10 @@ type QuestionCategoryRepository interface {
 	Delete(ctx context.Context, tx *gorm.DB, id uint) error
 
 	// Hierarchy operations
-	GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint) ([]*models.QuestionCategory, error)
-	GetRootCategories(ctx context.Context, tx *gorm.DB, creatorID uint) ([]*models.QuestionCategory, error)
+	GetByCreator(ctx context.Context, tx *gorm.DB, creatorID string) ([]*models.QuestionCategory, error)
+	GetRootCategories(ctx context.Context, tx *gorm.DB, creatorID string) ([]*models.QuestionCategory, error)
 	GetChildren(ctx context.Context, tx *gorm.DB, parentID uint) ([]*models.QuestionCategory, error)
-	GetHierarchy(ctx context.Context, tx *gorm.DB, creatorID uint) ([]*models.QuestionCategory, error)
+	GetHierarchy(ctx context.Context, tx *gorm.DB, creatorID string) ([]*models.QuestionCategory, error)
 	GetPath(ctx context.Context, tx *gorm.DB, categoryID uint) ([]*models.QuestionCategory, error)
 
 	// Tree operations
@@ -80,14 +80,14 @@ type QuestionCategoryRepository interface {
 	UpdatePath(ctx context.Context, tx *gorm.DB, categoryID uint) error
 
 	// Validation
-	ExistsByName(ctx context.Context, tx *gorm.DB, name string, creatorID uint, parentID *uint) (bool, error)
+	ExistsByName(ctx context.Context, tx *gorm.DB, name string, creatorID string, parentID *uint) (bool, error)
 	HasQuestions(ctx context.Context, tx *gorm.DB, id uint) (bool, error)
 	HasChildren(ctx context.Context, tx *gorm.DB, id uint) (bool, error)
 	ValidateHierarchy(ctx context.Context, tx *gorm.DB, categoryID uint, parentID *uint) error
 
 	// Statistics
 	GetCategoryStats(ctx context.Context, tx *gorm.DB, categoryID uint) (*CategoryStats, error)
-	GetCategoriesWithCounts(ctx context.Context, tx *gorm.DB, creatorID uint) ([]*CategoryWithCount, error)
+	GetCategoriesWithCounts(ctx context.Context, tx *gorm.DB, creatorID string) ([]*CategoryWithCount, error)
 }
 
 // QuestionAttachmentRepository interface for question attachment operations
@@ -122,17 +122,17 @@ type QuestionBankRepository interface {
 
 	// Query operations
 	List(ctx context.Context, tx *gorm.DB, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
-	GetByCreator(ctx context.Context, tx *gorm.DB, creatorID uint, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
+	GetByCreator(ctx context.Context, tx *gorm.DB, creatorID string, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
 	GetPublicBanks(ctx context.Context, tx *gorm.DB, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
-	GetSharedWithUser(ctx context.Context, tx *gorm.DB, userID uint, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
+	GetSharedWithUser(ctx context.Context, tx *gorm.DB, userID string, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
 	Search(ctx context.Context, tx *gorm.DB, query string, filters QuestionBankFilters) ([]*models.QuestionBank, int64, error)
 
 	// Sharing operations
 	ShareBank(ctx context.Context, tx *gorm.DB, share *models.QuestionBankShare) error
-	UnshareBank(ctx context.Context, tx *gorm.DB, bankID, userID uint) error
-	UpdateSharePermissions(ctx context.Context, tx *gorm.DB, bankID, userID uint, canEdit, canDelete bool) error
+	UnshareBank(ctx context.Context, tx *gorm.DB, bankID uint, userID string) error
+	UpdateSharePermissions(ctx context.Context, tx *gorm.DB, bankID uint, userID string, canEdit, canDelete bool) error
 	GetBankShares(ctx context.Context, tx *gorm.DB, bankID uint) ([]*models.QuestionBankShare, error)
-	GetUserShares(ctx context.Context, tx *gorm.DB, userID uint, filters QuestionBankShareFilters) ([]*models.QuestionBankShare, int64, error)
+	GetUserShares(ctx context.Context, tx *gorm.DB, userID string, filters QuestionBankShareFilters) ([]*models.QuestionBankShare, int64, error)
 
 	// Question-Bank relationship operations
 	AddQuestions(ctx context.Context, tx *gorm.DB, bankID uint, questionIDs []uint) error
@@ -141,13 +141,13 @@ type QuestionBankRepository interface {
 	IsQuestionInBank(ctx context.Context, tx *gorm.DB, questionID, bankID uint) (bool, error)
 
 	// Permission checks
-	CanAccess(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error)
-	CanEdit(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error)
-	CanDelete(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error)
-	IsOwner(ctx context.Context, tx *gorm.DB, bankID, userID uint) (bool, error)
+	CanAccess(ctx context.Context, tx *gorm.DB, bankID uint, userID string) (bool, error)
+	CanEdit(ctx context.Context, tx *gorm.DB, bankID uint, userID string) (bool, error)
+	CanDelete(ctx context.Context, tx *gorm.DB, bankID uint, userID string) (bool, error)
+	IsOwner(ctx context.Context, tx *gorm.DB, bankID uint, userID string) (bool, error)
 
 	// Validation
-	ExistsByName(ctx context.Context, tx *gorm.DB, name string, creatorID uint) (bool, error)
+	ExistsByName(ctx context.Context, tx *gorm.DB, name string, creatorID string) (bool, error)
 	HasQuestions(ctx context.Context, tx *gorm.DB, bankID uint) (bool, error)
 
 	// Statistics

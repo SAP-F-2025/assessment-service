@@ -32,7 +32,7 @@ type AuditLog struct {
 	EventType AuditEventType `json:"event_type" gorm:"not null;index"`
 
 	// Actor information
-	UserID    uint     `json:"user_id" gorm:"not null;index"`
+	UserID    string   `json:"user_id" gorm:"not null;index;size:255"`
 	UserEmail string   `json:"user_email" gorm:"not null;size:255"`
 	UserRole  UserRole `json:"user_role" gorm:"not null"`
 
