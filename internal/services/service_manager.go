@@ -217,7 +217,7 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 
 	// Initialize NotificationService
 	//sm.notificationService = NewNotificationService(sm.repo, sm.logger, sm.validator)
-	sm.logger.Info("Notification service initialized")
+	// sm.logger.Info("Notification service initialized")
 
 	if len(initErrors) > 0 {
 		return fmt.Errorf("service initialization failed with %d errors", len(initErrors))

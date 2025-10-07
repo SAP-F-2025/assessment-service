@@ -22,10 +22,11 @@ type assessmentService struct {
 
 func NewAssessmentService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *validator.Validator) AssessmentService {
 	return &assessmentService{
-		repo:      repo,
-		db:        db,
-		logger:    logger,
-		validator: validator,
+		repo:            repo,
+		db:              db,
+		logger:          logger,
+		validator:       validator,
+		questionService: NewQuestionService(repo, db, logger, validator),
 	}
 }
 
