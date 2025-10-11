@@ -39,6 +39,12 @@ type UpdateStatusRequest struct {
 	Reason *string                 `json:"reason" validate:"omitempty,max=500"`
 }
 
+type UpdateAssessmentQuestionRequest struct {
+	QuestionId uint `json:"question_id"`
+	Points     *int `json:"points" validate:"omitempty,min=1,max=100"`
+	TimeLimit  *int `json:"time_limit" validate:"omitempty,min=30,max=3600"`
+}
+
 // ===== ATTEMPT RELATED DTOs =====
 
 type StartAttemptRequest struct {
@@ -197,8 +203,12 @@ type AssessmentService interface {
 
 	// Question management
 	AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points *int, userID string) error
+	AddQuestions(ctx context.Context, assessmentID uint, questionsId []uint, userID string) error
 	RemoveQuestion(ctx context.Context, assessmentID, questionID uint, userID string) error
+	RemoveQuestions(ctx context.Context, assessmentID uint, questionsId []uint, userID string) error
 	ReorderQuestions(ctx context.Context, assessmentID uint, orders []repositories.QuestionOrder, userID string) error
+	UpdateAssessmentQuestionBatch(ctx context.Context, assessmentID uint, reqs []UpdateAssessmentQuestionRequest, userID string) error
+	UpdateAssessmentQuestion(ctx context.Context, assessmentID, questionID uint, req *UpdateAssessmentQuestionRequest, userID string) error
 
 	// Statistics and analytics
 	GetStats(ctx context.Context, id uint, userID string) (*repositories.AssessmentStats, error)

@@ -432,6 +432,146 @@ func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, quest
 	return nil
 }
 
+func (s *assessmentService) AddQuestions(ctx context.Context, assessmentID uint, questionsId []uint, userID string) error {
+	s.logger.Info("Adding multiple questions to assessment",
+		"assessment_id", assessmentID,
+		"question_count", len(questionsId),
+		"user_id", userID)
+
+	// Check edit permission
+	canEdit, err := s.CanEdit(ctx, assessmentID, userID)
+	if err != nil {
+		return err
+	}
+
+	if !canEdit {
+		return NewPermissionError(userID, assessmentID, "assessment", "add_questions", "not owner or assessment not editable")
+	}
+
+	// Add questions to assessment
+	if err := s.repo.AssessmentQuestion().AddQuestions(ctx, s.db, assessmentID, questionsId); err != nil {
+		return fmt.Errorf("failed to add questions to assessment: %w", err)
+	}
+
+	s.logger.Info("Questions added to assessment successfully",
+		"assessment_id", assessmentID,
+		"question_count", len(questionsId))
+
+	return nil
+}
+
+func (s *assessmentService) UpdateAssessmentQuestion(ctx context.Context, assessmentID, questionID uint, req *UpdateAssessmentQuestionRequest, userID string) error {
+	s.logger.Info("Updating assessment question",
+		"assessment_id", assessmentID,
+		"question_id", questionID,
+		"user_id", userID)
+
+	// Check edit permission
+	canEdit, err := s.CanEdit(ctx, assessmentID, userID)
+	if err != nil {
+		return err
+	}
+	if !canEdit {
+		return NewPermissionError(userID, assessmentID, "assessment", "update_assessment_question", "not owner or assessment not editable")
+	}
+
+	// Check if question is part of the assessment
+	assessmentQuestion, err := s.repo.AssessmentQuestion().GetQuestionAssessmentByAssessmentIdAndQuestionId(ctx, s.db, assessmentID, questionID)
+	if err != nil {
+		return fmt.Errorf("failed to check if question exists in assessment: %w", err)
+	}
+
+	// update assessment
+	if req.Points != nil { // Nếu DTO dùng *int
+		assessmentQuestion.Points = req.Points
+	}
+	if req.TimeLimit != nil {
+		assessmentQuestion.TimeLimit = req.TimeLimit
+	}
+
+	if err := s.repo.AssessmentQuestion().Update(ctx, s.db, assessmentQuestion); err != nil {
+		return fmt.Errorf("failed to update assessment question: %w", err)
+	}
+
+	s.logger.Info("Assessment question updated successfully",
+		"assessment_id", assessmentID,
+		"question_id", questionID)
+	return nil
+}
+
+func (s *assessmentService) RemoveQuestions(ctx context.Context, assessmentID uint, questionsId []uint, userID string) error {
+	s.logger.Info("Removing multiple questions from assessment",
+		"assessment_id", assessmentID,
+		"question_count", len(questionsId),
+		"user_id", userID)
+
+	// Check edit permission
+	canEdit, err := s.CanEdit(ctx, assessmentID, userID)
+	if err != nil {
+		return err
+	}
+	if !canEdit {
+		return NewPermissionError(userID, assessmentID, "assessment", "remove_questions", "not owner or assessment not editable")
+	}
+
+	// Remove questions from assessment
+	if err := s.repo.AssessmentQuestion().RemoveQuestions(ctx, s.db, assessmentID, questionsId); err != nil {
+		return fmt.Errorf("failed to remove questions from assessment: %w", err)
+	}
+
+	s.logger.Info("Questions removed from assessment successfully",
+		"assessment_id", assessmentID,
+		"question_count", len(questionsId))
+	return nil
+}
+
+func (s *assessmentService) UpdateAssessmentQuestionBatch(ctx context.Context, assessmentID uint, reqs []UpdateAssessmentQuestionRequest, userID string) error {
+	s.logger.Info("Updating multiple assessment questions",
+		"assessment_id", assessmentID,
+		"question_count", len(reqs),
+		"user_id", userID)
+
+	// Check edit permission
+	canEdit, err := s.CanEdit(ctx, assessmentID, userID)
+	if err != nil {
+		return err
+	}
+	if !canEdit {
+		return NewPermissionError(userID, assessmentID, "assessment", "update_assessment_questions", "not owner or assessment not editable")
+	}
+
+	// Update assessment questions in batch
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		for _, req := range reqs {
+			// Get assessment question
+			assessmentQuestion, err := s.repo.AssessmentQuestion().GetQuestionAssessmentByAssessmentIdAndQuestionId(ctx, tx, assessmentID, req.QuestionId)
+			if err != nil {
+				return fmt.Errorf("failed to get assessment question (question_id: %d): %w", req.QuestionId, err)
+			}
+
+			// Update fields
+			if req.Points != nil { // Nếu DTO dùng *int
+				assessmentQuestion.Points = req.Points
+			}
+			if req.TimeLimit != nil {
+				assessmentQuestion.TimeLimit = req.TimeLimit
+			}
+			// Save
+			if err := s.repo.AssessmentQuestion().Update(ctx, tx, assessmentQuestion); err != nil {
+				return fmt.Errorf("failed to update assessment question (question_id: %d): %w", req.QuestionId, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	s.logger.Info("Assessment questions updated successfully",
+		"assessment_id", assessmentID,
+		"question_count", len(reqs))
+	return nil
+}
+
 func (s *assessmentService) RemoveQuestion(ctx context.Context, assessmentID, questionID uint, userID string) error {
 	s.logger.Info("Removing question from assessment",
 		"assessment_id", assessmentID,
@@ -448,7 +588,7 @@ func (s *assessmentService) RemoveQuestion(ctx context.Context, assessmentID, qu
 	}
 
 	// Remove question from assessment
-	if err := s.repo.AssessmentQuestion().RemoveQuestion(ctx, nil, assessmentID, questionID); err != nil {
+	if err := s.repo.AssessmentQuestion().RemoveQuestion(ctx, s.db, assessmentID, questionID); err != nil {
 		return fmt.Errorf("failed to remove question from assessment: %w", err)
 	}
 
@@ -475,7 +615,7 @@ func (s *assessmentService) ReorderQuestions(ctx context.Context, assessmentID u
 	}
 
 	// Reorder questions
-	if err := s.repo.AssessmentQuestion().ReorderQuestions(ctx, nil, assessmentID, orders); err != nil {
+	if err := s.repo.AssessmentQuestion().ReorderQuestions(ctx, s.db, assessmentID, orders); err != nil {
 		return fmt.Errorf("failed to reorder questions: %w", err)
 	}
 

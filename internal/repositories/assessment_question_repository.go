@@ -20,6 +20,7 @@ type AssessmentQuestionRepository interface {
 	RemoveQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint) error
 	AddQuestions(ctx context.Context, tx *gorm.DB, assessmentID uint, questionIDs []uint) error
 	RemoveQuestions(ctx context.Context, tx *gorm.DB, assessmentID uint, questionIDs []uint) error
+	GetQuestionAssessmentByAssessmentIdAndQuestionId(ctx context.Context, tx *gorm.DB, assessmentId, questionId uint) (*models.AssessmentQuestion, error)
 
 	// Order management
 	UpdateOrder(ctx context.Context, tx *gorm.DB, assessmentID uint, questionOrders []QuestionOrder) error

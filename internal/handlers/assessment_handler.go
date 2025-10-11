@@ -748,6 +748,221 @@ func (h *AssessmentHandler) parseAssessmentFilters(c *gin.Context) repositories.
 	return filters
 }
 
+// AddQuestionsToAssessment adds multiple questions to an assessment
+// @Summary Add multiple questions to assessment
+// @Description Adds multiple questions to an assessment in batch
+// @Tags assessments
+// @Accept json
+// @Produce json
+// @Param id path uint true "Assessment ID"
+// @Param question_ids body object{question_ids=[]uint} true "Question IDs"
+// @Success 200 {object} SuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /assessments/{id}/questions/batch [post]
+func (h *AssessmentHandler) AddQuestionsToAssessment(c *gin.Context) {
+	assessmentID := h.parseIDParam(c, "id")
+	if assessmentID == 0 {
+		return
+	}
+
+	h.LogRequest(c, "Adding multiple questions to assessment", "assessment_id", assessmentID)
+
+	var req struct {
+		QuestionIDs []uint `json:"question_ids" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.RespondWithError(c, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	err := h.assessmentService.AddQuestions(c.Request.Context(), assessmentID, req.QuestionIDs, userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, SuccessResponse{
+		Message: "Questions added to assessment successfully",
+	})
+}
+
+// RemoveQuestionsFromAssessment removes multiple questions from an assessment
+// @Summary Remove multiple questions from assessment
+// @Description Removes multiple questions from an assessment in batch
+// @Tags assessments
+// @Accept json
+// @Produce json
+// @Param id path uint true "Assessment ID"
+// @Param question_ids body object{question_ids=[]uint} true "Question IDs"
+// @Success 200 {object} SuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /assessments/{id}/questions/batch [delete]
+func (h *AssessmentHandler) RemoveQuestionsFromAssessment(c *gin.Context) {
+	assessmentID := h.parseIDParam(c, "id")
+	if assessmentID == 0 {
+		return
+	}
+
+	h.LogRequest(c, "Removing multiple questions from assessment", "assessment_id", assessmentID)
+
+	var req struct {
+		QuestionIDs []uint `json:"question_ids" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.RespondWithError(c, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	err := h.assessmentService.RemoveQuestions(c.Request.Context(), assessmentID, req.QuestionIDs, userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, SuccessResponse{
+		Message: "Questions removed from assessment successfully",
+	})
+}
+
+// UpdateAssessmentQuestion updates a question's settings in an assessment
+// @Summary Update assessment question
+// @Description Updates points and time limit for a question in an assessment
+// @Tags assessments
+// @Accept json
+// @Produce json
+// @Param id path uint true "Assessment ID"
+// @Param question_id path uint true "Question ID"
+// @Param update body services.UpdateAssessmentQuestionRequest true "Update data"
+// @Success 200 {object} SuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /assessments/{id}/questions/{question_id} [put]
+func (h *AssessmentHandler) UpdateAssessmentQuestion(c *gin.Context) {
+	assessmentID := h.parseIDParam(c, "id")
+	if assessmentID == 0 {
+		return
+	}
+
+	questionID := h.parseIDParam(c, "question_id")
+	if questionID == 0 {
+		return
+	}
+
+	h.LogRequest(c, "Updating assessment question", "assessment_id", assessmentID, "question_id", questionID)
+
+	var req services.UpdateAssessmentQuestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.RespondWithError(c, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	// Set questionId from path param
+	req.QuestionId = questionID
+
+	if err := h.validator.Validate(&req); err != nil {
+		h.RespondWithError(c, http.StatusBadRequest, "Validation failed", err)
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	err := h.assessmentService.UpdateAssessmentQuestion(c.Request.Context(), assessmentID, questionID, &req, userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, SuccessResponse{
+		Message: "Assessment question updated successfully",
+	})
+}
+
+// UpdateAssessmentQuestionsBatch updates multiple questions' settings in an assessment
+// @Summary Update multiple assessment questions
+// @Description Updates points and time limits for multiple questions in an assessment
+// @Tags assessments
+// @Accept json
+// @Produce json
+// @Param id path uint true "Assessment ID"
+// @Param updates body []services.UpdateAssessmentQuestionRequest true "Update data"
+// @Success 200 {object} SuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /assessments/{id}/questions/batch [put]
+func (h *AssessmentHandler) UpdateAssessmentQuestionsBatch(c *gin.Context) {
+	assessmentID := h.parseIDParam(c, "id")
+	if assessmentID == 0 {
+		return
+	}
+
+	h.LogRequest(c, "Updating multiple assessment questions", "assessment_id", assessmentID)
+
+	var reqs []services.UpdateAssessmentQuestionRequest
+	if err := c.ShouldBindJSON(&reqs); err != nil {
+		h.RespondWithError(c, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	if len(reqs) == 0 {
+		h.RespondWithError(c, http.StatusBadRequest, "No updates provided", nil)
+		return
+	}
+
+	// Validate each request
+	for i, req := range reqs {
+		if err := h.validator.Validate(&req); err != nil {
+			h.RespondWithError(c, http.StatusBadRequest, "Validation failed for request "+strconv.Itoa(i), err)
+			return
+		}
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	err := h.assessmentService.UpdateAssessmentQuestionBatch(c.Request.Context(), assessmentID, reqs, userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, SuccessResponse{
+		Message: "Assessment questions updated successfully",
+	})
+}
+
 func (h *AssessmentHandler) handleServiceError(c *gin.Context, err error) {
 	// Handle custom error types first
 	var validationErrors services.ValidationErrors
