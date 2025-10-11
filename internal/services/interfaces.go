@@ -45,6 +45,10 @@ type UpdateAssessmentQuestionRequest struct {
 	TimeLimit  *int `json:"time_limit" validate:"omitempty,min=30,max=3600"`
 }
 
+type ReorderQuestionsRequest struct {
+	QuestionOrders []repositories.QuestionOrder `json:"question_orders"`
+}
+
 // ===== ATTEMPT RELATED DTOs =====
 
 type StartAttemptRequest struct {
