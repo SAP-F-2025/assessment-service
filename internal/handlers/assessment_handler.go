@@ -576,10 +576,23 @@ func (h *AssessmentHandler) ReorderAssessmentQuestions(c *gin.Context) {
 
 	h.LogRequest(c, "Reordering assessment questions", "assessment_id", id)
 
-	var orders []repositories.QuestionOrder
-	if err := c.ShouldBindJSON(&orders); err != nil {
+	var ordersRequest services.ReorderQuestionsRequest
+	if err := c.ShouldBindJSON(&ordersRequest); err != nil {
 		h.RespondWithError(c, http.StatusBadRequest, "Invalid request body", err)
 		return
+	}
+
+	if len(ordersRequest.QuestionOrders) == 0 {
+		h.RespondWithError(c, http.StatusBadRequest, "No question orders provided", errors.New("empty order list"))
+		return
+	}
+
+	var orders []repositories.QuestionOrder
+	for _, o := range ordersRequest.QuestionOrders {
+		orders = append(orders, repositories.QuestionOrder{
+			QuestionID: o.QuestionID,
+			Order:      o.Order,
+		})
 	}
 
 	userID, exists := c.Get("user_id")
