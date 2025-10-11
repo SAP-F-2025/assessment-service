@@ -69,8 +69,17 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			assessments.GET("/:id/stats", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.GetAssessmentStats)
 
 			// Assessment question management - Teachers and Admins only
+			// Single question operations
 			assessments.POST("/:id/questions/:question_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.AddQuestionToAssessment)
 			assessments.DELETE("/:id/questions/:question_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.RemoveQuestionFromAssessment)
+			assessments.PUT("/:id/questions/:question_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.UpdateAssessmentQuestion)
+
+			// Batch operations
+			assessments.POST("/:id/questions/batch", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.AddQuestionsToAssessment)
+			assessments.DELETE("/:id/questions/batch", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.RemoveQuestionsFromAssessment)
+			assessments.PUT("/:id/questions/batch", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.UpdateAssessmentQuestionsBatch)
+
+			// Question ordering
 			assessments.PUT("/:id/questions/reorder", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.ReorderAssessmentQuestions)
 
 			// Creator-specific routes - Teachers and Admins only

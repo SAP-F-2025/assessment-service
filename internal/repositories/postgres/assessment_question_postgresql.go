@@ -137,35 +137,37 @@ func (aq *AssessmentQuestionPostgreSQL) AddQuestions(ctx context.Context, tx *go
 	}
 
 	db := aq.getDB(tx)
-	return db.WithContext(ctx).Transaction(func(txInner *gorm.DB) error {
-		// Get next order
-		nextOrder, err := aq.GetNextOrder(ctx, txInner, assessmentID)
-		if err != nil {
-			return fmt.Errorf("failed to get next order: %w", err)
+	// Get next order
+	nextOrder, err := aq.GetNextOrder(ctx, db, assessmentID)
+	if err != nil {
+		return fmt.Errorf("failed to get next order: %w", err)
+	}
+
+	// Check if relationship already exists
+	var existingCount int64
+	if err := db.Model(&models.AssessmentQuestion{}).
+		Where("assessment_id = ? AND question_id IN ?", assessmentID, questionIDs).
+		Count(&existingCount).Error; err != nil {
+		return fmt.Errorf("failed to check existing relationships: %w", err)
+	}
+
+	if existingCount > 0 {
+		return fmt.Errorf("some questions are already added to assessment %d", assessmentID)
+	}
+
+	// Create assessment questions
+	assessmentQuestions := make([]*models.AssessmentQuestion, len(questionIDs))
+	for i, questionID := range questionIDs {
+
+		assessmentQuestions[i] = &models.AssessmentQuestion{
+			AssessmentID: assessmentID,
+			QuestionID:   questionID,
+			Order:        nextOrder + i,
+			Required:     true,
 		}
+	}
 
-		// Create assessment questions
-		assessmentQuestions := make([]*models.AssessmentQuestion, len(questionIDs))
-		for i, questionID := range questionIDs {
-			// Check if relationship already exists
-			exists, err := aq.Exists(ctx, txInner, assessmentID, questionID)
-			if err != nil {
-				return fmt.Errorf("failed to check if relationship exists for question %d: %w", questionID, err)
-			}
-			if exists {
-				return fmt.Errorf("question %d is already added to assessment %d", questionID, assessmentID)
-			}
-
-			assessmentQuestions[i] = &models.AssessmentQuestion{
-				AssessmentID: assessmentID,
-				QuestionID:   questionID,
-				Order:        nextOrder + i,
-				Required:     true,
-			}
-		}
-
-		return aq.CreateBatch(ctx, txInner, assessmentQuestions)
-	})
+	return aq.CreateBatch(ctx, db, assessmentQuestions)
 }
 
 // RemoveQuestions removes multiple questions from an assessment
@@ -175,15 +177,50 @@ func (aq *AssessmentQuestionPostgreSQL) RemoveQuestions(ctx context.Context, tx 
 	}
 
 	db := aq.getDB(tx)
-	result := db.WithContext(ctx).
-		Where("assessment_id = ? AND question_id IN ?", assessmentID, questionIDs).
-		Delete(&models.AssessmentQuestion{})
 
-	if result.Error != nil {
-		return fmt.Errorf("failed to remove questions from assessment: %w", result.Error)
+	execFunc := func(execDB *gorm.DB) error {
+		// Delete questions
+		result := execDB.WithContext(ctx).
+			Where("assessment_id = ? AND question_id IN ?", assessmentID, questionIDs).
+			Delete(&models.AssessmentQuestion{})
+
+		if result.Error != nil {
+			return fmt.Errorf("failed to remove questions from assessment: %w", result.Error)
+		}
+
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("no questions found in assessment %d to remove", assessmentID)
+		}
+
+		// Reorder remaining questions
+		var remaining []*models.AssessmentQuestion
+		if err := execDB.WithContext(ctx).
+			Where("assessment_id = ?", assessmentID).
+			Order("\"order\" ASC").
+			Find(&remaining).Error; err != nil {
+			return fmt.Errorf("failed to get remaining questions: %w", err)
+		}
+
+		// Update order to be sequential
+		for i, aq := range remaining {
+			newOrder := i + 1
+			if aq.Order != newOrder {
+				if err := execDB.Model(aq).Update("order", newOrder).Error; err != nil {
+					return fmt.Errorf("failed to reorder question %d: %w", aq.ID, err)
+				}
+			}
+		}
+
+		return nil
 	}
 
-	return nil
+	if tx != nil {
+		return execFunc(db)
+	}
+
+	return db.WithContext(ctx).Transaction(func(txInner *gorm.DB) error {
+		return execFunc(txInner)
+	})
 }
 
 // ===== ORDER MANAGEMENT =====
@@ -654,4 +691,20 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionUsageInAssessments(ctx contex
 	// which are not implemented in this basic version
 
 	return usage, nil
+}
+
+func (aq *AssessmentQuestionPostgreSQL) GetQuestionAssessmentByAssessmentIdAndQuestionId(ctx context.Context, tx *gorm.DB, assessmentId, questionId uint) (*models.AssessmentQuestion, error) {
+	db := aq.getDB(tx)
+
+	var assessmentQuestion models.AssessmentQuestion
+	err := db.WithContext(ctx).
+		Model(&models.AssessmentQuestion{}).
+		Where("assessment_id = ? AND question_id = ?", assessmentId, questionId).
+		First(&assessmentQuestion).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to check assessment question existence: %w", err)
+	}
+
+	return &assessmentQuestion, nil
 }
