@@ -315,48 +315,86 @@ func (s *studentService) GetStudentAssessments(ctx context.Context, studentID st
 
 	// Build response with student context
 	items := make([]StudentAssessmentItem, 0, len(assessments))
+
+	// OPTIMIZATION: Batch query all assessment IDs at once
+	assessmentIDs := make([]uint, len(assessments))
+	for i, assess := range assessments {
+		assessmentIDs[i] = assess.ID
+	}
+
+	// Batch query 1: Get all attempt counts, active status, best scores, and last attempt dates
+	type AttemptAggregation struct {
+		AssessmentID    uint
+		AttemptCount    int64
+		HasActive       bool
+		BestScore       *float64
+		LastAttemptDate *time.Time
+	}
+	var attemptAggs []AttemptAggregation
+	err = s.db.WithContext(ctx).
+		Model(&models.AssessmentAttempt{}).
+		Select(`
+			assessment_id,
+			COUNT(*) as attempt_count,
+			BOOL_OR(CASE WHEN status = ? THEN true ELSE false END) as has_active,
+			MAX(CASE WHEN status = ? THEN score ELSE NULL END) as best_score,
+			MAX(CASE WHEN status = ? THEN completed_at ELSE NULL END) as last_attempt_date
+		`, models.AttemptInProgress, models.AttemptCompleted, models.AttemptCompleted).
+		Where("student_id = ? AND assessment_id IN ?", studentID, assessmentIDs).
+		Group("assessment_id").
+		Scan(&attemptAggs).Error
+	if err != nil {
+		s.logger.Error("Failed to get attempt aggregations", "error", err)
+	}
+
+	// Create map for O(1) lookup
+	attemptMap := make(map[uint]AttemptAggregation)
+	for _, agg := range attemptAggs {
+		attemptMap[agg.AssessmentID] = agg
+	}
+
+	// Batch query 2: Get questions count and total points for all assessments
+	type QuestionAggregation struct {
+		AssessmentID   uint
+		QuestionsCount int64
+		TotalPoints    int
+	}
+	var questionAggs []QuestionAggregation
+	err = s.db.WithContext(ctx).
+		Model(&models.AssessmentQuestion{}).
+		Select("assessment_id, COUNT(*) as questions_count, COALESCE(SUM(points), 0) as total_points").
+		Where("assessment_id IN ?", assessmentIDs).
+		Group("assessment_id").
+		Scan(&questionAggs).Error
+	if err != nil {
+		s.logger.Error("Failed to get question aggregations", "error", err)
+	}
+
+	// Create map for O(1) lookup
+	questionMap := make(map[uint]QuestionAggregation)
+	for _, agg := range questionAggs {
+		questionMap[agg.AssessmentID] = agg
+	}
+
+	// Build items from precomputed data
 	for _, assess := range assessments {
-		// Get attempt count
-		attemptCount, err := s.repo.Attempt().GetAttemptCount(ctx, s.db, studentID, assess.ID)
-		if err != nil {
-			s.logger.Error("Failed to get attempt count", "error", err, "assessment_id", assess.ID)
-			attemptCount = 0
-		}
+		// Get attempt data from map
+		attemptData := attemptMap[assess.ID]
+		attemptCount := int(attemptData.AttemptCount)
+		hasActive := attemptData.HasActive
+		bestScore := attemptData.BestScore
+		lastAttemptDate := attemptData.LastAttemptDate
 
-		// Check if has active attempt
-		hasActive, err := s.repo.Attempt().HasActiveAttempt(ctx, s.db, studentID, assess.ID)
-		if err != nil {
-			s.logger.Error("Failed to check active attempt", "error", err, "assessment_id", assess.ID)
-			hasActive = false
-		}
+		// Get question data from map
+		questionData := questionMap[assess.ID]
+		questionsCount := questionData.QuestionsCount
+		totalPoints := questionData.TotalPoints
 
-		// Get best score and last attempt date
-		attempts, err := s.repo.Attempt().GetByStudentAndAssessment(ctx, s.db, studentID, assess.ID)
-		var bestScore *float64
-		var lastAttemptDate *time.Time
-		if err == nil && len(attempts) > 0 {
-			for _, att := range attempts {
-				if att.Status == models.AttemptCompleted {
-					if bestScore == nil || att.Score > *bestScore {
-						score := att.Score
-						bestScore = &score
-					}
-					if lastAttemptDate == nil || (att.CompletedAt != nil && att.CompletedAt.After(*lastAttemptDate)) {
-						lastAttemptDate = att.CompletedAt
-					}
-				}
-			}
-		}
-
-		// Check if can start
-		validation, err := s.repo.Attempt().CanStartAttempt(ctx, s.db, studentID, assess.ID)
-		canStart := err == nil && validation != nil && validation.CanStart
-
-		// Get questions count and total points
-		var questionsCount int64
-		var totalPoints int
-		s.db.WithContext(ctx).Model(&models.AssessmentQuestion{}).Where("assessment_id = ?", assess.ID).Count(&questionsCount)
-		s.db.WithContext(ctx).Model(&models.AssessmentQuestion{}).Where("assessment_id = ?", assess.ID).Select("COALESCE(SUM(points), 0)").Scan(&totalPoints)
+		// Check if can start (simplified - checking basic rules)
+		// Can start if: no active attempt AND attempts used < max attempts AND not expired
+		canStart := !hasActive &&
+			attemptCount < assess.MaxAttempts &&
+			(assess.DueDate == nil || assess.DueDate.After(time.Now()))
 
 		items = append(items, StudentAssessmentItem{
 			ID:               assess.ID,

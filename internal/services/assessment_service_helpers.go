@@ -323,6 +323,25 @@ func (s *assessmentService) validateCreateRequest(ctx context.Context, req *Crea
 		orderMap := make(map[int]bool)
 		totalPoints := 0
 
+		// OPTIMIZATION: Batch fetch all questions at once instead of one by one
+		questionIDs := make([]uint, len(req.Questions))
+		for i, q := range req.Questions {
+			questionIDs[i] = q.QuestionID
+		}
+
+		var existingQuestions []*models.Question
+		err := s.db.Where("id IN ?", questionIDs).Find(&existingQuestions).Error
+		if err != nil {
+			return fmt.Errorf("failed to validate questions: %w", err)
+		}
+
+		// Create map for O(1) lookup
+		questionMap := make(map[uint]bool)
+		for _, q := range existingQuestions {
+			questionMap[q.ID] = true
+		}
+
+		// Validate each question
 		for i, q := range req.Questions {
 			// Check for duplicate orders
 			if orderMap[q.Order] {
@@ -330,14 +349,9 @@ func (s *assessmentService) validateCreateRequest(ctx context.Context, req *Crea
 			}
 			orderMap[q.Order] = true
 
-			// Validate question exists
-			_, err := s.repo.Question().GetByID(ctx, nil, q.QuestionID)
-			if err != nil {
-				if repositories.IsNotFoundError(err) {
-					errors = append(errors, *NewValidationError(fmt.Sprintf("questions[%d].question_id", i), "question not found", q.QuestionID))
-				} else {
-					return fmt.Errorf("failed to validate question %d: %w", q.QuestionID, err)
-				}
+			// Validate question exists using the map
+			if !questionMap[q.QuestionID] {
+				errors = append(errors, *NewValidationError(fmt.Sprintf("questions[%d].question_id", i), "question not found", q.QuestionID))
 			}
 
 			// Accumulate points for total validation

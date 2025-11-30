@@ -109,49 +109,13 @@ func (s *dashboardService) GetDashboardStats(ctx context.Context, teacherID *str
 		period = 30 // Default: 30 days for trends
 	}
 
-	// Get overview data
-	totalAssessments, err := s.repo.Dashboard().GetTotalAssessments(ctx, nil, teacherID)
+	// OPTIMIZATION: Use single combined query instead of 8 separate queries
+	stats, err := s.repo.Dashboard().GetAllStatsOptimized(ctx, nil, teacherID, 30)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get total assessments: %w", err)
+		return nil, fmt.Errorf("failed to get dashboard stats: %w", err)
 	}
 
-	totalQuestions, err := s.repo.Dashboard().GetTotalQuestions(ctx, nil, teacherID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get total questions: %w", err)
-	}
-
-	totalQuestionBanks, err := s.repo.Dashboard().GetTotalQuestionBanks(ctx, nil, teacherID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get total question banks: %w", err)
-	}
-
-	totalAttempts, err := s.repo.Dashboard().GetTotalAttempts(ctx, nil, teacherID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get total attempts: %w", err)
-	}
-
-	activeUsers, err := s.repo.Dashboard().GetActiveUsers(ctx, nil, teacherID, 30)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active users: %w", err)
-	}
-
-	// Get metrics
-	completionRate, err := s.repo.Dashboard().GetCompletionRate(ctx, nil, teacherID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get completion rate: %w", err)
-	}
-
-	averageScore, err := s.repo.Dashboard().GetAverageScore(ctx, nil, teacherID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get average score: %w", err)
-	}
-
-	passRate, err := s.repo.Dashboard().GetPassRate(ctx, nil, teacherID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pass rate: %w", err)
-	}
-
-	// Get trends
+	// Get trends (these are still separate as they involve different time windows)
 	assessmentsChange, err := s.repo.Dashboard().GetTrendChange(ctx, nil, teacherID, "assessments", period)
 	if err != nil {
 		s.logger.Warn("Failed to get assessments trend", "error", err)
@@ -169,16 +133,16 @@ func (s *dashboardService) GetDashboardStats(ctx context.Context, teacherID *str
 
 	response := &DashboardStatsResponse{
 		Overview: DashboardOverview{
-			TotalAssessments:   totalAssessments,
-			TotalQuestions:     totalQuestions,
-			TotalQuestionBanks: totalQuestionBanks,
-			TotalAttempts:      totalAttempts,
-			ActiveUsers:        activeUsers,
+			TotalAssessments:   stats.TotalAssessments,
+			TotalQuestions:     stats.TotalQuestions,
+			TotalQuestionBanks: stats.TotalQuestionBanks,
+			TotalAttempts:      stats.TotalAttempts,
+			ActiveUsers:        stats.ActiveUsers,
 		},
 		Metrics: DashboardMetrics{
-			CompletionRate: roundFloat(completionRate, 1),
-			AverageScore:   roundFloat(averageScore, 1),
-			PassRate:       roundFloat(passRate, 1),
+			CompletionRate: roundFloat(stats.CompletionRate, 1),
+			AverageScore:   roundFloat(stats.AverageScore, 1),
+			PassRate:       roundFloat(stats.PassRate, 1),
 		},
 		Trends: DashboardTrends{
 			AssessmentsChange: roundFloat(assessmentsChange, 1),
