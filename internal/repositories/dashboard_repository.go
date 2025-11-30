@@ -22,6 +22,9 @@ type DashboardRepository interface {
 	GetAverageScore(ctx context.Context, tx *gorm.DB, teacherID *string) (float64, error)
 	GetPassRate(ctx context.Context, tx *gorm.DB, teacherID *string) (float64, error)
 
+	// OPTIMIZATION: Combined stats query to reduce N+1 queries
+	GetAllStatsOptimized(ctx context.Context, tx *gorm.DB, teacherID *string, activeDays int) (*DashboardStatsData, error)
+
 	// Trends
 	GetTrendChange(ctx context.Context, tx *gorm.DB, teacherID *string, entity string, days int) (float64, error)
 
@@ -39,6 +42,17 @@ type DashboardRepository interface {
 }
 
 // Data structures for dashboard responses
+
+type DashboardStatsData struct {
+	TotalAssessments   int64
+	TotalQuestions     int64
+	TotalQuestionBanks int64
+	TotalAttempts      int64
+	ActiveUsers        int64
+	CompletionRate     float64
+	AverageScore       float64
+	PassRate           float64
+}
 
 type ActivityTrendData struct {
 	Period       string  `json:"period"`

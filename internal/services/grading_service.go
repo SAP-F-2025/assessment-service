@@ -623,27 +623,108 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 func (s *gradingService) AutoGradeAssessment(ctx context.Context, assessmentID uint) (map[uint]*AttemptGradingResult, error) {
 	s.logger.Info("Auto-grading all attempts for assessment", "assessment_id", assessmentID)
 
-	// Get all submitted attempts for assessment
-	status := models.AttemptCompleted
-	filters := repositories.AttemptFilters{
-		Status: &status,
-	}
-
-	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, nil, assessmentID, filters)
+	// OPTIMIZATION: Preload all attempts with their answers and questions in a single query
+	var attempts []*models.AssessmentAttempt
+	err := s.db.WithContext(ctx).
+		Preload("Student").
+		Preload("Assessment").
+		Preload("Assessment.Settings").
+		Preload("Answers").
+		Preload("Answers.Question").
+		Where("assessment_id = ? AND status = ?", assessmentID, models.AttemptCompleted).
+		Find(&attempts).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get assessment attempts: %w", err)
 	}
 
+	// Get assessment for passing score (already preloaded but need reference)
+	var assessment *models.Assessment
+	if len(attempts) > 0 {
+		assessment = &attempts[0].Assessment
+	} else {
+		// No attempts to grade
+		return make(map[uint]*AttemptGradingResult), nil
+	}
+
 	results := make(map[uint]*AttemptGradingResult)
 
-	// Auto-grade each attempt
+	// OPTIMIZATION: Process each attempt without additional queries
 	for _, attempt := range attempts {
-		result, err := s.AutoGradeAttempt(ctx, attempt.ID)
-		if err != nil {
-			s.logger.Error("Failed to auto-grade attempt", "attempt_id", attempt.ID, "error", err)
+		// Begin transaction for each attempt
+		tx := s.db.Begin()
+		if tx.Error != nil {
+			s.logger.Error("Failed to begin transaction", "attempt_id", attempt.ID, "error", tx.Error)
 			continue
 		}
-		results[attempt.ID] = result
+
+		// Auto-grade all answers in batch (already preloaded)
+		questionResults, err := s.autoGradeAnswers(ctx, tx, attempt.Answers, assessmentID)
+		if err != nil {
+			tx.Rollback()
+			s.logger.Error("Failed to auto-grade answers", "attempt_id", attempt.ID, "error", err)
+			continue
+		}
+
+		// Calculate final grade
+		totalScore := 0.0
+		maxTotalScore := 0.0
+		hasManualGrading := false
+
+		for _, result := range questionResults {
+			totalScore += result.Score
+			maxTotalScore += result.MaxScore
+		}
+
+		for _, answer := range attempt.Answers {
+			if !s.isAutoGradeable(answer.Question.Type) {
+				hasManualGrading = true
+				break
+			}
+		}
+
+		percentage := 0.0
+		if maxTotalScore > 0 {
+			percentage = (totalScore / maxTotalScore) * 100
+		}
+
+		isPassing := percentage >= float64(assessment.PassingScore)
+		grade := s.calculateLetterGrade(percentage)
+
+		// Update attempt with final grade
+		attempt.Score = totalScore
+		attempt.Percentage = percentage
+		attempt.Passed = isPassing
+		attempt.IsGraded = !hasManualGrading
+		attempt.MaxScore = int(maxTotalScore)
+
+		if err := s.repo.Attempt().Update(ctx, tx, attempt); err != nil {
+			tx.Rollback()
+			s.logger.Error("Failed to update attempt grade", "attempt_id", attempt.ID, "error", err)
+			continue
+		}
+
+		// Commit transaction
+		if err := tx.Commit().Error; err != nil {
+			s.logger.Error("Failed to commit transaction", "attempt_id", attempt.ID, "error", err)
+			continue
+		}
+
+		results[attempt.ID] = &AttemptGradingResult{
+			AttemptID:  attempt.ID,
+			TotalScore: totalScore,
+			MaxScore:   maxTotalScore,
+			Percentage: percentage,
+			IsPassing:  isPassing,
+			Grade:      &grade,
+			Questions:  questionResults,
+			GradedAt:   time.Now(),
+			GradedBy:   "", // Auto-graded
+		}
+
+		s.logger.Debug("Attempt auto-graded successfully",
+			"attempt_id", attempt.ID,
+			"total_score", totalScore,
+			"has_manual_grading", hasManualGrading)
 	}
 
 	s.logger.Info("Assessment auto-grading completed",

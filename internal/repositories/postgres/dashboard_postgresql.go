@@ -214,6 +214,110 @@ func (r *dashboardRepository) GetPassRate(ctx context.Context, tx *gorm.DB, teac
 	return float64(passed) / float64(totalCompleted) * 100, nil
 }
 
+// OPTIMIZATION: GetAllStatsOptimized combines multiple queries into one efficient query
+// SECURITY: Uses parameterized queries only - no string concatenation to prevent SQL injection
+func (r *dashboardRepository) GetAllStatsOptimized(ctx context.Context, tx *gorm.DB, teacherID *string, activeDays int) (*repositories.DashboardStatsData, error) {
+	db := r.getDB(tx)
+
+	// Calculate active users date threshold
+	activeUsersDate := time.Now().AddDate(0, 0, -activeDays)
+
+	var stats repositories.DashboardStatsData
+	var err error
+
+	// SECURITY FIX: Use separate queries instead of fmt.Sprintf to avoid SQL injection patterns
+	// This ensures we never concatenate user input into SQL strings
+	if teacherID != nil && *teacherID != "" {
+		// Query with teacher filter - all parameters are properly escaped via $1, $2, $3
+		query := `
+			WITH assessment_stats AS (
+				SELECT
+					COUNT(DISTINCT assessments.id) as total_assessments,
+					COUNT(DISTINCT questions.id) as total_questions,
+					COUNT(DISTINCT question_banks.id) as total_question_banks
+				FROM assessments
+				LEFT JOIN questions ON questions.created_by = assessments.created_by
+				LEFT JOIN question_banks ON question_banks.created_by = assessments.created_by
+				WHERE assessments.created_by = $1
+			),
+			attempt_stats AS (
+				SELECT
+					COUNT(*) as total_attempts,
+					COUNT(DISTINCT CASE WHEN assessment_attempts.created_at >= $2 THEN assessment_attempts.student_id END) as active_users,
+					COUNT(CASE WHEN assessment_attempts.status = 'completed' THEN 1 END) as completed_attempts,
+					AVG(CASE WHEN assessment_attempts.status = 'completed' THEN assessment_attempts.score ELSE NULL END) as avg_score,
+					COUNT(CASE WHEN assessment_attempts.status = 'completed' AND assessment_attempts.passed = true THEN 1 END) as passed_attempts
+				FROM assessment_attempts
+				JOIN assessments ON assessment_attempts.assessment_id = assessments.id
+				WHERE assessments.created_by = $3
+			)
+			SELECT
+				assessment_stats.total_assessments,
+				assessment_stats.total_questions,
+				assessment_stats.total_question_banks,
+				attempt_stats.total_attempts,
+				attempt_stats.active_users,
+				CASE
+					WHEN attempt_stats.total_attempts > 0 THEN (attempt_stats.completed_attempts::float / attempt_stats.total_attempts::float * 100)
+					ELSE 0
+				END as completion_rate,
+				COALESCE(attempt_stats.avg_score, 0) as average_score,
+				CASE
+					WHEN attempt_stats.completed_attempts > 0 THEN (attempt_stats.passed_attempts::float / attempt_stats.completed_attempts::float * 100)
+					ELSE 0
+				END as pass_rate
+			FROM assessment_stats, attempt_stats
+		`
+		err = db.WithContext(ctx).Raw(query, *teacherID, activeUsersDate, *teacherID).Scan(&stats).Error
+	} else {
+		// Query without teacher filter (admin view - all data)
+		query := `
+			WITH assessment_stats AS (
+				SELECT
+					COUNT(DISTINCT assessments.id) as total_assessments,
+					COUNT(DISTINCT questions.id) as total_questions,
+					COUNT(DISTINCT question_banks.id) as total_question_banks
+				FROM assessments
+				CROSS JOIN questions
+				CROSS JOIN question_banks
+			),
+			attempt_stats AS (
+				SELECT
+					COUNT(*) as total_attempts,
+					COUNT(DISTINCT CASE WHEN assessment_attempts.created_at >= $1 THEN assessment_attempts.student_id END) as active_users,
+					COUNT(CASE WHEN assessment_attempts.status = 'completed' THEN 1 END) as completed_attempts,
+					AVG(CASE WHEN assessment_attempts.status = 'completed' THEN assessment_attempts.score ELSE NULL END) as avg_score,
+					COUNT(CASE WHEN assessment_attempts.status = 'completed' AND assessment_attempts.passed = true THEN 1 END) as passed_attempts
+				FROM assessment_attempts
+				JOIN assessments ON assessment_attempts.assessment_id = assessments.id
+			)
+			SELECT
+				assessment_stats.total_assessments,
+				assessment_stats.total_questions,
+				assessment_stats.total_question_banks,
+				attempt_stats.total_attempts,
+				attempt_stats.active_users,
+				CASE
+					WHEN attempt_stats.total_attempts > 0 THEN (attempt_stats.completed_attempts::float / attempt_stats.total_attempts::float * 100)
+					ELSE 0
+				END as completion_rate,
+				COALESCE(attempt_stats.avg_score, 0) as average_score,
+				CASE
+					WHEN attempt_stats.completed_attempts > 0 THEN (attempt_stats.passed_attempts::float / attempt_stats.completed_attempts::float * 100)
+					ELSE 0
+				END as pass_rate
+			FROM assessment_stats, attempt_stats
+		`
+		err = db.WithContext(ctx).Raw(query, activeUsersDate).Scan(&stats).Error
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get dashboard stats: %w", err)
+	}
+
+	return &stats, nil
+}
+
 // ===== TRENDS =====
 
 func (r *dashboardRepository) GetTrendChange(ctx context.Context, tx *gorm.DB, teacherID *string, entity string, days int) (float64, error) {
