@@ -148,7 +148,7 @@ func (r *dashboardRepository) GetCompletionRate(ctx context.Context, tx *gorm.DB
 	}
 
 	// Get completed attempts
-	completedQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).Where("status = ?", models.AttemptCompleted)
+	completedQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).Where("assessment_attempts.status = ?", models.AttemptCompleted)
 	if teacherID != nil && *teacherID != "" {
 		completedQuery = completedQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id").
 			Where("assessments.created_by = ?", *teacherID)
