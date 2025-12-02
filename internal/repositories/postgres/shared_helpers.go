@@ -177,33 +177,50 @@ func (h *SharedHelpers) ValidateAttemptEligibility(ctx context.Context, assessme
 		return validation, nil
 	}
 
-	// Check max attempts
+	// Check max attempts (only count completed/timeout attempts, not in-progress)
 	if assessment.MaxAttempts > 0 {
-		attemptCount, err := h.CountAttemptsByStudent(ctx, assessmentID, studentID)
+		var completedCount int64
+		err = h.db.WithContext(ctx).
+			Model(&models.AssessmentAttempt{}).
+			Where("assessment_id = ? AND student_id = ? AND status IN ?", 
+				assessmentID, studentID, 
+				[]models.AttemptStatus{models.AttemptCompleted, models.AttemptTimeOut, models.AttemptAbandoned}).
+			Count(&completedCount).Error
 		if err != nil {
 			return nil, err
 		}
-		if attemptCount >= int64(assessment.MaxAttempts) {
+		if completedCount >= int64(assessment.MaxAttempts) {
 			validation.CanStart = false
 			validation.Reason = "Maximum attempts reached"
 			return validation, nil
 		}
 	}
 
-	// Check for active attempts
-	var activeCount int64
+	// Check for ANY active attempts (student can only have one active attempt at a time)
+	var activeAttempts []models.AssessmentAttempt
 	err = h.db.WithContext(ctx).
-		Model(&models.AssessmentAttempt{}).
 		Where("student_id = ? AND status = ?", studentID, models.AttemptInProgress).
-		Count(&activeCount).Error
+		Find(&activeAttempts).Error
 	if err != nil {
 		return nil, err
 	}
-
-	if activeCount > 0 {
-		validation.CanStart = false
-		validation.Reason = "An attempt is already in progress"
-		return validation, nil
+	
+	// Check each active attempt and auto-expire if timed out
+	for _, activeAttempt := range activeAttempts {
+		if activeAttempt.EndedAt != nil && time.Now().After(*activeAttempt.EndedAt) {
+			// Attempt has expired - auto-submit it as timeout
+			now := time.Now()
+			h.db.WithContext(ctx).Model(&activeAttempt).Updates(map[string]interface{}{
+				"status":       models.AttemptTimeOut,
+				"completed_at": &now,
+				"end_reason":   "timeout",
+			})
+		} else {
+			// Found a valid active attempt - block starting new one
+			validation.CanStart = false
+			validation.Reason = "An attempt is already in progress"
+			return validation, nil
+		}
 	}
 
 	return validation, nil

@@ -323,11 +323,23 @@ func (s *studentService) GetStudentAssessments(ctx context.Context, studentID st
 			attemptCount = 0
 		}
 
-		// Check if has active attempt
-		hasActive, err := s.repo.Attempt().HasActiveAttempt(ctx, s.db, studentID, assess.ID)
-		if err != nil {
-			s.logger.Error("Failed to check active attempt", "error", err, "assessment_id", assess.ID)
-			hasActive = false
+		// Check if has active attempt and auto-expire if timed out
+		activeAttempt, err := s.repo.Attempt().GetActiveAttempt(ctx, s.db, studentID, assess.ID)
+		hasActive := false
+		if err == nil && activeAttempt != nil {
+			// Check if expired
+			if activeAttempt.EndedAt != nil && time.Now().After(*activeAttempt.EndedAt) {
+				// Auto-expire the attempt
+				now := time.Now()
+				s.db.WithContext(ctx).Model(activeAttempt).Updates(map[string]interface{}{
+					"status":       models.AttemptTimeOut,
+					"completed_at": &now,
+					"end_reason":   "timeout",
+				})
+				hasActive = false
+			} else {
+				hasActive = true
+			}
 		}
 
 		// Get best score and last attempt date
