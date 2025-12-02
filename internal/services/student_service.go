@@ -348,6 +348,18 @@ func (s *studentService) GetStudentAssessments(ctx context.Context, studentID st
 			}
 		}
 
+		for _, att := range attempts {
+			if att != nil && att.Status == models.AttemptInProgress {
+				if att.EndedAt != nil && time.Now().After(*att.EndedAt) {
+					err := s.attemptService.HandleTimeout(ctx, att.ID)
+					if err != nil {
+						s.logger.Error("Failed to handle timeout for attempt", "error", err, "attempt_id", att.ID)
+						return nil, fmt.Errorf("failed to handle timeout for attempt %d: %w", att.ID, err)
+					}
+				}
+			}
+		}
+
 		// Check if can start
 		validation, err := s.repo.Attempt().CanStartAttempt(ctx, s.db, studentID, assess.ID)
 		canStart := err == nil && validation != nil && validation.CanStart
