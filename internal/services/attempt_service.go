@@ -291,7 +291,8 @@ func (s *attemptService) SubmitAnswer(ctx context.Context, attemptID uint, req *
 	}
 
 	// Check if attempt has expired
-	if attempt.EndedAt != nil && time.Now().After(*attempt.EndedAt) {
+	// Allow a small grace period of 5 minutes for answer submissions after end time
+	if attempt.EndedAt != nil && time.Now().Add(5*time.Minute).After(*attempt.EndedAt) {
 		return ErrAttemptTimeExpired
 	}
 
