@@ -33,10 +33,11 @@ type Assessment struct {
 	Version int `json:"version" gorm:"default:1"`
 
 	// Relations
-	Settings  AssessmentSettings   `json:"settings" gorm:"foreignKey:AssessmentID"`
-	Questions []AssessmentQuestion `json:"questions" gorm:"foreignKey:AssessmentID"`
-	Attempts  []AssessmentAttempt  `json:"attempts" gorm:"foreignKey:AssessmentID"`
-	Creator   User                 `json:"creator" gorm:"foreignKey:CreatedBy"`
+	Settings       AssessmentSettings   `json:"settings" gorm:"foreignKey:AssessmentID"`
+	Questions      []AssessmentQuestion `json:"questions" gorm:"foreignKey:AssessmentID"`
+	Attempts       []AssessmentAttempt  `json:"attempts" gorm:"foreignKey:AssessmentID"`
+	Creator        User                 `json:"creator" gorm:"foreignKey:CreatedBy"`
+	AssignedGroups []AssessmentGroup    `json:"assigned_groups,omitempty" gorm:"foreignKey:AssessmentID"`
 
 	// Computed fields (not stored)
 	QuestionsCount int     `json:"questions_count" gorm:"-"`

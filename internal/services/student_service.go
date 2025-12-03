@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
@@ -81,6 +82,7 @@ type StudentAssessmentItem struct {
 	HasActiveAttempt bool       `json:"has_active_attempt"`
 	BestScore        *float64   `json:"best_score"`
 	LastAttemptDate  *time.Time `json:"last_attempt_date"`
+	IsExpired        bool       `json:"is_expired"`
 }
 
 // Student Attempts Response
@@ -282,36 +284,63 @@ func (s *studentService) GetStudentAssessments(ctx context.Context, studentID st
 
 	offset := (page - 1) * size
 
-	// Build query for active assessments
-	query := s.db.WithContext(ctx).Model(&models.Assessment{}).Preload("Settings").
-		Where("status = ?", models.StatusActive)
-
-	// Filter by due date (only show non-expired)
-	query = query.Where("due_date IS NULL OR due_date > ?", time.Now())
-
-	// Count total
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, fmt.Errorf("failed to count assessments: %w", err)
+	// UPDATED: Use AssessmentGroup repository for PRIVATE visibility
+	// Only show assessments assigned to groups that student is a member of
+	statusFilter := models.StatusActive
+	if status != "" {
+		statusFilter = models.AssessmentStatus(status)
 	}
 
-	// Apply sorting
+	// Get assessments from groups student belongs to
+	assessments, err := s.repo.AssessmentGroup().GetStudentAssessments(ctx, nil, studentID, statusFilter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get student assessments: %w", err)
+	}
+
+	// Load settings for each assessment
+	for _, assess := range assessments {
+		if err := s.db.WithContext(ctx).Preload("Settings").First(assess, assess.ID).Error; err != nil {
+			s.logger.Error("Failed to load settings", "error", err, "assessment_id", assess.ID)
+		}
+	}
+
+	// Apply sorting in memory (since we got from custom query)
 	switch sortBy {
 	case "due_date":
-		query = query.Order("due_date ASC")
-	case "created_at":
-		query = query.Order("created_at DESC")
+		// Sort by due date ascending (nulls last)
+		sort.Slice(assessments, func(i, j int) bool {
+			if assessments[i].DueDate == nil {
+				return false
+			}
+			if assessments[j].DueDate == nil {
+				return true
+			}
+			return assessments[i].DueDate.Before(*assessments[j].DueDate)
+		})
 	case "title":
-		query = query.Order("title ASC")
-	default:
-		query = query.Order("created_at DESC")
+		sort.Slice(assessments, func(i, j int) bool {
+			return assessments[i].Title < assessments[j].Title
+		})
+	default: // "created_at" or default
+		sort.Slice(assessments, func(i, j int) bool {
+			return assessments[i].CreatedAt.After(assessments[j].CreatedAt)
+		})
 	}
 
-	// Get assessments
-	var assessments []*models.Assessment
-	if err := query.Offset(offset).Limit(size).Find(&assessments).Error; err != nil {
-		return nil, fmt.Errorf("failed to get assessments: %w", err)
+	// Calculate total and apply pagination in memory
+	total := int64(len(assessments))
+
+	// Apply pagination
+	start := offset
+	end := offset + size
+	if start > len(assessments) {
+		start = len(assessments)
 	}
+	if end > len(assessments) {
+		end = len(assessments)
+	}
+
+	assessments = assessments[start:end]
 
 	// Build response with student context
 	items := make([]StudentAssessmentItem, 0, len(assessments))
@@ -370,6 +399,12 @@ func (s *studentService) GetStudentAssessments(ctx context.Context, studentID st
 		s.db.WithContext(ctx).Model(&models.AssessmentQuestion{}).Where("assessment_id = ?", assess.ID).Count(&questionsCount)
 		s.db.WithContext(ctx).Model(&models.AssessmentQuestion{}).Where("assessment_id = ?", assess.ID).Select("COALESCE(SUM(points), 0)").Scan(&totalPoints)
 
+		// Check if assessment is expired
+		isExpired := false
+		if assess.DueDate != nil && assess.DueDate.Before(time.Now()) {
+			isExpired = true
+		}
+
 		items = append(items, StudentAssessmentItem{
 			ID:               assess.ID,
 			Title:            assess.Title,
@@ -387,6 +422,7 @@ func (s *studentService) GetStudentAssessments(ctx context.Context, studentID st
 			BestScore:        bestScore,
 			LastAttemptDate:  lastAttemptDate,
 			Settings:         assess.Settings,
+			IsExpired:        isExpired,
 		})
 	}
 

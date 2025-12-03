@@ -31,6 +31,8 @@ type PostgreSQLRepository struct {
 	answer             repositories.AnswerRepository
 	user               repositories.UserRepository
 	dashboard          repositories.DashboardRepository
+	group              repositories.GroupRepository
+	assessmentGroup    repositories.AssessmentGroupRepository
 }
 
 // RepositoryConfig holds configuration for repository initialization
@@ -62,6 +64,12 @@ func NewPostgreSQLRepository(config RepositoryConfig) repositories.Repository {
 
 	// Dashboard repository
 	repo.dashboard = NewDashboardRepository(config.DB)
+
+	// Group repository
+	repo.group = NewGroupPostgreSQL(config.DB)
+
+	// Assessment-Group repository
+	repo.assessmentGroup = NewAssessmentGroupPostgreSQL(config.DB)
 
 	// TODO: Initialize other repositories
 	repo.assessmentSettings = NewAssessmentSettingsPostgreSQL(config.DB, cacheManager)
@@ -127,6 +135,16 @@ func (r *PostgreSQLRepository) Dashboard() repositories.DashboardRepository {
 	return r.dashboard
 }
 
+// Group returns the group repository
+func (r *PostgreSQLRepository) Group() repositories.GroupRepository {
+	return r.group
+}
+
+// AssessmentGroup returns the assessment-group repository
+func (r *PostgreSQLRepository) AssessmentGroup() repositories.AssessmentGroupRepository {
+	return r.assessmentGroup
+}
+
 // WithTransaction executes a function within a database transaction
 func (r *PostgreSQLRepository) WithTransaction(ctx context.Context, fn func(repositories.Repository) error) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -149,6 +167,12 @@ func (r *PostgreSQLRepository) WithTransaction(ctx context.Context, fn func(repo
 
 		// Dashboard repository with transaction
 		txRepo.dashboard = NewDashboardRepository(tx)
+
+		// Group repository with transaction
+		txRepo.group = NewGroupPostgreSQL(tx)
+
+		// Assessment-Group repository with transaction
+		txRepo.assessmentGroup = NewAssessmentGroupPostgreSQL(tx)
 
 		return fn(txRepo)
 	})

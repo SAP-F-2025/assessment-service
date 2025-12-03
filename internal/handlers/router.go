@@ -12,15 +12,17 @@ import (
 )
 
 type HandlerManager struct {
-	assessmentHandler   *AssessmentHandler
-	questionHandler     *QuestionHandler
-	questionBankHandler *QuestionBankHandler
-	attemptHandler      *AttemptHandler
-	gradingHandler      *GradingHandler
-	dashboardHandler    *DashboardHandler
-	studentHandler      *StudentHandler
-	userHandler         *UserHandler
-	authMiddleware      *CasdoorAuthMiddleware
+	assessmentHandler      *AssessmentHandler
+	questionHandler        *QuestionHandler
+	questionBankHandler    *QuestionBankHandler
+	attemptHandler         *AttemptHandler
+	gradingHandler         *GradingHandler
+	dashboardHandler       *DashboardHandler
+	studentHandler         *StudentHandler
+	groupHandler           *GroupHandler
+	assessmentGroupHandler *AssessmentGroupHandler
+	userHandler            *UserHandler
+	authMiddleware         *CasdoorAuthMiddleware
 }
 
 func NewHandlerManager(
@@ -33,15 +35,17 @@ func NewHandlerManager(
 	authMiddleware := NewCasdoorAuthMiddleware(casdoorConfig, userRepo)
 
 	return &HandlerManager{
-		assessmentHandler:   NewAssessmentHandler(serviceManager.Assessment(), validator, logger),
-		questionHandler:     NewQuestionHandler(serviceManager.Question(), validator, logger),
-		questionBankHandler: NewQuestionBankHandler(serviceManager.QuestionBank(), logger),
-		attemptHandler:      NewAttemptHandler(serviceManager.Attempt(), validator, logger),
-		gradingHandler:      NewGradingHandler(serviceManager.Grading(), validator, logger),
-		dashboardHandler:    NewDashboardHandler(serviceManager.Dashboard(), logger),
-		studentHandler:      NewStudentHandler(serviceManager.Student(), logger),
-		userHandler:         NewUserHandler(userRepo, logger),
-		authMiddleware:      authMiddleware,
+		assessmentHandler:      NewAssessmentHandler(serviceManager.Assessment(), validator, logger),
+		questionHandler:        NewQuestionHandler(serviceManager.Question(), validator, logger),
+		questionBankHandler:    NewQuestionBankHandler(serviceManager.QuestionBank(), logger),
+		attemptHandler:         NewAttemptHandler(serviceManager.Attempt(), validator, logger),
+		gradingHandler:         NewGradingHandler(serviceManager.Grading(), validator, logger),
+		dashboardHandler:       NewDashboardHandler(serviceManager.Dashboard(), logger),
+		studentHandler:         NewStudentHandler(serviceManager.Student(), logger),
+		groupHandler:           NewGroupHandler(serviceManager.Group(), logger),
+		assessmentGroupHandler: NewAssessmentGroupHandler(serviceManager.AssessmentGroup(), logger),
+		userHandler:            NewUserHandler(userRepo, logger),
+		authMiddleware:         authMiddleware,
 	}
 }
 
@@ -92,6 +96,11 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			// Creator-specific routes - Teachers and Admins only
 			assessments.GET("/creator/:creator_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.GetAssessmentsByCreator)
 			assessments.GET("/creator/:creator_id/stats", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.GetCreatorStats)
+
+			// Assessment-Group assignment routes - Teachers and Admins only
+			assessments.POST("/:id/groups", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentGroupHandler.AssignToGroups)
+			assessments.DELETE("/:id/groups", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentGroupHandler.UnassignFromGroups)
+			assessments.GET("/:id/groups", hm.assessmentGroupHandler.GetAssignedGroups)
 		}
 
 		// Question routes
@@ -228,6 +237,33 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			students.GET("/me/assessments", hm.studentHandler.GetStudentAssessments)
 			students.GET("/me/assessments/:id", hm.studentHandler.GetStudentAssessmentDetail)
 			students.GET("/me/attempts", hm.studentHandler.GetStudentAttempts)
+		}
+
+		// Group (Class) routes
+		groups := v1.Group("/groups")
+		{
+			// Create group - Teachers and Admins only
+			groups.POST("", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.groupHandler.CreateGroup)
+
+			// View groups - All authenticated users (service layer filters by access)
+			groups.GET("", hm.groupHandler.ListGroups)
+			groups.GET("/my", hm.groupHandler.GetMyGroups)
+			groups.GET("/memberships", hm.groupHandler.GetMyMemberships)
+			groups.GET("/:id", hm.groupHandler.GetGroup)
+			groups.GET("/:id/details", hm.groupHandler.GetGroupWithMembers)
+
+			// Update/delete group - Permission checked at service layer (owner only)
+			groups.PUT("/:id", hm.groupHandler.UpdateGroup)
+			groups.DELETE("/:id", hm.groupHandler.DeleteGroup)
+
+			// Member management - Permission checked at service layer
+			groups.GET("/:id/members", hm.groupHandler.GetMembers)
+			groups.POST("/:id/members", hm.groupHandler.AddMember)
+			groups.DELETE("/:id/members/:userId", hm.groupHandler.RemoveMember)
+			groups.PUT("/:id/members/:userId/role", hm.groupHandler.UpdateMemberRole)
+
+			// Group assessments - Get assessments assigned to this group
+			groups.GET("/:id/assessments", hm.assessmentGroupHandler.GetGroupAssessments)
 		}
 	}
 

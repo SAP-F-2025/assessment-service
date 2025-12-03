@@ -68,14 +68,16 @@ type serviceManager struct {
 	config       ServiceManagerConfig
 
 	// Service instances
-	assessmentService   AssessmentService
-	questionService     QuestionService
-	questionBankService QuestionBankService
-	attemptService      AttemptService
-	gradingService      GradingService
-	dashboardService    DashboardService
-	studentService      StudentService
-	importExportService ImportExportService
+	assessmentService      AssessmentService
+	questionService        QuestionService
+	questionBankService    QuestionBankService
+	attemptService         AttemptService
+	gradingService         GradingService
+	dashboardService       DashboardService
+	studentService         StudentService
+	groupService           GroupService
+	assessmentGroupService AssessmentGroupService
+	importExportService    ImportExportService
 	// notificationService NotificationService
 	//analyticsService    AnalyticsService
 
@@ -228,6 +230,14 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 	sm.studentService = NewStudentService(sm.repo, sm.db, sm.logger)
 	sm.logger.Info("Student service initialized")
 
+	// Initialize GroupService
+	sm.groupService = NewGroupService(sm.repo, sm.db, sm.logger, sm.validator)
+	sm.logger.Info("Group service initialized")
+
+	// Initialize AssessmentGroupService
+	sm.assessmentGroupService = NewAssessmentGroupService(sm.repo, sm.db, sm.logger, sm.validator)
+	sm.logger.Info("AssessmentGroup service initialized")
+
 	// Initialize ImportExportService
 	sm.importExportService = NewImportExportService(sm.repo, sm.logger, sm.validator)
 	sm.logger.Info("ImportExport service initialized")
@@ -359,6 +369,36 @@ func (sm *serviceManager) Student() StudentService {
 	}
 
 	panic("student service not initialized")
+}
+
+func (sm *serviceManager) Group() GroupService {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if !sm.initialized {
+		panic("service manager not initialized")
+	}
+
+	if sm.groupService != nil {
+		return sm.groupService
+	}
+
+	panic("group service not initialized")
+}
+
+func (sm *serviceManager) AssessmentGroup() AssessmentGroupService {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if !sm.initialized {
+		panic("service manager not initialized")
+	}
+
+	if sm.assessmentGroupService != nil {
+		return sm.assessmentGroupService
+	}
+
+	panic("assessment group service not initialized")
 }
 
 func (sm *serviceManager) ImportExport() ImportExportService {

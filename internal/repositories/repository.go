@@ -27,6 +27,12 @@ type Repository interface {
 	// Dashboard domain
 	Dashboard() DashboardRepository
 
+	// Group domain
+	Group() GroupRepository
+
+	// Assessment-Group relationship
+	AssessmentGroup() AssessmentGroupRepository
+
 	// Transaction support
 	WithTransaction(ctx context.Context, fn func(Repository) error) error
 
