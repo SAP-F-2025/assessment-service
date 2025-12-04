@@ -3890,11 +3890,11 @@ components:
           type: integer
           format: uint32
           description: ID lần thử
-        answers:
-          type: array
-          items:
-            $ref: '#/components/schemas/SubmitAnswerRequest'
-          description: Danh sách câu trả lời
+        # answers:
+        #   type: array
+        #   items:
+        #     $ref: '#/components/schemas/SubmitAnswerRequest'
+        #   description: Danh sách câu trả lời
         time_spent:
           type: integer
           minimum: 0

@@ -63,10 +63,9 @@ type SubmitAnswerRequest struct {
 }
 
 type SubmitAttemptRequest struct {
-	AttemptID uint                  `json:"attempt_id" validate:"required"`
-	Answers   []SubmitAnswerRequest `json:"answers" validate:"required,dive"`
-	TimeSpent *int                  `json:"time_spent"`
-	EndReason string                `json:"end_reason"`
+	AttemptID uint   `json:"attempt_id" validate:"required"`
+	TimeSpent *int   `json:"time_spent"`
+	EndReason string `json:"end_reason"`
 }
 
 type AttemptResponse struct {
