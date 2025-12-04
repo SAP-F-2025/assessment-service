@@ -177,8 +177,7 @@ func (s *attemptService) Resume(ctx context.Context, attemptID uint, studentID s
 func (s *attemptService) Submit(ctx context.Context, req *SubmitAttemptRequest, studentID string) (*AttemptResponse, error) {
 	s.logger.Info("Submitting assessment attempt",
 		"attempt_id", req.AttemptID,
-		"student_id", studentID,
-		"answers_count", len(req.Answers))
+		"student_id", studentID)
 
 	// Validate request
 	if err := s.validator.Validate(req); err != nil {
