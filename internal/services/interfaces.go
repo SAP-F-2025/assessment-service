@@ -254,10 +254,37 @@ type AssessmentGroupAssignmentResponse struct {
 	TotalGroups  int              `json:"total_groups"`
 }
 
+type GroupAssessmentItem struct {
+	ID             uint                      `json:"id"`
+	Title          string                    `json:"title"`
+	Description    *string                   `json:"description"`
+	Duration       int                       `json:"duration"`
+	PassingScore   float64                   `json:"passing_score"`
+	Status         models.AssessmentStatus   `json:"status"`
+	DueDate        *time.Time                `json:"due_date"`
+	QuestionsCount int                       `json:"questions_count"`
+	TotalPoints    int                       `json:"total_points"`
+	Settings       models.AssessmentSettings `json:"settings"`
+	IsExpired      bool                      `json:"is_expired"`
+
+	// Permission fields
+	CanEdit   bool `json:"can_edit"`
+	CanDelete bool `json:"can_delete"`
+	CanTake   bool `json:"can_take"`
+
+	// Student-specific fields (optional - only populated for students)
+	AttemptsUsed     *int       `json:"attempts_used,omitempty"`
+	MaxAttempts      *int       `json:"max_attempts,omitempty"`
+	CanStart         *bool      `json:"can_start,omitempty"`
+	HasActiveAttempt *bool      `json:"has_active_attempt,omitempty"`
+	BestScore        *float64   `json:"best_score,omitempty"`
+	LastAttemptDate  *time.Time `json:"last_attempt_date,omitempty"`
+}
+
 type GroupAssessmentListResponse struct {
-	GroupID     uint                  `json:"group_id"`
-	Assessments []*AssessmentResponse `json:"assessments"`
-	TotalCount  int                   `json:"total_count"`
+	GroupID     uint                   `json:"group_id"`
+	Assessments []*GroupAssessmentItem `json:"assessments"`
+	TotalCount  int                    `json:"total_count"`
 }
 
 // ===== SERVICE INTERFACES =====

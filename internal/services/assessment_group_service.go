@@ -205,8 +205,7 @@ func (s *assessmentGroupService) GetAssignedGroups(ctx context.Context, assessme
 	}, nil
 }
 
-// GetGroupAssessments retrieves all assessments assigned to a group
-// TODO: Phải đủ thông tin như GetStudentAssessments
+// GetGroupAssessments retrieves all assessments assigned to a group with detailed information
 func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupID uint, userID string) (*GroupAssessmentListResponse, error) {
 	// Check if user is member of the group
 	isMember, err := s.repo.Group().IsMember(ctx, nil, groupID, userID)
@@ -230,35 +229,122 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 			"must be group member or owner")
 	}
 
+	// Get member info to check role
+	var userRole *models.GroupMemberRole
+	if isMember {
+		members, err := s.repo.Group().GetMembers(ctx, nil, groupID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get group members: %w", err)
+		}
+		for _, member := range members {
+			if member.UserID == userID {
+				userRole = &member.Role
+				break
+			}
+		}
+	}
+
+	// Determine if user is a student (for populating student-specific fields)
+	isStudent := userRole != nil && *userRole == models.GroupMemberRoleStudent
+
 	// Get assigned assessments
 	assessments, err := s.repo.AssessmentGroup().GetAssessmentsByGroup(ctx, nil, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get group assessments: %w", err)
 	}
 
-	// Build assessment responses
-	assessmentResponses := make([]*AssessmentResponse, 0, len(assessments))
+	// Build detailed assessment responses
+	assessmentItems := make([]*GroupAssessmentItem, 0, len(assessments))
 	for _, assessment := range assessments {
+		// Load settings for each assessment
+		if err := s.db.WithContext(ctx).Preload("Settings").First(assessment, assessment.ID).Error; err != nil {
+			s.logger.Error("Failed to load settings", "error", err, "assessment_id", assessment.ID)
+		}
+
 		// Check if assessment is expired
 		isExpired := false
 		if assessment.DueDate != nil && assessment.DueDate.Before(time.Now()) {
 			isExpired = true
 		}
 
-		// Basic response - could enhance with more details if needed
-		assessmentResponses = append(assessmentResponses, &AssessmentResponse{
-			Assessment: assessment,
-			CanEdit:    assessment.CreatedBy == userID,
-			CanDelete:  assessment.CreatedBy == userID,
-			CanTake:    true, // Member can take assessments assigned to their group
-			IsExpired:  isExpired,
-		})
+		// Get questions count and total points
+		var questionsCount int64
+		var totalPoints int
+		s.db.WithContext(ctx).Model(&models.AssessmentQuestion{}).Where("assessment_id = ?", assessment.ID).Count(&questionsCount)
+		s.db.WithContext(ctx).Model(&models.AssessmentQuestion{}).Where("assessment_id = ?", assessment.ID).Select("COALESCE(SUM(points), 0)").Scan(&totalPoints)
+
+		item := &GroupAssessmentItem{
+			ID:             assessment.ID,
+			Title:          assessment.Title,
+			Description:    assessment.Description,
+			Duration:       assessment.Duration,
+			PassingScore:   float64(assessment.PassingScore),
+			Status:         assessment.Status,
+			DueDate:        assessment.DueDate,
+			QuestionsCount: int(questionsCount),
+			TotalPoints:    totalPoints,
+			Settings:       assessment.Settings,
+			IsExpired:      isExpired,
+			CanEdit:        assessment.CreatedBy == userID,
+			CanDelete:      assessment.CreatedBy == userID,
+			CanTake:        true, // Member can take assessments assigned to their group
+		}
+
+		// Populate student-specific fields if user is a student
+		if isStudent {
+			// Get attempt count
+			attemptCount, err := s.repo.Attempt().GetAttemptCount(ctx, s.db, userID, assessment.ID)
+			if err != nil {
+				s.logger.Error("Failed to get attempt count", "error", err, "assessment_id", assessment.ID)
+				attemptCount = 0
+			}
+
+			// Check if has active attempt
+			hasActive, err := s.repo.Attempt().HasActiveAttempt(ctx, s.db, userID, assessment.ID)
+			if err != nil {
+				s.logger.Error("Failed to check active attempt", "error", err, "assessment_id", assessment.ID)
+				hasActive = false
+			}
+
+			// Get best score and last attempt date
+			attempts, err := s.repo.Attempt().GetByStudentAndAssessment(ctx, s.db, userID, assessment.ID)
+			var bestScore *float64
+			var lastAttemptDate *time.Time
+			if err == nil && len(attempts) > 0 {
+				for _, att := range attempts {
+					if att.Status == models.AttemptCompleted {
+						if bestScore == nil || att.Score > *bestScore {
+							score := att.Score
+							bestScore = &score
+						}
+						if lastAttemptDate == nil || (att.CompletedAt != nil && att.CompletedAt.After(*lastAttemptDate)) {
+							lastAttemptDate = att.CompletedAt
+						}
+					}
+				}
+			}
+
+			// Check if can start
+			validation, err := s.repo.Attempt().CanStartAttempt(ctx, s.db, userID, assessment.ID)
+			canStart := err == nil && validation != nil && validation.CanStart
+
+			// Populate student-specific fields
+			item.AttemptsUsed = &attemptCount
+			maxAttempts := assessment.MaxAttempts
+			item.MaxAttempts = &maxAttempts
+			item.CanStart = &canStart
+			item.HasActiveAttempt = &hasActive
+			item.BestScore = bestScore
+			item.LastAttemptDate = lastAttemptDate
+		}
+
+		assessmentItems = append(assessmentItems, item)
 	}
 
 	return &GroupAssessmentListResponse{
 		GroupID:     groupID,
-		Assessments: assessmentResponses,
-		TotalCount:  len(assessmentResponses),
+		Assessments: assessmentItems,
+		TotalCount:  len(assessmentItems),
 	}, nil
 }
 
