@@ -429,6 +429,540 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  # Assessment-Group Assignment Management
+  /api/v1/assessments/{id}/groups:
+    post:
+      tags:
+        - assessments
+        - groups
+      summary: Gán bài thi vào các nhóm
+      description: Gán bài thi vào một hoặc nhiều nhóm (chỉ teacher và admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignAssessmentToGroupsRequest'
+      responses:
+        '200':
+          description: Gán thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - assessments
+        - groups
+      summary: Bỏ gán bài thi khỏi các nhóm
+      description: Loại bỏ bài thi khỏi một hoặc nhiều nhóm (chỉ teacher và admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnassignAssessmentFromGroupsRequest'
+      responses:
+        '200':
+          description: Bỏ gán thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags:
+        - assessments
+        - groups
+      summary: Lấy danh sách nhóm được gán bài thi
+      description: Lấy tất cả nhóm mà bài thi này được gán vào
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID bài thi
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Danh sách nhóm được gán
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssessmentGroupAssignmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/groups/{id}/assessments:
+    get:
+      tags:
+        - groups
+        - assessments
+      summary: Lấy danh sách bài thi của nhóm
+      description: Lấy tất cả bài thi được gán cho nhóm này (với thông tin chi tiết)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID nhóm
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Danh sách bài thi của nhóm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupAssessmentListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # Group Management APIs
+  /api/v1/groups:
+    post:
+      tags:
+        - groups
+      summary: Tạo nhóm mới
+      description: Tạo nhóm học tập/lớp học mới (chỉ teacher và admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupRequest'
+      responses:
+        '201':
+          description: Tạo nhóm thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags:
+        - groups
+      summary: Lấy danh sách nhóm
+      description: Lấy danh sách tất cả nhóm (có pagination và filter)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: Số trang
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 10
+          description: Số lượng item trên mỗi trang
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Tìm kiếm theo tên nhóm
+      responses:
+        '200':
+          description: Danh sách nhóm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/groups/my:
+    get:
+      tags:
+        - groups
+      summary: Lấy các nhóm do tôi tạo
+      description: Lấy danh sách nhóm mà user hiện tại là chủ nhóm
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Danh sách nhóm của tôi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupListResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/groups/memberships:
+    get:
+      tags:
+        - groups
+      summary: Lấy các nhóm tôi là thành viên
+      description: Lấy danh sách nhóm mà user hiện tại là thành viên (không phải chủ)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Danh sách nhóm tham gia
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupListResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/groups/{id}:
+    get:
+      tags:
+        - groups
+      summary: Lấy thông tin nhóm
+      description: Lấy thông tin chi tiết của một nhóm
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID nhóm
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Thông tin nhóm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - groups
+      summary: Cập nhật nhóm
+      description: Cập nhật thông tin nhóm (chỉ chủ nhóm)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID nhóm
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGroupRequest'
+      responses:
+        '200':
+          description: Cập nhật thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - groups
+      summary: Xóa nhóm
+      description: Xóa nhóm (soft delete - chỉ chủ nhóm)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID nhóm
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Xóa thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/groups/{id}/details:
+    get:
+      tags:
+        - groups
+      summary: Lấy thông tin nhóm với danh sách thành viên
+      description: Lấy thông tin đầy đủ của nhóm bao gồm danh sách thành viên
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID nhóm
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Thông tin nhóm chi tiết
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupDetailResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/groups/{id}/members:
+    get:
+      tags:
+        - groups
+      summary: Lấy danh sách thành viên
+      description: Lấy danh sách tất cả thành viên trong nhóm
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID nhóm
+          schema:
+            type: integer
+            format: uint32
+      responses:
+        '200':
+          description: Danh sách thành viên
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMemberListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags:
+        - groups
+      summary: Thêm thành viên vào nhóm
+      description: Thêm một hoặc nhiều thành viên vào nhóm (chỉ chủ nhóm và teacher members)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID nhóm
+          schema:
+            type: integer
+            format: uint32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMemberRequest'
+      responses:
+        '200':
+          description: Thêm thành viên thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/groups/{id}/members/{userId}:
+    delete:
+      tags:
+        - groups
+      summary: Xóa thành viên khỏi nhóm
+      description: Xóa thành viên khỏi nhóm (chỉ chủ nhóm)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID nhóm
+          schema:
+            type: integer
+            format: uint32
+        - name: userId
+          in: path
+          required: true
+          description: ID user cần xóa
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Xóa thành viên thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/groups/{id}/members/{userId}/role:
+    put:
+      tags:
+        - groups
+      summary: Cập nhật vai trò thành viên
+      description: Thay đổi vai trò của thành viên trong nhóm (student/teacher - chỉ chủ nhóm)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID nhóm
+          schema:
+            type: integer
+            format: uint32
+        - name: userId
+          in: path
+          required: true
+          description: ID user
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemberRoleRequest'
+      responses:
+        '200':
+          description: Cập nhật vai trò thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   # Question Management in Assessments
   /api/v1/assessments/{id}/questions/{question_id}:
     post:
@@ -3988,6 +4522,18 @@ components:
           type: number
           format: float
           description: Điểm trung bình
+        can_edit:
+          type: boolean
+          description: Có thể chỉnh sửa không
+        can_delete:
+          type: boolean
+          description: Có thể xóa không
+        can_take:
+          type: boolean
+          description: Có thể làm bài không
+        is_expired:
+          type: boolean
+          description: Bài thi đã hết hạn hay chưa
 
     AssessmentDetailResponse:
       allOf:
@@ -4639,6 +5185,307 @@ components:
           type: string
           format: date-time
 
+    # Assessment-Group Management Schemas
+    AssignAssessmentToGroupsRequest:
+      type: object
+      required: [group_ids]
+      properties:
+        group_ids:
+          type: array
+          items:
+            type: integer
+            format: uint32
+          minItems: 1
+          description: Danh sách ID nhóm cần gán
+          example: [1, 2, 3]
+
+    UnassignAssessmentFromGroupsRequest:
+      type: object
+      required: [group_ids]
+      properties:
+        group_ids:
+          type: array
+          items:
+            type: integer
+            format: uint32
+          minItems: 1
+          description: Danh sách ID nhóm cần bỏ gán
+          example: [1, 2]
+
+    AssessmentGroupAssignmentResponse:
+      type: object
+      properties:
+        assessment_id:
+          type: integer
+          format: uint32
+          description: ID bài thi
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupResponse'
+          description: Danh sách nhóm được gán
+        total_groups:
+          type: integer
+          description: Tổng số nhóm
+
+    GroupResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+          description: ID nhóm
+        name:
+          type: string
+          description: Tên nhóm
+        description:
+          type: string
+          description: Mô tả nhóm
+        created_by:
+          type: string
+          description: ID người tạo
+        created_at:
+          type: string
+          format: date-time
+          description: Thời gian tạo
+        can_edit:
+          type: boolean
+          description: Có thể chỉnh sửa không
+        can_delete:
+          type: boolean
+          description: Có thể xóa không
+        can_manage:
+          type: boolean
+          description: Có thể quản lý không
+        member_count:
+          type: integer
+          description: Số lượng thành viên
+        is_owner:
+          type: boolean
+          description: Có phải chủ nhóm không
+        is_member:
+          type: boolean
+          description: Có phải thành viên không
+        member_role:
+          type: string
+          enum: [student, teacher]
+          description: Vai trò trong nhóm
+
+    GroupAssessmentItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+          description: ID bài thi
+        title:
+          type: string
+          description: Tiêu đề bài thi
+        description:
+          type: string
+          description: Mô tả bài thi
+        duration:
+          type: integer
+          description: Thời gian làm bài (phút)
+        passing_score:
+          type: number
+          format: float
+          description: Điểm qua môn (%)
+        status:
+          $ref: '#/components/schemas/AssessmentStatus'
+        due_date:
+          type: string
+          format: date-time
+          description: Hạn nộp bài
+        questions_count:
+          type: integer
+          description: Số câu hỏi
+        total_points:
+          type: integer
+          description: Tổng điểm
+        settings:
+          $ref: '#/components/schemas/AssessmentSettingsResponse'
+        is_expired:
+          type: boolean
+          description: Đã hết hạn chưa
+        can_edit:
+          type: boolean
+          description: Có thể chỉnh sửa không
+        can_delete:
+          type: boolean
+          description: Có thể xóa không
+        can_take:
+          type: boolean
+          description: Có thể làm bài không
+        attempts_used:
+          type: integer
+          description: Số lần thử đã sử dụng (chỉ cho student)
+        max_attempts:
+          type: integer
+          description: Số lần thử tối đa (chỉ cho student)
+        can_start:
+          type: boolean
+          description: Có thể bắt đầu làm bài không (chỉ cho student)
+        has_active_attempt:
+          type: boolean
+          description: Có lần thử đang active không (chỉ cho student)
+        best_score:
+          type: number
+          format: float
+          description: Điểm cao nhất (chỉ cho student)
+        last_attempt_date:
+          type: string
+          format: date-time
+          description: Ngày làm bài gần nhất (chỉ cho student)
+
+    GroupAssessmentListResponse:
+      type: object
+      properties:
+        group_id:
+          type: integer
+          format: uint32
+          description: ID nhóm
+        assessments:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupAssessmentItem'
+          description: Danh sách bài thi
+        total_count:
+          type: integer
+          description: Tổng số bài thi
+
+    # Group Management Schemas
+    GroupMemberRole:
+      type: string
+      enum: [student, teacher]
+      description: Vai trò thành viên trong nhóm
+
+    CreateGroupRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Tên nhóm
+          example: "Lớp 12A1 - Toán"
+        description:
+          type: string
+          maxLength: 500
+          description: Mô tả nhóm
+          example: "Lớp học Toán nâng cao khối 12"
+
+    UpdateGroupRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Tên nhóm
+        description:
+          type: string
+          maxLength: 500
+          description: Mô tả nhóm
+
+    GroupListResponse:
+      type: object
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupResponse'
+          description: Danh sách nhóm
+        total:
+          type: integer
+          description: Tổng số nhóm
+        page:
+          type: integer
+          description: Trang hiện tại
+        size:
+          type: integer
+          description: Số item trên mỗi trang
+        total_pages:
+          type: integer
+          description: Tổng số trang
+
+    GroupDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/GroupResponse'
+        - type: object
+          properties:
+            members:
+              type: array
+              items:
+                $ref: '#/components/schemas/GroupMember'
+              description: Danh sách thành viên
+
+    GroupMember:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: uint32
+          description: ID membership
+        group_id:
+          type: integer
+          format: uint32
+          description: ID nhóm
+        user_id:
+          type: string
+          description: ID user
+        role:
+          $ref: '#/components/schemas/GroupMemberRole'
+        joined_at:
+          type: string
+          format: date-time
+          description: Thời gian tham gia
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    GroupMemberListResponse:
+      type: object
+      properties:
+        group_id:
+          type: integer
+          format: uint32
+          description: ID nhóm
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupMember'
+          description: Danh sách thành viên
+        total_count:
+          type: integer
+          description: Tổng số thành viên
+
+    AddMemberRequest:
+      type: object
+      required: [user_id, role]
+      properties:
+        user_id:
+          type: string
+          description: ID user cần thêm
+          example: "user123"
+        role:
+          $ref: '#/components/schemas/GroupMemberRole'
+          description: Vai trò trong nhóm
+          example: "student"
+
+    UpdateMemberRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: '#/components/schemas/GroupMemberRole'
+          description: Vai trò mới
+          example: "teacher"
+
     AssessmentStats:
       type: object
       properties:
@@ -5264,6 +6111,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        is_expired:
+          type: boolean
+          description: Bài thi đã hết hạn hay chưa
+          example: false
 
     StudentAssessmentDetailResponse:
       type: object

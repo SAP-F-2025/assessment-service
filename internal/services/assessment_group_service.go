@@ -253,25 +253,113 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 		return nil, fmt.Errorf("failed to get group assessments: %w", err)
 	}
 
+	assessmentIDs := make([]uint, len(assessments))
+	for i, a := range assessments {
+		assessmentIDs[i] = a.ID
+	}
+
+	// Batch load settings
+	var settingsMap = make(map[uint]models.AssessmentSettings)
+	var allSettings []models.AssessmentSettings
+	if err := s.db.WithContext(ctx).Where("assessment_id IN ?", assessmentIDs).Find(&allSettings).Error; err == nil {
+		for _, setting := range allSettings {
+			settingsMap[setting.AssessmentID] = setting
+		}
+	}
+
+	// Batch load questions count and total points
+	type AssessmentStats struct {
+		AssessmentID   uint
+		QuestionsCount int64
+		TotalPoints    int
+	}
+	var statsMap = make(map[uint]AssessmentStats)
+	var stats []AssessmentStats
+	s.db.WithContext(ctx).
+		Model(&models.AssessmentQuestion{}).
+		Select("assessment_id, COUNT(*) as questions_count, COALESCE(SUM(points), 0) as total_points").
+		Where("assessment_id IN ?", assessmentIDs).
+		Group("assessment_id").
+		Scan(&stats)
+	for _, stat := range stats {
+		statsMap[stat.AssessmentID] = stat
+	}
+
+	// Batch load student attempts if student
+	var attemptCountMap = make(map[uint]int)
+	var hasActiveMap = make(map[uint]bool)
+	var bestScoreMap = make(map[uint]*float64)
+	var lastAttemptDateMap = make(map[uint]*time.Time)
+	var canStartMap = make(map[uint]bool)
+
+	if isStudent {
+		// Batch load attempt counts
+		type AttemptCount struct {
+			AssessmentID uint
+			Count        int
+		}
+		var attemptCounts []AttemptCount
+		s.db.WithContext(ctx).
+			Model(&models.AssessmentAttempt{}).
+			Select("assessment_id, COUNT(*) as count").
+			Where("student_id = ? AND assessment_id IN ?", userID, assessmentIDs).
+			Group("assessment_id").
+			Scan(&attemptCounts)
+		for _, ac := range attemptCounts {
+			attemptCountMap[ac.AssessmentID] = ac.Count
+		}
+
+		// Batch check active attempts
+		type ActiveAttempt struct {
+			AssessmentID uint
+		}
+		var activeAttempts []ActiveAttempt
+		s.db.WithContext(ctx).
+			Model(&models.AssessmentAttempt{}).
+			Select("DISTINCT assessment_id").
+			Where("student_id = ? AND assessment_id IN ? AND status = ?", userID, assessmentIDs, models.AttemptInProgress).
+			Scan(&activeAttempts)
+		for _, aa := range activeAttempts {
+			hasActiveMap[aa.AssessmentID] = true
+		}
+
+		// Batch load best scores and last attempt dates
+		type BestAttempt struct {
+			AssessmentID    uint
+			BestScore       *float64
+			LastAttemptDate *time.Time
+		}
+		var bestAttempts []BestAttempt
+		s.db.WithContext(ctx).
+			Model(&models.AssessmentAttempt{}).
+			Select("assessment_id, MAX(score) as best_score, MAX(completed_at) as last_attempt_date").
+			Where("student_id = ? AND assessment_id IN ? AND status = ?", userID, assessmentIDs, models.AttemptCompleted).
+			Group("assessment_id").
+			Scan(&bestAttempts)
+		for _, ba := range bestAttempts {
+			bestScoreMap[ba.AssessmentID] = ba.BestScore
+			lastAttemptDateMap[ba.AssessmentID] = ba.LastAttemptDate
+		}
+
+		// Batch check can start (simplified - you may want to optimize this further)
+		for _, assessment := range assessments {
+			validation, err := s.repo.Attempt().CanStartAttempt(ctx, s.db, userID, assessment.ID)
+			canStartMap[assessment.ID] = err == nil && validation != nil && validation.CanStart
+		}
+	}
+
 	// Build detailed assessment responses
 	assessmentItems := make([]*GroupAssessmentItem, 0, len(assessments))
 	for _, assessment := range assessments {
-		// Load settings for each assessment
-		if err := s.db.WithContext(ctx).Preload("Settings").First(assessment, assessment.ID).Error; err != nil {
-			s.logger.Error("Failed to load settings", "error", err, "assessment_id", assessment.ID)
-		}
-
 		// Check if assessment is expired
 		isExpired := false
 		if assessment.DueDate != nil && assessment.DueDate.Before(time.Now()) {
 			isExpired = true
 		}
 
-		// Get questions count and total points
-		var questionsCount int64
-		var totalPoints int
-		s.db.WithContext(ctx).Model(&models.AssessmentQuestion{}).Where("assessment_id = ?", assessment.ID).Count(&questionsCount)
-		s.db.WithContext(ctx).Model(&models.AssessmentQuestion{}).Where("assessment_id = ?", assessment.ID).Select("COALESCE(SUM(points), 0)").Scan(&totalPoints)
+		// Get data from maps (no queries!)
+		setting, _ := settingsMap[assessment.ID]
+		stat := statsMap[assessment.ID]
 
 		item := &GroupAssessmentItem{
 			ID:             assessment.ID,
@@ -281,54 +369,23 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 			PassingScore:   float64(assessment.PassingScore),
 			Status:         assessment.Status,
 			DueDate:        assessment.DueDate,
-			QuestionsCount: int(questionsCount),
-			TotalPoints:    totalPoints,
-			Settings:       assessment.Settings,
+			QuestionsCount: int(stat.QuestionsCount),
+			TotalPoints:    stat.TotalPoints,
+			Settings:       setting,
 			IsExpired:      isExpired,
 			CanEdit:        assessment.CreatedBy == userID,
 			CanDelete:      assessment.CreatedBy == userID,
 			CanTake:        true, // Member can take assessments assigned to their group
 		}
 
-		// Populate student-specific fields if user is a student
+		// Populate student-specific fields if user is a student (from maps - no queries!)
 		if isStudent {
-			// Get attempt count
-			attemptCount, err := s.repo.Attempt().GetAttemptCount(ctx, s.db, userID, assessment.ID)
-			if err != nil {
-				s.logger.Error("Failed to get attempt count", "error", err, "assessment_id", assessment.ID)
-				attemptCount = 0
-			}
+			attemptCount := attemptCountMap[assessment.ID]
+			hasActive := hasActiveMap[assessment.ID]
+			bestScore := bestScoreMap[assessment.ID]
+			lastAttemptDate := lastAttemptDateMap[assessment.ID]
+			canStart := canStartMap[assessment.ID]
 
-			// Check if has active attempt
-			hasActive, err := s.repo.Attempt().HasActiveAttempt(ctx, s.db, userID, assessment.ID)
-			if err != nil {
-				s.logger.Error("Failed to check active attempt", "error", err, "assessment_id", assessment.ID)
-				hasActive = false
-			}
-
-			// Get best score and last attempt date
-			attempts, err := s.repo.Attempt().GetByStudentAndAssessment(ctx, s.db, userID, assessment.ID)
-			var bestScore *float64
-			var lastAttemptDate *time.Time
-			if err == nil && len(attempts) > 0 {
-				for _, att := range attempts {
-					if att.Status == models.AttemptCompleted {
-						if bestScore == nil || att.Score > *bestScore {
-							score := att.Score
-							bestScore = &score
-						}
-						if lastAttemptDate == nil || (att.CompletedAt != nil && att.CompletedAt.After(*lastAttemptDate)) {
-							lastAttemptDate = att.CompletedAt
-						}
-					}
-				}
-			}
-
-			// Check if can start
-			validation, err := s.repo.Attempt().CanStartAttempt(ctx, s.db, userID, assessment.ID)
-			canStart := err == nil && validation != nil && validation.CanStart
-
-			// Populate student-specific fields
 			item.AttemptsUsed = &attemptCount
 			maxAttempts := assessment.MaxAttempts
 			item.MaxAttempts = &maxAttempts

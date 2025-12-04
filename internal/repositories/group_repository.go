@@ -31,6 +31,7 @@ type GroupRepository interface {
 
 	// Group membership operations
 	AddMember(ctx context.Context, tx *gorm.DB, member *models.GroupMember) error
+	UpdateMember(ctx context.Context, tx *gorm.DB, member *models.GroupMember) error
 	RemoveMember(ctx context.Context, tx *gorm.DB, groupID uint, userID string) error
 	GetMembers(ctx context.Context, tx *gorm.DB, groupID uint) ([]*models.GroupMember, error)
 	GetMembersByUserID(ctx context.Context, tx *gorm.DB, userID string) ([]*models.GroupMember, error)

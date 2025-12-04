@@ -190,6 +190,36 @@ func (g *GroupPostgreSQL) AddMember(ctx context.Context, tx *gorm.DB, member *mo
 	return nil
 }
 
+// UpdateMember updates an existing group member's information (e.g., role)
+func (g *GroupPostgreSQL) UpdateMember(ctx context.Context, tx *gorm.DB, member *models.GroupMember) error {
+	db := g.getDB(tx)
+
+	// Check if member exists
+	exists, err := g.IsMember(ctx, tx, member.GroupID, member.UserID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("user %s is not a member of group %d", member.UserID, member.GroupID)
+	}
+
+	// Update member - only update role field, preserve joined_at and other metadata
+	result := db.WithContext(ctx).
+		Model(&models.GroupMember{}).
+		Where("group_id = ? AND user_id = ?", member.GroupID, member.UserID).
+		Update("role", member.Role)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to update member: %w", result.Error)
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("no member found to update for user %s in group %d", member.UserID, member.GroupID)
+	}
+
+	return nil
+}
+
 // RemoveMember removes a user from a group
 func (g *GroupPostgreSQL) RemoveMember(ctx context.Context, tx *gorm.DB, groupID uint, userID string) error {
 	db := g.getDB(tx)

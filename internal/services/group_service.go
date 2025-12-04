@@ -210,9 +210,19 @@ func (s *groupService) Delete(ctx context.Context, id uint, userID string) error
 		return NewPermissionError(userID, id, "group", "delete", "only the class owner can delete")
 	}
 
-	// Delete group
-	if err = s.repo.Group().Delete(ctx, nil, id); err != nil {
-		return fmt.Errorf("failed to delete group: %w", err)
+	// Wrap in transaction to ensure atomicity with cascade deletes
+	// (group_members and assessment_groups will be cascade deleted)
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// Delete group (will cascade delete members and assessment assignments)
+		if err := s.repo.Group().Delete(ctx, tx, id); err != nil {
+			return fmt.Errorf("failed to delete group: %w", err)
+		}
+		return nil
+	})
+
+	if err != nil {
+		s.logger.Error("Failed to delete group", "error", err, "group_id", id)
+		return err
 	}
 
 	s.logger.Info("Group (class) deleted successfully", "group_id", id)
@@ -473,34 +483,15 @@ func (s *groupService) UpdateMemberRole(ctx context.Context, groupID uint, membe
 		return fmt.Errorf("students must have 'student' role in class")
 	}
 
-	// Get members
-	members, err := s.repo.Group().GetMembers(ctx, nil, groupID)
-	if err != nil {
-		return fmt.Errorf("failed to get group members: %w", err)
+	// Create member object with new role
+	member := &models.GroupMember{
+		GroupID: groupID,
+		UserID:  memberUserID,
+		Role:    newRole,
 	}
 
-	// Find and update member
-	var foundMember *models.GroupMember
-	for _, member := range members {
-		if member.UserID == memberUserID {
-			foundMember = member
-			break
-		}
-	}
-
-	if foundMember == nil {
-		return ErrGroupMemberNotFound
-	}
-
-	// Update role
-	foundMember.Role = newRole
-
-	// Remove and re-add with new role (since we don't have UpdateMember method)
-	if err = s.repo.Group().RemoveMember(ctx, nil, groupID, memberUserID); err != nil {
-		return fmt.Errorf("failed to update member role: %w", err)
-	}
-
-	if err = s.repo.Group().AddMember(ctx, nil, foundMember); err != nil {
+	// Update member role directly (preserves joined_at and other metadata)
+	if err = s.repo.Group().UpdateMember(ctx, nil, member); err != nil {
 		return fmt.Errorf("failed to update member role: %w", err)
 	}
 
