@@ -204,21 +204,20 @@ func (s *attemptService) Submit(ctx context.Context, req *SubmitAttemptRequest, 
 		return nil, ErrAttemptAlreadySubmitted
 	}
 
-	// Check if attempt has expired
-	// Extend by 5 minutes to allow submission grace period (network delays, last-moment submissions, etc.)
-
-	if attempt.EndedAt != nil && time.Now().After(attempt.EndedAt.Add(5*time.Minute)) {
-		return nil, ErrAttemptTimeExpired
-	}
+	// No time check - allow submit anytime since answers are saved via auto-save
+	// Auto-save endpoint enforces time limits
 
 	// Begin transaction
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		// Update all answers
-		for _, answerReq := range req.Answers {
-			if err := s.updateAttemptAnswer(ctx, tx, req.AttemptID, answerReq, studentID); err != nil {
-				return fmt.Errorf("failed to update answer for question %d: %w", answerReq.QuestionID, err)
-			}
-		}
+		// Update answers only if provided (for backward compatibility)
+		// Modern clients use auto-save and send empty answers array
+		// if len(req.Answers) > 0 {
+		// 	for _, answerReq := range req.Answers {
+		// 		if err := s.updateAttemptAnswer(ctx, tx, req.AttemptID, answerReq, studentID); err != nil {
+		// 			return fmt.Errorf("failed to update answer for question %d: %w", answerReq.QuestionID, err)
+		// 		}
+		// 	}
+		// }
 
 		// Update attempt status
 		attempt.Status = models.AttemptCompleted
@@ -292,9 +291,9 @@ func (s *attemptService) SubmitAnswer(ctx context.Context, attemptID uint, req *
 		return ErrAttemptNotActive
 	}
 
-	// Check if attempt has expired
-	// Allow a small grace period of 5 minutes for answer submissions after end time
-	if attempt.EndedAt != nil && time.Now().After(attempt.EndedAt.Add(5*time.Minute)) {
+	// Allow 30-second grace period for auto-save after exam ends
+	// Covers network delays and pending saves, but prevents abuse
+	if attempt.EndedAt != nil && time.Now().After(attempt.EndedAt.Add(30*time.Second)) {
 		return ErrAttemptTimeExpired
 	}
 
