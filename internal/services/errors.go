@@ -61,6 +61,20 @@ var (
 	ErrGradingInvalidScore     = errors.New("invalid score value")
 	ErrGradingPermissionDenied = errors.New("permission denied for grading")
 
+	// Group specific errors
+	ErrGroupNotFound          = errors.New("group not found")
+	ErrGroupAccessDenied      = errors.New("access denied to group")
+	ErrGroupDuplicateName     = errors.New("group name already exists")
+	ErrGroupMemberExists      = errors.New("user is already a member of this group")
+	ErrGroupMemberNotFound    = errors.New("user is not a member of this group")
+	ErrGroupCannotRemoveOwner = errors.New("cannot remove group owner")
+
+	// Assessment-Group assignment errors
+	ErrAssessmentGroupNotFound        = errors.New("assessment-group assignment not found")
+	ErrAssessmentGroupAlreadyAssigned = errors.New("assessment already assigned to group")
+	ErrAssessmentGroupNotAssigned     = errors.New("assessment not assigned to this group")
+	ErrCannotAssignInActiveAssessment = errors.New("cannot assign inactive assessment to groups")
+
 	// User/Permission errors
 	ErrUserNotFound            = errors.New("user not found")
 	ErrInvalidRole             = errors.New("invalid user role")
@@ -127,7 +141,9 @@ func IsNotFound(err error) bool {
 		errors.Is(err, ErrAssessmentNotFound) ||
 		errors.Is(err, ErrQuestionNotFound) ||
 		errors.Is(err, ErrAttemptNotFound) ||
-		errors.Is(err, ErrUserNotFound)
+		errors.Is(err, ErrUserNotFound) ||
+		errors.Is(err, ErrGroupNotFound) ||
+		errors.Is(err, ErrGroupMemberNotFound)
 }
 
 // IsUnauthorized checks if error represents an "unauthorized" condition
@@ -137,6 +153,7 @@ func IsUnauthorized(err error) bool {
 		errors.Is(err, ErrAssessmentAccessDenied) ||
 		errors.Is(err, ErrQuestionAccessDenied) ||
 		errors.Is(err, ErrAttemptAccessDenied) ||
+		errors.Is(err, ErrGroupAccessDenied) ||
 		errors.Is(err, ErrInsufficientPermissions)
 }
 
@@ -163,5 +180,8 @@ func IsConflict(err error) bool {
 		errors.Is(err, ErrQuestionNotDeletable) ||
 		errors.Is(err, ErrAttemptAlreadySubmitted) ||
 		errors.Is(err, ErrAttemptLimitExceeded) ||
-		errors.Is(err, ErrGradingAlreadyCompleted)
+		errors.Is(err, ErrGradingAlreadyCompleted) ||
+		errors.Is(err, ErrGroupDuplicateName) ||
+		errors.Is(err, ErrGroupMemberExists) ||
+		errors.Is(err, ErrGroupCannotRemoveOwner)
 }

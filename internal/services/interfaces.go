@@ -26,6 +26,7 @@ type AssessmentResponse struct {
 	CanEdit   bool `json:"can_edit"`
 	CanDelete bool `json:"can_delete"`
 	CanTake   bool `json:"can_take"`
+	IsExpired bool `json:"is_expired"`
 }
 
 type AssessmentListResponse struct {
@@ -184,6 +185,105 @@ type QuestionBankShareResponse struct {
 
 type AddQuestionsTobankRequest struct {
 	QuestionIDs []uint `json:"question_ids" validate:"required,min=1"`
+}
+
+// ===== GROUP RELATED DTOs =====
+
+type CreateGroupRequest struct {
+	Name        string  `json:"name" validate:"required,max=100"`
+	DisplayName string  `json:"display_name" validate:"required,max=255"`
+	Description *string `json:"description" validate:"omitempty,max=2000"`
+	Type        string  `json:"type" validate:"omitempty,max=50"`
+}
+
+type UpdateGroupRequest struct {
+	DisplayName *string `json:"display_name" validate:"omitempty,max=255"`
+	Description *string `json:"description" validate:"omitempty,max=2000"`
+	Type        *string `json:"type" validate:"omitempty,max=50"`
+}
+
+type AddGroupMemberRequest struct {
+	UserID string `json:"user_id" validate:"required"`
+	// Role is optional - will be auto-detected from user's system role (teacher/student)
+	// If provided, must match: "teacher" or "student"
+	Role string `json:"role" validate:"omitempty,oneof=teacher student"`
+}
+
+type UpdateMemberRoleRequest struct {
+	Role string `json:"role" validate:"required,oneof=teacher student"`
+}
+
+type GroupResponse struct {
+	*models.Group
+	CanEdit     bool    `json:"can_edit"`
+	CanDelete   bool    `json:"can_delete"`
+	CanManage   bool    `json:"can_manage"`
+	MemberCount int     `json:"member_count"`
+	IsOwner     bool    `json:"is_owner"`
+	IsMember    bool    `json:"is_member"`
+	MemberRole  *string `json:"member_role,omitempty"`
+}
+
+type GroupListResponse struct {
+	Groups []*GroupResponse `json:"groups"`
+	Total  int64            `json:"total"`
+	Page   int              `json:"page"`
+	Size   int              `json:"size"`
+}
+
+type GroupMemberResponse struct {
+	*models.GroupMember
+	CanRemove bool `json:"can_remove"`
+	CanModify bool `json:"can_modify"`
+}
+
+// ===== ASSESSMENT-GROUP ASSIGNMENT DTOs =====
+
+type AssignAssessmentToGroupsRequest struct {
+	GroupIDs []uint `json:"group_ids" validate:"required,min=1,dive,required"`
+}
+
+type UnassignAssessmentFromGroupsRequest struct {
+	GroupIDs []uint `json:"group_ids" validate:"required,min=1,dive,required"`
+}
+
+type AssessmentGroupAssignmentResponse struct {
+	AssessmentID uint             `json:"assessment_id"`
+	Groups       []*GroupResponse `json:"groups"`
+	TotalGroups  int              `json:"total_groups"`
+}
+
+type GroupAssessmentItem struct {
+	ID             uint                      `json:"id"`
+	Title          string                    `json:"title"`
+	Description    *string                   `json:"description"`
+	Duration       int                       `json:"duration"`
+	PassingScore   float64                   `json:"passing_score"`
+	Status         models.AssessmentStatus   `json:"status"`
+	DueDate        *time.Time                `json:"due_date"`
+	QuestionsCount int                       `json:"questions_count"`
+	TotalPoints    int                       `json:"total_points"`
+	Settings       models.AssessmentSettings `json:"settings"`
+	IsExpired      bool                      `json:"is_expired"`
+
+	// Permission fields
+	CanEdit   bool `json:"can_edit"`
+	CanDelete bool `json:"can_delete"`
+	CanTake   bool `json:"can_take"`
+
+	// Student-specific fields (optional - only populated for students)
+	AttemptsUsed     *int       `json:"attempts_used,omitempty"`
+	MaxAttempts      *int       `json:"max_attempts,omitempty"`
+	CanStart         *bool      `json:"can_start,omitempty"`
+	HasActiveAttempt *bool      `json:"has_active_attempt,omitempty"`
+	BestScore        *float64   `json:"best_score,omitempty"`
+	LastAttemptDate  *time.Time `json:"last_attempt_date,omitempty"`
+}
+
+type GroupAssessmentListResponse struct {
+	GroupID     uint                   `json:"group_id"`
+	Assessments []*GroupAssessmentItem `json:"assessments"`
+	TotalCount  int                    `json:"total_count"`
 }
 
 // ===== SERVICE INTERFACES =====
@@ -353,6 +453,69 @@ type GradingService interface {
 	GetGradingOverview(ctx context.Context, assessmentID uint, userID string) (*repositories.GradingStats, error)
 }
 
+type GroupService interface {
+	// Core CRUD operations
+	Create(ctx context.Context, req *CreateGroupRequest, creatorID string) (*GroupResponse, error)
+	GetByID(ctx context.Context, id uint, userID string) (*GroupResponse, error)
+	GetByIDWithMembers(ctx context.Context, id uint, userID string) (*GroupResponse, error)
+	GetByName(ctx context.Context, name string, userID string) (*GroupResponse, error)
+	Update(ctx context.Context, id uint, req *UpdateGroupRequest, userID string) (*GroupResponse, error)
+	Delete(ctx context.Context, id uint, userID string) error
+
+	// List and search operations
+	List(ctx context.Context, filters repositories.GroupFilters, userID string) (*GroupListResponse, error)
+	GetByCreator(ctx context.Context, creatorID string, filters repositories.GroupFilters) (*GroupListResponse, error)
+	GetByMember(ctx context.Context, userID string, filters repositories.GroupFilters) (*GroupListResponse, error)
+	Search(ctx context.Context, query string, filters repositories.GroupFilters, userID string) (*GroupListResponse, error)
+
+	// Member management
+	AddMember(ctx context.Context, groupID uint, req *AddGroupMemberRequest, userID string) error
+	RemoveMember(ctx context.Context, groupID uint, memberUserID string, userID string) error
+	UpdateMemberRole(ctx context.Context, groupID uint, memberUserID string, req *UpdateMemberRoleRequest, userID string) error
+	GetMembers(ctx context.Context, groupID uint, userID string) ([]*GroupMemberResponse, error)
+	GetMemberGroups(ctx context.Context, memberUserID string) ([]*GroupResponse, error)
+
+	// Permission checks
+	CanAccess(ctx context.Context, groupID uint, userID string) (bool, error)
+	CanEdit(ctx context.Context, groupID uint, userID string) (bool, error)
+	CanDelete(ctx context.Context, groupID uint, userID string) (bool, error)
+	CanManageMembers(ctx context.Context, groupID uint, userID string) (bool, error)
+	IsOwner(ctx context.Context, groupID uint, userID string) (bool, error)
+	IsMember(ctx context.Context, groupID uint, userID string) (bool, error)
+}
+
+type AssessmentGroupService interface {
+	// ===== ASSIGNMENT OPERATIONS =====
+
+	// AssignToGroups assigns assessment to multiple groups with permission checks
+	// Validates: user is assessment creator OR group owner OR teacher member of each group
+	// Validates: assessment is not Draft status
+	// Validates: all groups exist
+	AssignToGroups(ctx context.Context, assessmentID uint, req *AssignAssessmentToGroupsRequest, userID string) error
+
+	// UnassignFromGroups removes assessment from groups with permission checks
+	UnassignFromGroups(ctx context.Context, assessmentID uint, req *UnassignAssessmentFromGroupsRequest, userID string) error
+
+	// ===== QUERY OPERATIONS =====
+
+	// GetAssignedGroups retrieves all groups assigned to an assessment
+	// Only accessible to: assessment creator, assigned group owners/teachers
+	GetAssignedGroups(ctx context.Context, assessmentID uint, userID string) (*AssessmentGroupAssignmentResponse, error)
+
+	// GetGroupAssessments retrieves all assessments assigned to a group
+	// Only accessible to: group members (teachers and students)
+	GetGroupAssessments(ctx context.Context, groupID uint, userID string) (*GroupAssessmentListResponse, error)
+
+	// ===== PERMISSION CHECKS =====
+
+	// CanAssignToGroup checks if user can assign assessment to a specific group
+	// Returns true if user is: assessment creator OR group owner OR teacher member
+	CanAssignToGroup(ctx context.Context, assessmentID, groupID uint, userID string) (bool, error)
+
+	// CanUnassignFromGroup checks if user can remove assignment
+	CanUnassignFromGroup(ctx context.Context, assessmentID, groupID uint, userID string) (bool, error)
+}
+
 // ===== SERVICE MANAGER =====
 
 type ServiceManager interface {
@@ -364,6 +527,8 @@ type ServiceManager interface {
 	Grading() GradingService
 	Dashboard() DashboardService
 	Student() StudentService
+	Group() GroupService
+	AssessmentGroup() AssessmentGroupService
 
 	// Additional service getters
 	ImportExport() ImportExportService
