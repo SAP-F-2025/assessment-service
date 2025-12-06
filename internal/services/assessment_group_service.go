@@ -244,8 +244,8 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 		}
 	}
 
-	// Determine if user is a student (for populating student-specific fields)
-	isStudent := userRole != nil && *userRole == models.GroupMemberRoleStudent
+	// Determine if user is a regular member (not owner) for populating member-specific fields
+	isMemberRole := userRole != nil && *userRole == models.GroupMemberRoleMember
 
 	// Get assigned assessments
 	assessments, err := s.repo.AssessmentGroup().GetAssessmentsByGroup(ctx, nil, groupID)
@@ -292,7 +292,7 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 	var lastAttemptDateMap = make(map[uint]*time.Time)
 	var canStartMap = make(map[uint]bool)
 
-	if isStudent {
+	if isMemberRole {
 		// Batch load attempt counts
 		type AttemptCount struct {
 			AssessmentID uint
@@ -378,8 +378,8 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 			CanTake:        true, // Member can take assessments assigned to their group
 		}
 
-		// Populate student-specific fields if user is a student (from maps - no queries!)
-		if isStudent {
+		// Populate member-specific fields (from maps - no queries!)
+		if isMemberRole {
 			attemptCount := attemptCountMap[assessment.ID]
 			hasActive := hasActiveMap[assessment.ID]
 			bestScore := bestScoreMap[assessment.ID]
@@ -431,15 +431,18 @@ func (s *assessmentGroupService) CanAssignToGroup(ctx context.Context, assessmen
 		return true, nil
 	}
 
-	// Check 3: Is user a teacher member of the group?
+	// Check 3: Is user an owner or co-owner member of the group?
+	// Both owner and co-owner can assign assessments to the group
 	members, err := s.repo.Group().GetMembers(ctx, nil, groupID)
 	if err != nil {
 		return false, err
 	}
 
 	for _, member := range members {
-		if member.UserID == userID && member.Role == models.GroupMemberRoleTeacher {
-			return true, nil
+		if member.UserID == userID {
+			if member.Role == models.GroupMemberRoleOwner || member.Role == models.GroupMemberRoleCoOwner {
+				return true, nil
+			}
 		}
 	}
 

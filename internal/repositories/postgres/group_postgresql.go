@@ -98,7 +98,7 @@ func (g *GroupPostgreSQL) Update(ctx context.Context, tx *gorm.DB, group *models
 // Delete soft deletes a group
 func (g *GroupPostgreSQL) Delete(ctx context.Context, tx *gorm.DB, id uint) error {
 	db := g.getDB(tx)
-	if err := db.WithContext(ctx).Unscoped().Delete(&models.Group{}, id).Error; err != nil {
+	if err := db.WithContext(ctx).Delete(&models.Group{}, id).Error; err != nil {
 		return fmt.Errorf("failed to delete group: %w", err)
 	}
 	return nil

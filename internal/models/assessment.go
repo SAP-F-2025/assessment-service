@@ -13,6 +13,16 @@ const (
 	StatusArchived AssessmentStatus = "Archived"
 )
 
+// AssessmentType distinguishes between teacher-created and student-created assessments
+type AssessmentType string
+
+const (
+	// AssessmentTypeTeacher represents formal assessments created by teachers
+	AssessmentTypeTeacher AssessmentType = "teacher"
+	// AssessmentTypeStudent represents peer assessments created by students
+	AssessmentTypeStudent AssessmentType = "student"
+)
+
 type Assessment struct {
 	ID           uint             `json:"id" gorm:"primaryKey"`
 	Title        string           `json:"title" gorm:"not null;size:200;index" validate:"required,min=1,max=200"`
@@ -23,6 +33,9 @@ type Assessment struct {
 	MaxAttempts  int              `json:"max_attempts" gorm:"default:1" validate:"min=1,max=10"`
 	TimeWarning  int              `json:"time_warning" gorm:"default:300"` // Warning time in seconds
 	DueDate      *time.Time       `json:"due_date"`
+
+	// Type indicates who created the assessment (teacher or student)
+	Type AssessmentType `json:"type" gorm:"size:20;default:'teacher';index"`
 
 	// Metadata
 	CreatedBy string    `json:"created_by" gorm:"not null;index;size:255"`

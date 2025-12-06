@@ -31,21 +31,17 @@ func NewGroupService(repo repositories.Repository, db *gorm.DB, logger *slog.Log
 // ===== CORE CRUD OPERATIONS =====
 
 func (s *groupService) Create(ctx context.Context, req *CreateGroupRequest, creatorID string) (*GroupResponse, error) {
-	s.logger.Info("Creating group (class)", "creator_id", creatorID, "name", req.Name)
+	s.logger.Info("Creating group", "creator_id", creatorID, "name", req.Name)
 
 	// Validate request
 	if err := s.validator.Validate(req); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	// IMPORTANT: Only teachers can create groups (classes)
+	// Verify creator exists
 	creator, err := s.repo.User().GetByID(ctx, creatorID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get creator user: %w", err)
-	}
-
-	if creator.Role != models.RoleTeacher && creator.Role != models.RoleAdmin {
-		return nil, NewPermissionError(creatorID, 0, "group", "create", "only teachers can create groups (classes)")
 	}
 
 	// Check if group with same name exists
@@ -57,28 +53,55 @@ func (s *groupService) Create(ctx context.Context, req *CreateGroupRequest, crea
 		return nil, ErrGroupDuplicateName
 	}
 
-	// Create group
-	group := &models.Group{
-		Name:        req.Name,
-		DisplayName: req.DisplayName,
-		Description: "",
-		Type:        req.Type,
-		CreatedBy:   creatorID,
+	// Create group in transaction (to also add creator as owner member)
+	var group *models.Group
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// Create group
+		group = &models.Group{
+			Name:        req.Name,
+			DisplayName: req.DisplayName,
+			Description: "",
+			Type:        req.Type,
+			CreatedBy:   creatorID,
+		}
+
+		if req.Description != nil {
+			group.Description = *req.Description
+		}
+
+		if req.Type == "" {
+			group.Type = "class"
+		}
+
+		if err := s.repo.Group().Create(ctx, tx, group); err != nil {
+			return fmt.Errorf("failed to create group: %w", err)
+		}
+
+		// Add creator as owner member
+		// This allows the creator to be seen in the members list with their role
+		ownerMember := &models.GroupMember{
+			GroupID: group.ID,
+			UserID:  creatorID,
+			Role:    models.GroupMemberRoleOwner,
+		}
+
+		// Determine display role based on user's system role
+		// If creator is a student, they become owner of a student-created group
+		// If creator is a teacher, they become owner of a teacher-created group
+		_ = creator // creator is used for logging/validation if needed
+
+		if err := s.repo.Group().AddMember(ctx, tx, ownerMember); err != nil {
+			return fmt.Errorf("failed to add creator as owner member: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
-	if req.Description != nil {
-		group.Description = *req.Description
-	}
-
-	if req.Type == "" {
-		group.Type = "class"
-	}
-
-	if err = s.repo.Group().Create(ctx, nil, group); err != nil {
-		return nil, fmt.Errorf("failed to create group: %w", err)
-	}
-
-	s.logger.Info("Group (class) created successfully", "group_id", group.ID, "creator", creatorID)
+	s.logger.Info("Group created successfully", "group_id", group.ID, "creator", creatorID)
 
 	return s.buildGroupResponse(ctx, group, creatorID), nil
 }
@@ -234,7 +257,7 @@ func (s *groupService) Delete(ctx context.Context, id uint, userID string) error
 
 func (s *groupService) List(ctx context.Context, filters repositories.GroupFilters, userID string) (*GroupListResponse, error) {
 	// Get groups
-	groups, _, err := s.repo.Group().List(ctx, nil, filters)
+	groups, total, err := s.repo.Group().List(ctx, nil, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list groups: %w", err)
 	}
@@ -258,7 +281,7 @@ func (s *groupService) List(ctx context.Context, filters repositories.GroupFilte
 
 	return &GroupListResponse{
 		Groups: responses,
-		Total:  int64(len(responses)), // Adjusted total based on access
+		Total:  total, // Adjusted total based on access
 		Page:   page,
 		Size:   len(responses),
 	}, nil
@@ -321,55 +344,34 @@ func (s *groupService) Search(ctx context.Context, query string, filters reposit
 // ===== MEMBER MANAGEMENT =====
 
 func (s *groupService) AddMember(ctx context.Context, groupID uint, req *AddGroupMemberRequest, userID string) error {
-	s.logger.Info("Adding member to group (class)", "group_id", groupID, "user_id", userID, "member_id", req.UserID)
+	s.logger.Info("Adding member to group", "group_id", groupID, "user_id", userID, "member_id", req.UserID)
 
 	// Validate request
 	if err := s.validator.Validate(req); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Check permission to manage members (only owner or teacher members can add)
+	// Check permission to manage members (only owner can add)
 	canManage, err := s.CanManageMembers(ctx, groupID, userID)
 	if err != nil {
 		return err
 	}
 	if !canManage {
-		return NewPermissionError(userID, groupID, "group", "add_member", "only class owner or teachers can add members")
+		return NewPermissionError(userID, groupID, "group", "add_member", "only group owner can add members")
 	}
 
-	// Get the user being added to determine their role
-	user, err := s.repo.User().GetByID(ctx, req.UserID)
+	// Verify the user being added exists
+	_, err = s.repo.User().GetByID(ctx, req.UserID)
 	if err != nil {
 		return fmt.Errorf("failed to get user: %w", err)
 	}
 
-	// Determine member role
-	var memberRole models.GroupMemberRole
-	if req.Role != "" {
-		// Use provided role but validate it matches user's system role
-		memberRole = models.GroupMemberRole(req.Role)
-
-		// Validate: teachers can only be added as teacher role, students as student role
-		if user.Role == models.RoleTeacher && memberRole != models.GroupMemberRoleTeacher {
-			return fmt.Errorf("teachers must be added with 'teacher' role")
-		}
-		if user.Role == models.RoleStudent && memberRole != models.GroupMemberRoleStudent {
-			return fmt.Errorf("students must be added with 'student' role")
-		}
-	} else {
-		// Auto-detect role from user's system role
-		if user.Role == models.RoleTeacher || user.Role == models.RoleAdmin {
-			memberRole = models.GroupMemberRoleTeacher
-		} else {
-			memberRole = models.GroupMemberRoleStudent
-		}
-	}
-
-	// Create member
+	// All new members are added with "member" role
+	// Only the creator gets "owner" role (set during group creation)
 	member := &models.GroupMember{
 		GroupID: groupID,
 		UserID:  req.UserID,
-		Role:    memberRole,
+		Role:    models.GroupMemberRoleMember,
 	}
 
 	if err = s.repo.Group().AddMember(ctx, nil, member); err != nil {
@@ -379,53 +381,42 @@ func (s *groupService) AddMember(ctx context.Context, groupID uint, req *AddGrou
 		return fmt.Errorf("failed to add member to group: %w", err)
 	}
 
-	s.logger.Info("Member added to group (class) successfully", "group_id", groupID, "member_id", req.UserID, "role", memberRole)
+	s.logger.Info("Member added to group successfully", "group_id", groupID, "member_id", req.UserID)
 
 	return nil
 }
 
 func (s *groupService) RemoveMember(ctx context.Context, groupID uint, memberUserID string, userID string) error {
-	s.logger.Info("Removing member from group (class)", "group_id", groupID, "user_id", userID, "member_id", memberUserID)
+	s.logger.Info("Removing member from group", "group_id", groupID, "user_id", userID, "member_id", memberUserID)
 
-	// Check permission to manage members
+	// Check permission to manage members (owner or co-owner)
 	canManage, err := s.CanManageMembers(ctx, groupID, userID)
 	if err != nil {
 		return err
 	}
 	if !canManage {
-		return NewPermissionError(userID, groupID, "group", "remove_member", "only class owner or teachers can remove members")
+		return NewPermissionError(userID, groupID, "group", "remove_member", "only owner or co-owner can remove members")
 	}
 
-	// Check if trying to remove the owner
-	isOwner, err := s.IsOwner(ctx, groupID, memberUserID)
+	// Get caller's role and target's role
+	callerRole, err := s.getMemberRole(ctx, groupID, userID)
 	if err != nil {
 		return err
 	}
-	if isOwner {
+
+	targetRole, err := s.getMemberRole(ctx, groupID, memberUserID)
+	if err != nil {
+		return err
+	}
+
+	// Cannot remove owner
+	if targetRole == models.GroupMemberRoleOwner {
 		return ErrGroupCannotRemoveOwner
 	}
 
-	// Teachers can only remove students, not other teachers (unless they are the owner)
-	isCallerOwner, err := s.IsOwner(ctx, groupID, userID)
-	if err != nil {
-		return err
-	}
-
-	if !isCallerOwner {
-		// Non-owner teachers can only remove students
-		members, err := s.repo.Group().GetMembers(ctx, nil, groupID)
-		if err != nil {
-			return fmt.Errorf("failed to get members: %w", err)
-		}
-
-		for _, member := range members {
-			if member.UserID == memberUserID {
-				if member.Role == models.GroupMemberRoleTeacher {
-					return NewPermissionError(userID, groupID, "group", "remove_member", "only class owner can remove teachers")
-				}
-				break
-			}
-		}
+	// Co-owner cannot remove other co-owners, only owner can
+	if callerRole == models.GroupMemberRoleCoOwner && targetRole == models.GroupMemberRoleCoOwner {
+		return NewPermissionError(userID, groupID, "group", "remove_member", "co-owner cannot remove other co-owners")
 	}
 
 	// Remove member
@@ -436,66 +427,75 @@ func (s *groupService) RemoveMember(ctx context.Context, groupID uint, memberUse
 		return fmt.Errorf("failed to remove member from group: %w", err)
 	}
 
-	s.logger.Info("Member removed from group (class) successfully", "group_id", groupID, "member_id", memberUserID)
+	s.logger.Info("Member removed from group successfully", "group_id", groupID, "member_id", memberUserID)
 
 	return nil
 }
 
 func (s *groupService) UpdateMemberRole(ctx context.Context, groupID uint, memberUserID string, req *UpdateMemberRoleRequest, userID string) error {
-	s.logger.Info("Updating member role", "group_id", groupID, "user_id", userID, "member_id", memberUserID)
+	s.logger.Info("Updating member role", "group_id", groupID, "user_id", userID, "member_id", memberUserID, "new_role", req.Role)
 
 	// Validate request
 	if err := s.validator.Validate(req); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Only owner can update member roles
-	isOwner, err := s.IsOwner(ctx, groupID, userID)
-	if err != nil {
-		return err
-	}
-	if !isOwner {
-		return NewPermissionError(userID, groupID, "group", "update_member_role", "only class owner can change member roles")
-	}
-
-	// Check if trying to change owner's role (owner is not a member)
-	isTargetOwner, err := s.IsOwner(ctx, groupID, memberUserID)
-	if err != nil {
-		return err
-	}
-	if isTargetOwner {
-		return fmt.Errorf("cannot change class owner's role")
-	}
-
-	// Get the user to validate role matches their system role
-	user, err := s.repo.User().GetByID(ctx, memberUserID)
-	if err != nil {
-		return fmt.Errorf("failed to get user: %w", err)
-	}
-
 	newRole := models.GroupMemberRole(req.Role)
 
-	// Validate role matches user's system role
-	if user.Role == models.RoleTeacher && newRole != models.GroupMemberRoleTeacher {
-		return fmt.Errorf("teachers must have 'teacher' role in class")
-	}
-	if user.Role == models.RoleStudent && newRole != models.GroupMemberRoleStudent {
-		return fmt.Errorf("students must have 'student' role in class")
+	// Validate new role is valid
+	if newRole != models.GroupMemberRoleCoOwner && newRole != models.GroupMemberRoleMember {
+		return fmt.Errorf("invalid role: must be 'co-owner' or 'member'")
 	}
 
-	// Create member object with new role
+	// Get caller's role
+	callerRole, err := s.getMemberRole(ctx, groupID, userID)
+	if err != nil {
+		return err
+	}
+
+	// Get target member's current role
+	targetRole, err := s.getMemberRole(ctx, groupID, memberUserID)
+	if err != nil {
+		return err
+	}
+
+	// Cannot change owner's role
+	if targetRole == models.GroupMemberRoleOwner {
+		return fmt.Errorf("cannot change owner's role")
+	}
+
+	// Permission check based on caller's role
+	switch callerRole {
+	case models.GroupMemberRoleOwner:
+		// Owner can promote/demote anyone (except owner role)
+		// Can: member -> co-owner, co-owner -> member
+
+	case models.GroupMemberRoleCoOwner:
+		// Co-owner can only promote member -> co-owner
+		// Cannot demote co-owner to member
+		if targetRole == models.GroupMemberRoleCoOwner && newRole == models.GroupMemberRoleMember {
+			return NewPermissionError(userID, groupID, "group", "update_member_role", "co-owner cannot demote other co-owners")
+		}
+		if newRole != models.GroupMemberRoleCoOwner {
+			return NewPermissionError(userID, groupID, "group", "update_member_role", "co-owner can only promote members to co-owner")
+		}
+
+	default:
+		return NewPermissionError(userID, groupID, "group", "update_member_role", "only owner or co-owner can change member roles")
+	}
+
+	// Update member role
 	member := &models.GroupMember{
 		GroupID: groupID,
 		UserID:  memberUserID,
 		Role:    newRole,
 	}
 
-	// Update member role directly (preserves joined_at and other metadata)
 	if err = s.repo.Group().UpdateMember(ctx, nil, member); err != nil {
 		return fmt.Errorf("failed to update member role: %w", err)
 	}
 
-	s.logger.Info("Member role updated successfully", "group_id", groupID, "member_id", memberUserID, "role", req.Role)
+	s.logger.Info("Member role updated successfully", "group_id", groupID, "member_id", memberUserID, "new_role", newRole)
 
 	return nil
 }
@@ -507,7 +507,7 @@ func (s *groupService) GetMembers(ctx context.Context, groupID uint, userID stri
 		return nil, err
 	}
 	if !canAccess {
-		return nil, NewPermissionError(userID, groupID, "group", "get_members", "not a member of this class")
+		return nil, NewPermissionError(userID, groupID, "group", "get_members", "not a member of this group")
 	}
 
 	// Get members
@@ -516,23 +516,27 @@ func (s *groupService) GetMembers(ctx context.Context, groupID uint, userID stri
 		return nil, fmt.Errorf("failed to get group members: %w", err)
 	}
 
-	// Build responses
-	canManage, _ := s.CanManageMembers(ctx, groupID, userID)
-	isOwner, _ := s.IsOwner(ctx, groupID, userID)
+	// Get caller's role for permission calculation
+	callerRole, _ := s.getMemberRole(ctx, groupID, userID)
 
 	responses := make([]*GroupMemberResponse, 0, len(members))
 	for _, member := range members {
 		canRemove := false
 		canModify := false
 
-		if isOwner {
-			// Owner can remove and modify anyone
-			canRemove = true
-			canModify = true
-		} else if canManage && member.Role == models.GroupMemberRoleStudent {
-			// Teachers can only remove/modify students
-			canRemove = true
-			canModify = false // Only owner can modify roles
+		switch callerRole {
+		case models.GroupMemberRoleOwner:
+			// Owner can remove anyone except self, can modify anyone except owner
+			if member.Role != models.GroupMemberRoleOwner {
+				canRemove = true
+				canModify = true
+			}
+		case models.GroupMemberRoleCoOwner:
+			// Co-owner can remove/modify members only (not owner or other co-owners)
+			if member.Role == models.GroupMemberRoleMember {
+				canRemove = true
+				canModify = true // Can promote to co-owner
+			}
 		}
 
 		responses = append(responses, &GroupMemberResponse{
@@ -595,7 +599,7 @@ func (s *groupService) CanDelete(ctx context.Context, groupID uint, userID strin
 }
 
 func (s *groupService) CanManageMembers(ctx context.Context, groupID uint, userID string) (bool, error) {
-	// Owner can manage
+	// Owner can manage (check via CreatedBy)
 	isOwner, err := s.IsOwner(ctx, groupID, userID)
 	if err != nil {
 		return false, err
@@ -604,15 +608,18 @@ func (s *groupService) CanManageMembers(ctx context.Context, groupID uint, userI
 		return true, nil
 	}
 
-	// Teacher members can also add/remove students
+	// Check if user has owner or co-owner role in group_members
 	members, err := s.repo.Group().GetMembers(ctx, nil, groupID)
 	if err != nil {
 		return false, err
 	}
 
 	for _, member := range members {
-		if member.UserID == userID && member.Role == models.GroupMemberRoleTeacher {
-			return true, nil
+		if member.UserID == userID {
+			// Owner or co-owner can manage members
+			if member.Role == models.GroupMemberRoleOwner || member.Role == models.GroupMemberRoleCoOwner {
+				return true, nil
+			}
 		}
 	}
 
@@ -675,4 +682,20 @@ func (s *groupService) buildGroupResponse(ctx context.Context, group *models.Gro
 		IsMember:    isMember,
 		MemberRole:  memberRole,
 	}
+}
+
+// getMemberRole returns the role of a user in a group
+func (s *groupService) getMemberRole(ctx context.Context, groupID uint, userID string) (models.GroupMemberRole, error) {
+	members, err := s.repo.Group().GetMembers(ctx, nil, groupID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get members: %w", err)
+	}
+
+	for _, member := range members {
+		if member.UserID == userID {
+			return member.Role, nil
+		}
+	}
+
+	return "", fmt.Errorf("user is not a member of this group")
 }

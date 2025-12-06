@@ -61,13 +61,13 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 		// Assessment routes
 		assessments := v1.Group("/assessments")
 		{
-			// Create/modify assessments - Teachers and Admins only
-			assessments.POST("", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.CreateAssessment)
-			assessments.PUT("/:id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.UpdateAssessment)
-			assessments.DELETE("/:id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.DeleteAssessment)
-			assessments.PUT("/:id/status", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.UpdateAssessmentStatus)
-			assessments.POST("/:id/publish", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.PublishAssessment)
-			assessments.POST("/:id/archive", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.ArchiveAssessment)
+			// Create/modify assessments - All authenticated users (ownership checked at service layer)
+			assessments.POST("", hm.assessmentHandler.CreateAssessment)
+			assessments.PUT("/:id", hm.assessmentHandler.UpdateAssessment)
+			assessments.DELETE("/:id", hm.assessmentHandler.DeleteAssessment)
+			assessments.PUT("/:id/status", hm.assessmentHandler.UpdateAssessmentStatus)
+			assessments.POST("/:id/publish", hm.assessmentHandler.PublishAssessment)
+			assessments.POST("/:id/archive", hm.assessmentHandler.ArchiveAssessment)
 
 			// View assessments - All authenticated users
 			assessments.GET("", hm.assessmentHandler.ListAssessments)
@@ -75,31 +75,31 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			assessments.GET("/:id", hm.assessmentHandler.GetAssessment)
 			assessments.GET("/:id/details", hm.assessmentHandler.GetAssessmentWithDetails)
 
-			// Stats - Teachers and Admins only
-			assessments.GET("/:id/stats", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.GetAssessmentStats)
+			// Stats - Ownership checked at service layer
+			assessments.GET("/:id/stats", hm.assessmentHandler.GetAssessmentStats)
 
-			// Assessment question management - Teachers and Admins only
+			// Assessment question management - Ownership checked at service layer
 			// Single question operations
-			assessments.POST("/:id/questions/:question_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.AddQuestionToAssessment)
-			assessments.DELETE("/:id/questions/:question_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.RemoveQuestionFromAssessment)
-			assessments.PUT("/:id/questions/:question_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.UpdateAssessmentQuestion)
+			assessments.POST("/:id/questions/:question_id", hm.assessmentHandler.AddQuestionToAssessment)
+			assessments.DELETE("/:id/questions/:question_id", hm.assessmentHandler.RemoveQuestionFromAssessment)
+			assessments.PUT("/:id/questions/:question_id", hm.assessmentHandler.UpdateAssessmentQuestion)
 
 			// Batch operations
-			assessments.POST("/:id/questions/batch", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.AddQuestionsToAssessment)
-			assessments.POST("/:id/questions/auto-assign", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.AutoAssignQuestionsToAssessment)
-			assessments.DELETE("/:id/questions/batch", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.RemoveQuestionsFromAssessment)
-			assessments.PUT("/:id/questions/batch", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.UpdateAssessmentQuestionsBatch)
+			assessments.POST("/:id/questions/batch", hm.assessmentHandler.AddQuestionsToAssessment)
+			assessments.POST("/:id/questions/auto-assign", hm.assessmentHandler.AutoAssignQuestionsToAssessment)
+			assessments.DELETE("/:id/questions/batch", hm.assessmentHandler.RemoveQuestionsFromAssessment)
+			assessments.PUT("/:id/questions/batch", hm.assessmentHandler.UpdateAssessmentQuestionsBatch)
 
 			// Question ordering
-			assessments.PUT("/:id/questions/reorder", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.ReorderAssessmentQuestions)
+			assessments.PUT("/:id/questions/reorder", hm.assessmentHandler.ReorderAssessmentQuestions)
 
-			// Creator-specific routes - Teachers and Admins only
-			assessments.GET("/creator/:creator_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.GetAssessmentsByCreator)
-			assessments.GET("/creator/:creator_id/stats", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentHandler.GetCreatorStats)
+			// Creator-specific routes - Ownership checked at service layer
+			assessments.GET("/creator/:creator_id", hm.assessmentHandler.GetAssessmentsByCreator)
+			assessments.GET("/creator/:creator_id/stats", hm.assessmentHandler.GetCreatorStats)
 
-			// Assessment-Group assignment routes - Teachers and Admins only
-			assessments.POST("/:id/groups", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentGroupHandler.AssignToGroups)
-			assessments.DELETE("/:id/groups", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.assessmentGroupHandler.UnassignFromGroups)
+			// Assessment-Group assignment routes - Permission checked at service layer
+			assessments.POST("/:id/groups", hm.assessmentGroupHandler.AssignToGroups)
+			assessments.DELETE("/:id/groups", hm.assessmentGroupHandler.UnassignFromGroups)
 			assessments.GET("/:id/groups", hm.assessmentGroupHandler.GetAssignedGroups)
 		}
 
@@ -242,8 +242,8 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 		// Group (Class) routes
 		groups := v1.Group("/groups")
 		{
-			// Create group - Teachers and Admins only
-			groups.POST("", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.groupHandler.CreateGroup)
+			// Create group - All authenticated users (creator becomes owner)
+			groups.POST("", hm.groupHandler.CreateGroup)
 
 			// View groups - All authenticated users (service layer filters by access)
 			groups.GET("", hm.groupHandler.ListGroups)

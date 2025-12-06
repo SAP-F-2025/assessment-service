@@ -57,6 +57,14 @@ func (s *assessmentService) Create(ctx context.Context, req *CreateAssessmentReq
 	// Use transaction for complex operation
 	var assessment *models.Assessment
 	err = s.withTx(ctx, func(tx *gorm.DB) error {
+		// Determine assessment type based on creator's role
+		// Students create peer assessments, Teachers create formal assessments
+		assessmentType := models.AssessmentTypeTeacher
+		userRole, roleErr := s.getUserRole(ctx, creatorID)
+		if roleErr == nil && userRole == models.RoleStudent {
+			assessmentType = models.AssessmentTypeStudent
+		}
+
 		// Create assessment
 		assessment = &models.Assessment{
 			Title:        req.Title,
@@ -69,6 +77,7 @@ func (s *assessmentService) Create(ctx context.Context, req *CreateAssessmentReq
 			DueDate:      req.DueDate,
 			CreatedBy:    creatorID,
 			Version:      1,
+			Type:         assessmentType,
 		}
 
 		if req.TimeWarning != nil {
@@ -248,21 +257,21 @@ func (s *assessmentService) List(ctx context.Context, filters repositories.Asses
 	}
 
 	// Apply role-based filtering
+	// This is the CRUD management API - users see only their own assessments
 	switch userRole {
 	case models.RoleStudent:
-		// Students: only Active assessments that haven't expired
-		activeStatus := models.StatusActive
-		filters.Status = &activeStatus
+		// Students see only their own assessments (peer assessments they created)
+		filters.CreatedBy = &userID
 
 	case models.RoleTeacher:
-		// Teachers: only their own assessments
+		// Teachers see only their own assessments
 		filters.CreatedBy = &userID
 
 	case models.RoleAdmin:
-		// Admins: no additional filtering (can see all)
+		// Admins can see all assessments (for administration purposes)
 
 	default:
-		// Unknown role: no access
+		// Unknown role: return empty list
 		return &AssessmentListResponse{
 			Assessments: []*AssessmentResponse{},
 			Total:       0,
@@ -274,20 +283,6 @@ func (s *assessmentService) List(ctx context.Context, filters repositories.Asses
 	assessments, total, err := s.repo.Assessment().List(ctx, s.db, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list assessments: %w", err)
-	}
-
-	// For students, filter out expired assessments (where due_date has passed)
-	if userRole == models.RoleStudent {
-		now := time.Now()
-		filteredAssessments := make([]*models.Assessment, 0, len(assessments))
-		for _, assessment := range assessments {
-			// Include if no due_date or due_date is in the future
-			if assessment.DueDate == nil || assessment.DueDate.After(now) {
-				filteredAssessments = append(filteredAssessments, assessment)
-			}
-		}
-		assessments = filteredAssessments
-		total = int64(len(filteredAssessments))
 	}
 
 	// Build response
