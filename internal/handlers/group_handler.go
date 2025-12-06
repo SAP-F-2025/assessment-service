@@ -630,6 +630,10 @@ func (h *GroupHandler) handleServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, ErrorResponse{
 			Message: "Forbidden",
 		})
+	case errors.Is(err, services.ErrGroupInvalidRole):
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid group member role",
+		})
 	default:
 		// Log unexpected errors
 		h.LogError(c, err, "Unexpected error in group handler")

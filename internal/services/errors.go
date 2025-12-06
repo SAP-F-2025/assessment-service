@@ -68,6 +68,7 @@ var (
 	ErrGroupMemberExists      = errors.New("user is already a member of this group")
 	ErrGroupMemberNotFound    = errors.New("user is not a member of this group")
 	ErrGroupCannotRemoveOwner = errors.New("cannot remove group owner")
+	ErrGroupInvalidRole       = errors.New("invalid group member role")
 
 	// Assessment-Group assignment errors
 	ErrAssessmentGroupNotFound        = errors.New("assessment-group assignment not found")

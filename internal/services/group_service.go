@@ -256,32 +256,39 @@ func (s *groupService) Delete(ctx context.Context, id uint, userID string) error
 // ===== LIST AND SEARCH OPERATIONS =====
 
 func (s *groupService) List(ctx context.Context, filters repositories.GroupFilters, userID string) (*GroupListResponse, error) {
+	// Check user role for filtering
+	userRole, err := s.getUserRole(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply membership filter based on role
+	// Admin can see all groups, others only see groups they are members of
+	if userRole != models.RoleAdmin {
+		filters.MemberUserID = userID
+	}
+
 	// Get groups
 	groups, total, err := s.repo.Group().List(ctx, nil, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list groups: %w", err)
 	}
 
-	// Build responses - only include groups user can access
+	// Build responses
 	responses := make([]*GroupResponse, 0, len(groups))
 	for _, group := range groups {
-		// Check if user can access this group
-		canAccess, err := s.CanAccess(ctx, group.ID, userID)
-		if err != nil || !canAccess {
-			continue
-		}
 		responses = append(responses, s.buildGroupResponse(ctx, group, userID))
 	}
 
 	// Calculate pagination
-	page := (filters.Offset / filters.Limit) + 1
-	if filters.Limit == 0 {
-		page = 1
+	page := 1
+	if filters.Limit > 0 {
+		page = (filters.Offset / filters.Limit) + 1
 	}
 
 	return &GroupListResponse{
 		Groups: responses,
-		Total:  total, // Adjusted total based on access
+		Total:  total,
 		Page:   page,
 		Size:   len(responses),
 	}, nil
@@ -366,12 +373,18 @@ func (s *groupService) AddMember(ctx context.Context, groupID uint, req *AddGrou
 		return fmt.Errorf("failed to get user: %w", err)
 	}
 
+	if req.Role != string(models.GroupMemberRoleMember) && req.Role != string(models.GroupMemberRoleCoOwner) {
+		return ErrGroupInvalidRole
+	}
+
+	newRole := models.GroupMemberRole(req.Role)
+
 	// All new members are added with "member" role
 	// Only the creator gets "owner" role (set during group creation)
 	member := &models.GroupMember{
 		GroupID: groupID,
 		UserID:  req.UserID,
-		Role:    models.GroupMemberRoleMember,
+		Role:    newRole,
 	}
 
 	if err = s.repo.Group().AddMember(ctx, nil, member); err != nil {
@@ -389,7 +402,7 @@ func (s *groupService) AddMember(ctx context.Context, groupID uint, req *AddGrou
 func (s *groupService) RemoveMember(ctx context.Context, groupID uint, memberUserID string, userID string) error {
 	s.logger.Info("Removing member from group", "group_id", groupID, "user_id", userID, "member_id", memberUserID)
 
-	// Check permission to manage members (owner or co-owner)
+	// Check permission to manage members (includes Admin bypass)
 	canManage, err := s.CanManageMembers(ctx, groupID, userID)
 	if err != nil {
 		return err
@@ -398,12 +411,14 @@ func (s *groupService) RemoveMember(ctx context.Context, groupID uint, memberUse
 		return NewPermissionError(userID, groupID, "group", "remove_member", "only owner or co-owner can remove members")
 	}
 
-	// Get caller's role and target's role
-	callerRole, err := s.getMemberRole(ctx, groupID, userID)
-	if err != nil {
-		return err
+	// Check if caller is Admin (doesn't need to be member)
+	isAdmin := false
+	userRole, err := s.getUserRole(ctx, userID)
+	if err == nil && userRole == models.RoleAdmin {
+		isAdmin = true
 	}
 
+	// Get target's role
 	targetRole, err := s.getMemberRole(ctx, groupID, memberUserID)
 	if err != nil {
 		return err
@@ -414,9 +429,16 @@ func (s *groupService) RemoveMember(ctx context.Context, groupID uint, memberUse
 		return ErrGroupCannotRemoveOwner
 	}
 
-	// Co-owner cannot remove other co-owners, only owner can
-	if callerRole == models.GroupMemberRoleCoOwner && targetRole == models.GroupMemberRoleCoOwner {
-		return NewPermissionError(userID, groupID, "group", "remove_member", "co-owner cannot remove other co-owners")
+	// If not Admin, check caller's role for co-owner restrictions
+	if !isAdmin {
+		callerRole, err := s.getMemberRole(ctx, groupID, userID)
+		if err != nil {
+			return err
+		}
+		// Co-owner cannot remove other co-owners, only owner can
+		if callerRole == models.GroupMemberRoleCoOwner && targetRole == models.GroupMemberRoleCoOwner {
+			return NewPermissionError(userID, groupID, "group", "remove_member", "co-owner cannot remove other co-owners")
+		}
 	}
 
 	// Remove member
@@ -447,10 +469,11 @@ func (s *groupService) UpdateMemberRole(ctx context.Context, groupID uint, membe
 		return fmt.Errorf("invalid role: must be 'co-owner' or 'member'")
 	}
 
-	// Get caller's role
-	callerRole, err := s.getMemberRole(ctx, groupID, userID)
-	if err != nil {
-		return err
+	// Check if caller is Admin (doesn't need to be member)
+	isAdmin := false
+	userRole, err := s.getUserRole(ctx, userID)
+	if err == nil && userRole == models.RoleAdmin {
+		isAdmin = true
 	}
 
 	// Get target member's current role
@@ -464,24 +487,30 @@ func (s *groupService) UpdateMemberRole(ctx context.Context, groupID uint, membe
 		return fmt.Errorf("cannot change owner's role")
 	}
 
-	// Permission check based on caller's role
-	switch callerRole {
-	case models.GroupMemberRoleOwner:
-		// Owner can promote/demote anyone (except owner role)
-		// Can: member -> co-owner, co-owner -> member
-
-	case models.GroupMemberRoleCoOwner:
-		// Co-owner can only promote member -> co-owner
-		// Cannot demote co-owner to member
-		if targetRole == models.GroupMemberRoleCoOwner && newRole == models.GroupMemberRoleMember {
-			return NewPermissionError(userID, groupID, "group", "update_member_role", "co-owner cannot demote other co-owners")
-		}
-		if newRole != models.GroupMemberRoleCoOwner {
-			return NewPermissionError(userID, groupID, "group", "update_member_role", "co-owner can only promote members to co-owner")
+	// If not Admin, check caller's role for permission restrictions
+	if !isAdmin {
+		callerRole, err := s.getMemberRole(ctx, groupID, userID)
+		if err != nil {
+			return err
 		}
 
-	default:
-		return NewPermissionError(userID, groupID, "group", "update_member_role", "only owner or co-owner can change member roles")
+		// Permission check based on caller's role
+		switch callerRole {
+		case models.GroupMemberRoleOwner:
+			// Owner can promote/demote anyone (except owner role)
+
+		case models.GroupMemberRoleCoOwner:
+			// Co-owner can only promote member -> co-owner
+			if targetRole == models.GroupMemberRoleCoOwner && newRole == models.GroupMemberRoleMember {
+				return NewPermissionError(userID, groupID, "group", "update_member_role", "co-owner cannot demote other co-owners")
+			}
+			if newRole != models.GroupMemberRoleCoOwner {
+				return NewPermissionError(userID, groupID, "group", "update_member_role", "co-owner can only promote members to co-owner")
+			}
+
+		default:
+			return NewPermissionError(userID, groupID, "group", "update_member_role", "only owner or co-owner can change member roles")
+		}
 	}
 
 	// Update member role
@@ -570,6 +599,12 @@ func (s *groupService) GetMemberGroups(ctx context.Context, memberUserID string)
 // ===== PERMISSION CHECKS =====
 
 func (s *groupService) CanAccess(ctx context.Context, groupID uint, userID string) (bool, error) {
+	// Admin can access all groups
+	userRole, err := s.getUserRole(ctx, userID)
+	if err == nil && userRole == models.RoleAdmin {
+		return true, nil
+	}
+
 	// Owner can always access
 	isOwner, err := s.IsOwner(ctx, groupID, userID)
 	if err != nil {
@@ -580,25 +615,36 @@ func (s *groupService) CanAccess(ctx context.Context, groupID uint, userID strin
 	}
 
 	// Members can access
-	isMember, err := s.IsMember(ctx, groupID, userID)
-	if err != nil {
-		return false, err
-	}
-
-	return isMember, nil
+	return s.IsMember(ctx, groupID, userID)
 }
 
 func (s *groupService) CanEdit(ctx context.Context, groupID uint, userID string) (bool, error) {
-	// Only owner (teacher who created the class) can edit
+	// Admin can edit any group
+	userRole, err := s.getUserRole(ctx, userID)
+	if err == nil && userRole == models.RoleAdmin {
+		return true, nil
+	}
+	// Owner can edit their own groups
 	return s.IsOwner(ctx, groupID, userID)
 }
 
 func (s *groupService) CanDelete(ctx context.Context, groupID uint, userID string) (bool, error) {
-	// Only owner can delete
+	// Admin can delete any group
+	userRole, err := s.getUserRole(ctx, userID)
+	if err == nil && userRole == models.RoleAdmin {
+		return true, nil
+	}
+	// Owner can delete their own groups
 	return s.IsOwner(ctx, groupID, userID)
 }
 
 func (s *groupService) CanManageMembers(ctx context.Context, groupID uint, userID string) (bool, error) {
+	// Admin can manage members of any group
+	userRole, err := s.getUserRole(ctx, userID)
+	if err == nil && userRole == models.RoleAdmin {
+		return true, nil
+	}
+
 	// Owner can manage (check via CreatedBy)
 	isOwner, err := s.IsOwner(ctx, groupID, userID)
 	if err != nil {
@@ -698,4 +744,13 @@ func (s *groupService) getMemberRole(ctx context.Context, groupID uint, userID s
 	}
 
 	return "", fmt.Errorf("user is not a member of this group")
+}
+
+// getUserRole returns the system role of a user
+func (s *groupService) getUserRole(ctx context.Context, userID string) (models.UserRole, error) {
+	user, err := s.repo.User().GetByID(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get user: %w", err)
+	}
+	return user.Role, nil
 }

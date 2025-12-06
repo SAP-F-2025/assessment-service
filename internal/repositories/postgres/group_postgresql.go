@@ -120,18 +120,24 @@ func (g *GroupPostgreSQL) List(ctx context.Context, tx *gorm.DB, filters reposit
 
 	query := db.WithContext(ctx).Model(&models.Group{})
 
-	// Apply filters
+	// Apply membership filter - JOIN with group_members table
+	// This is the key filter for access control
+	if filters.MemberUserID != "" {
+		query = query.Joins("INNER JOIN group_members ON group_members.group_id = groups.id AND group_members.user_id = ? AND group_members.deleted_at IS NULL", filters.MemberUserID)
+	}
+
+	// Apply other filters
 	if filters.Query != "" {
 		searchPattern := "%" + filters.Query + "%"
-		query = query.Where("name ILIKE ? OR display_name ILIKE ?", searchPattern, searchPattern)
+		query = query.Where("groups.name ILIKE ? OR groups.display_name ILIKE ?", searchPattern, searchPattern)
 	}
 
 	if filters.Type != "" {
-		query = query.Where("type = ?", filters.Type)
+		query = query.Where("groups.type = ?", filters.Type)
 	}
 
 	if filters.CreatedBy != "" {
-		query = query.Where("created_by = ?", filters.CreatedBy)
+		query = query.Where("groups.created_by = ?", filters.CreatedBy)
 	}
 
 	// Get total count
