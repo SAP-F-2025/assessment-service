@@ -305,6 +305,10 @@ func (h *ImportExportHandler) DownloadTemplate(c *gin.Context) {
 		{"multiple_choice", "Which are prime numbers?", "2", "4", "5", "8", "A,C", 15, "medium", "math,numbers", "2 and 5 are prime"},
 		{"true_false", "The Earth is flat.", "", "", "", "", "False", 5, "easy", "science,geography", "The Earth is approximately spherical"},
 		{"essay", "Explain the water cycle.", "", "", "", "", "", 20, "hard", "science,geography", ""},
+		{"short_answer", "What is the capital of France?", "", "", "", "", "Paris|paris|PARIS", 10, "easy", "geography", "Paris is the capital city"},
+		{"fill_blank", "The {___} is the capital of {___}.", "", "", "", "", "Paris|France", 15, "medium", "geography", "Fill in the blanks"},
+		{"matching", "Match animals to their categories", "", "", "", "", "Dog:Mammal|Cat:Mammal|Eagle:Bird|Shark:Fish", 20, "medium", "biology", "Match each animal"},
+		{"ordering", "Put the steps in order", "", "", "", "", "First > Second > Third > Fourth", 15, "easy", "process", "Correct sequence"},
 	}
 
 	for rowIdx, row := range examples {
@@ -322,7 +326,7 @@ func (h *ImportExportHandler) DownloadTemplate(c *gin.Context) {
 		"D": 15, // option_b
 		"E": 15, // option_c
 		"F": 15, // option_d
-		"G": 15, // correct_answer
+		"G": 40, // correct_answer (wider for complex types)
 		"H": 10, // points
 		"I": 12, // difficulty
 		"J": 20, // tags
@@ -340,24 +344,35 @@ func (h *ImportExportHandler) DownloadTemplate(c *gin.Context) {
 		{"Import Template Instructions"},
 		{""},
 		{"Column", "Description", "Required", "Example Values"},
-		{"question_type", "Type of question", "Yes", "multiple_choice, true_false, essay"},
+		{"question_type", "Type of question", "Yes", "multiple_choice, true_false, essay, short_answer, fill_blank, matching, ordering"},
 		{"question_text", "The question text", "Yes", "What is the capital of France?"},
-		{"option_a", "First option (for multiple choice)", "Depends", "Paris"},
-		{"option_b", "Second option (for multiple choice)", "Depends", "London"},
+		{"option_a", "First option (for multiple choice only)", "Depends", "Paris"},
+		{"option_b", "Second option (for multiple choice only)", "Depends", "London"},
 		{"option_c", "Third option (optional)", "No", "Berlin"},
 		{"option_d", "Fourth option (optional)", "No", "Madrid"},
-		{"correct_answer", "Correct answer(s)", "Yes*", "A, B, A,C, True, False"},
+		{"correct_answer", "Correct answer(s) - format depends on type", "Yes*", "See format guide below"},
 		{"points", "Points for this question", "No", "10 (default)"},
 		{"difficulty", "Difficulty level", "No", "easy, medium (default), hard"},
 		{"tags", "Comma-separated tags", "No", "math,algebra,equations"},
 		{"explanation", "Explanation for the answer", "No", "Paris is the capital of France"},
 		{""},
-		{"Notes:"},
-		{"- For multiple_choice: At least 2 options (A and B) are required"},
-		{"- For true_false: correct_answer should be 'True' or 'False'"},
-		{"- For essay: correct_answer is not required"},
-		{"- Multiple correct answers can be specified as 'A,C' or 'A,B,D'"},
-		{"- Tags are separated by commas without spaces"},
+		{"=== CORRECT ANSWER FORMAT GUIDE ==="},
+		{""},
+		{"QUESTION TYPE", "FORMAT", "EXAMPLE"},
+		{"multiple_choice", "Single letter or comma-separated letters", "B or A,C,D"},
+		{"true_false", "True or False", "True or False"},
+		{"essay", "Leave empty", ""},
+		{"short_answer", "Accepted answers separated by |", "Paris|paris|PARIS"},
+		{"fill_blank", "Answers for each blank separated by |", "Paris|France (for 2 blanks)"},
+		{"matching", "Pairs in format left:right separated by |", "Dog:Mammal|Cat:Mammal|Eagle:Bird"},
+		{"ordering", "Items in correct order separated by >", "First > Second > Third > Fourth"},
+		{""},
+		{"=== SPECIAL NOTES ==="},
+		{""},
+		{"fill_blank:", "Use {___} in question_text to mark blanks. Number of answers must match number of blanks."},
+		{"fill_blank:", "For multiple accepted answers per blank, use ||| (triple pipe): Paris|||paris|France"},
+		{"matching:", "Each pair format is 'left:right'. Minimum 2 pairs required."},
+		{"ordering:", "Items will be randomized during test. Minimum 2 items required."},
 	}
 
 	for rowIdx, row := range instructions {
