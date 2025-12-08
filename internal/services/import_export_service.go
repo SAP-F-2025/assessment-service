@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -36,11 +37,13 @@ type ImportExportService interface {
 }
 
 type importExportService struct {
-	repo      repositories.Repository
-	logger    *slog.Logger
-	validator *validator.Validator
+	repo              repositories.Repository
+	logger            *slog.Logger
+	validator         *validator.Validator
+	assessmentService AssessmentService // Injected dependency
 }
 
+// NewImportExportService creates a new ImportExportService with dependencies
 func NewImportExportService(repo repositories.Repository, logger *slog.Logger, validator *validator.Validator) ImportExportService {
 	return &importExportService{
 		repo:      repo,
@@ -49,7 +52,20 @@ func NewImportExportService(repo repositories.Repository, logger *slog.Logger, v
 	}
 }
 
+// NewImportExportServiceWithDeps creates a new ImportExportService with all dependencies injected
+func NewImportExportServiceWithDeps(repo repositories.Repository, logger *slog.Logger, validator *validator.Validator, assessmentService AssessmentService) ImportExportService {
+	return &importExportService{
+		repo:              repo,
+		logger:            logger,
+		validator:         validator,
+		assessmentService: assessmentService,
+	}
+}
+
 // ===== IMPORT OPERATIONS =====
+
+// MaxImportRows is the maximum number of rows allowed in a single import (excluding header)
+const MaxImportRows = 1000
 
 type ImportResult struct {
 	JobID         string                         `json:"job_id"`
@@ -58,7 +74,7 @@ type ImportResult struct {
 	SuccessCount  int                            `json:"success_count"`
 	ErrorCount    int                            `json:"error_count"`
 	Errors        []models.ImportValidationError `json:"errors"`
-	Questions     []*models.Question             `json:"questions,omitempty"`
+	QuestionIDs   []uint                         `json:"question_ids,omitempty"` // Return only IDs instead of full objects
 	Status        models.ImportJobStatus         `json:"status"`
 }
 
@@ -91,6 +107,12 @@ func (s *importExportService) ImportQuestionsFromCSV(ctx context.Context, reader
 		return nil, NewValidationError("file", "CSV must have header row and at least one data row", len(records))
 	}
 
+	// Validate max rows limit
+	dataRows := len(records) - 1
+	if dataRows > MaxImportRows {
+		return nil, NewValidationError("file", fmt.Sprintf("too many rows (%d). Maximum allowed: %d", dataRows, MaxImportRows), dataRows)
+	}
+
 	// Parse header
 	headers := records[0]
 	headerMap := make(map[string]int)
@@ -98,8 +120,8 @@ func (s *importExportService) ImportQuestionsFromCSV(ctx context.Context, reader
 		headerMap[strings.ToLower(strings.TrimSpace(header))] = i
 	}
 
-	// Validate required columns
-	requiredColumns := []string{"question_type", "question_text", "correct_answer"}
+	// Validate required columns (correct_answer not required for essay type)
+	requiredColumns := []string{"question_type", "question_text"}
 	for _, col := range requiredColumns {
 		if _, exists := headerMap[col]; !exists {
 			return nil, NewValidationError("headers", fmt.Sprintf("missing required column: %s", col), col)
@@ -134,7 +156,8 @@ func (s *importExportService) ImportQuestionsFromCSV(ctx context.Context, reader
 		}
 	}
 
-	result.Questions = questions
+	// Extract question IDs for response (avoid returning full objects)
+	result.QuestionIDs = extractQuestionIDs(questions)
 	result.Errors = errors
 	result.Status = models.ImportCompleted
 
@@ -153,8 +176,8 @@ func (s *importExportService) ImportQuestionsFromExcel(ctx context.Context, read
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Open Excel file
-	f, err := excelize.OpenReader(strings.NewReader(string(data)))
+	// Open Excel file using bytes.NewReader for proper binary handling
+	f, err := excelize.OpenReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open Excel file: %w", err)
 	}
@@ -176,11 +199,25 @@ func (s *importExportService) ImportQuestionsFromExcel(ctx context.Context, read
 		return nil, NewValidationError("file", "Excel must have header row and at least one data row", len(rows))
 	}
 
+	// Validate max rows limit
+	dataRows := len(rows) - 1
+	if dataRows > MaxImportRows {
+		return nil, NewValidationError("file", fmt.Sprintf("too many rows (%d). Maximum allowed: %d", dataRows, MaxImportRows), dataRows)
+	}
+
 	// Parse header
 	headers := rows[0]
 	headerMap := make(map[string]int)
 	for i, header := range headers {
 		headerMap[strings.ToLower(strings.TrimSpace(header))] = i
+	}
+
+	// Validate required columns (same as CSV)
+	requiredColumns := []string{"question_type", "question_text"}
+	for _, col := range requiredColumns {
+		if _, exists := headerMap[col]; !exists {
+			return nil, NewValidationError("headers", fmt.Sprintf("missing required column: %s", col), col)
+		}
 	}
 
 	result := &ImportResult{
@@ -211,7 +248,8 @@ func (s *importExportService) ImportQuestionsFromExcel(ctx context.Context, read
 		}
 	}
 
-	result.Questions = questions
+	// Extract question IDs for response (avoid returning full objects)
+	result.QuestionIDs = extractQuestionIDs(questions)
 	result.Errors = errors
 	result.Status = models.ImportCompleted
 
@@ -266,6 +304,8 @@ func (s *importExportService) ExportQuestionsToExcel(ctx context.Context, questi
 	}
 
 	f := excelize.NewFile()
+	defer f.Close()
+
 	sheetName := "Questions"
 
 	// Create sheet
@@ -274,6 +314,9 @@ func (s *importExportService) ExportQuestionsToExcel(ctx context.Context, questi
 		return nil, fmt.Errorf("failed to create Excel sheet: %w", err)
 	}
 	f.SetActiveSheet(index)
+
+	// Delete default "Sheet1"
+	f.DeleteSheet("Sheet1")
 
 	// Write headers
 	headers := []string{
@@ -305,9 +348,16 @@ func (s *importExportService) ExportQuestionsToExcel(ctx context.Context, questi
 }
 
 func (s *importExportService) ExportAssessmentResults(ctx context.Context, assessmentID uint, userID string) ([]byte, error) {
-	// Check permission
-	assessmentService := NewAssessmentService(s.repo, nil, s.logger, s.validator)
-	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)
+	// Check permission using injected assessmentService
+	var assessmentSvc AssessmentService
+	if s.assessmentService != nil {
+		assessmentSvc = s.assessmentService
+	} else {
+		// Fallback for backward compatibility (not recommended)
+		assessmentSvc = NewAssessmentService(s.repo, nil, s.logger, s.validator)
+	}
+
+	canAccess, err := assessmentSvc.CanAccess(ctx, assessmentID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -322,6 +372,8 @@ func (s *importExportService) ExportAssessmentResults(ctx context.Context, asses
 	}
 
 	f := excelize.NewFile()
+	defer f.Close()
+
 	sheetName := "Results"
 
 	index, err := f.NewSheet(sheetName)
@@ -419,50 +471,153 @@ func (s *importExportService) parseCSVRow(record []string, headerMap map[string]
 		return ""
 	}
 
-	// Parse question type
+	// ===== VALIDATE QUESTION TYPE =====
 	questionTypeStr := getColumn("question_type")
 	if questionTypeStr == "" {
 		errors = append(errors, models.ImportValidationError{
-			Row: rowNum, Column: "question_type", Message: "required field", Value: questionTypeStr,
+			Row: rowNum, Column: "question_type", Message: "required field", Value: questionTypeStr, Code: "REQUIRED",
 		})
 		return nil, errors
 	}
 
 	questionType := models.QuestionType(strings.ToLower(questionTypeStr))
 
-	// Parse question text
-	questionText := getColumn("question_text")
-	if questionText == "" {
+	// Validate question type is one of the allowed types
+	validTypes := []models.QuestionType{
+		models.MultipleChoice, models.TrueFalse, models.Essay,
+		models.ShortAnswer, models.FillInBlank, models.Matching, models.Ordering,
+	}
+	isValidType := false
+	for _, vt := range validTypes {
+		if questionType == vt {
+			isValidType = true
+			break
+		}
+	}
+	if !isValidType {
 		errors = append(errors, models.ImportValidationError{
-			Row: rowNum, Column: "question_text", Message: "required field", Value: questionText,
+			Row:     rowNum,
+			Column:  "question_type",
+			Message: fmt.Sprintf("invalid question type '%s'. Valid types: multiple_choice, true_false, essay, short_answer, fill_blank, matching, ordering", questionTypeStr),
+			Value:   questionTypeStr,
+			Code:    "INVALID_TYPE",
 		})
 		return nil, errors
 	}
 
-	// Parse points
+	// ===== VALIDATE QUESTION TEXT =====
+	questionText := getColumn("question_text")
+	if questionText == "" {
+		errors = append(errors, models.ImportValidationError{
+			Row: rowNum, Column: "question_text", Message: "required field", Value: questionText, Code: "REQUIRED",
+		})
+		return nil, errors
+	}
+
+	// Validate text length (max 10000 chars like in model)
+	if len(questionText) > 10000 {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "question_text",
+			Message: fmt.Sprintf("question text too long (%d chars). Maximum allowed: 10000", len(questionText)),
+			Value:   questionText[:50] + "...",
+			Code:    "MAX_LENGTH",
+		})
+		return nil, errors
+	}
+
+	// ===== VALIDATE POINTS (1-100) =====
 	pointsStr := getColumn("points")
 	points := 10 // Default
 	if pointsStr != "" {
-		if p, err := strconv.Atoi(pointsStr); err == nil && p > 0 {
-			points = p
+		p, err := strconv.Atoi(pointsStr)
+		if err != nil {
+			errors = append(errors, models.ImportValidationError{
+				Row:     rowNum,
+				Column:  "points",
+				Message: fmt.Sprintf("invalid number format '%s'. Must be an integer", pointsStr),
+				Value:   pointsStr,
+				Code:    "INVALID_FORMAT",
+			})
+			return nil, errors
 		}
+		if p < 1 || p > 100 {
+			errors = append(errors, models.ImportValidationError{
+				Row:     rowNum,
+				Column:  "points",
+				Message: fmt.Sprintf("points must be between 1 and 100, got %d", p),
+				Value:   pointsStr,
+				Code:    "OUT_OF_RANGE",
+			})
+			return nil, errors
+		}
+		points = p
 	}
 
-	// Parse difficulty
+	// ===== VALIDATE DIFFICULTY =====
 	difficultyStr := getColumn("difficulty")
 	difficulty := models.DifficultyMedium // Default
 	if difficultyStr != "" {
-		switch strings.ToLower(difficultyStr) {
+		diffLower := strings.ToLower(difficultyStr)
+		switch diffLower {
 		case "easy":
 			difficulty = models.DifficultyEasy
 		case "medium":
 			difficulty = models.DifficultyMedium
 		case "hard":
 			difficulty = models.DifficultyHard
+		default:
+			errors = append(errors, models.ImportValidationError{
+				Row:     rowNum,
+				Column:  "difficulty",
+				Message: fmt.Sprintf("invalid difficulty '%s'. Valid values: easy, medium, hard", difficultyStr),
+				Value:   difficultyStr,
+				Code:    "INVALID_VALUE",
+			})
+			return nil, errors
 		}
 	}
 
-	// Parse content based on question type
+	// ===== VALIDATE TAGS (max 10, no empty) =====
+	tagsStr := getColumn("tags")
+	var tags []string
+	if tagsStr != "" {
+		rawTags := strings.Split(tagsStr, ",")
+		for _, tag := range rawTags {
+			trimmedTag := strings.TrimSpace(tag)
+			if trimmedTag != "" {
+				tags = append(tags, trimmedTag)
+			}
+		}
+
+		// Validate max 10 tags
+		if len(tags) > 10 {
+			errors = append(errors, models.ImportValidationError{
+				Row:     rowNum,
+				Column:  "tags",
+				Message: fmt.Sprintf("too many tags (%d). Maximum allowed: 10", len(tags)),
+				Value:   tagsStr,
+				Code:    "MAX_COUNT",
+			})
+			return nil, errors
+		}
+
+		// Validate tag length (max 50 chars each)
+		for i, tag := range tags {
+			if len(tag) > 50 {
+				errors = append(errors, models.ImportValidationError{
+					Row:     rowNum,
+					Column:  "tags",
+					Message: fmt.Sprintf("tag #%d '%s...' too long. Maximum: 50 characters", i+1, tag[:20]),
+					Value:   tag,
+					Code:    "MAX_LENGTH",
+				})
+				return nil, errors
+			}
+		}
+	}
+
+	// ===== PARSE AND VALIDATE CONTENT =====
 	content, contentErrors := s.parseQuestionContent(questionType, record, headerMap, rowNum)
 	if len(contentErrors) > 0 {
 		errors = append(errors, contentErrors...)
@@ -472,28 +627,29 @@ func (s *importExportService) parseCSVRow(record []string, headerMap map[string]
 	contentBytes, err := json.Marshal(content)
 	if err != nil {
 		errors = append(errors, models.ImportValidationError{
-			Row: rowNum, Column: "content", Message: "failed to serialize content", Value: "",
+			Row: rowNum, Column: "content", Message: "failed to serialize content", Value: "", Code: "INTERNAL_ERROR",
 		})
 		return nil, errors
 	}
 
-	// Parse tags
-	tagsStr := getColumn("tags")
-	var tags []string
-	if tagsStr != "" {
-		tags = strings.Split(tagsStr, ",")
-		for i := range tags {
-			tags[i] = strings.TrimSpace(tags[i])
-		}
-	}
-
-	// Parse explanation
+	// ===== VALIDATE EXPLANATION (optional, max 5000 chars) =====
 	explanation := getColumn("explanation")
 	var explanationPtr *string
 	if explanation != "" {
+		if len(explanation) > 5000 {
+			errors = append(errors, models.ImportValidationError{
+				Row:     rowNum,
+				Column:  "explanation",
+				Message: fmt.Sprintf("explanation too long (%d chars). Maximum: 5000", len(explanation)),
+				Value:   explanation[:50] + "...",
+				Code:    "MAX_LENGTH",
+			})
+			return nil, errors
+		}
 		explanationPtr = &explanation
 	}
 
+	// ===== BUILD QUESTION =====
 	tagsJson, _ := json.Marshal(tags)
 
 	question := &models.Question{
@@ -528,21 +684,93 @@ func (s *importExportService) parseQuestionContent(questionType models.QuestionT
 	switch questionType {
 	case models.MultipleChoice:
 		return s.parseMultipleChoiceContent(record, headerMap, rowNum)
+
 	case models.TrueFalse:
 		correctAnswer := strings.ToLower(getColumn("correct_answer"))
+		if correctAnswer == "" {
+			errors = append(errors, models.ImportValidationError{
+				Row:     rowNum,
+				Column:  "correct_answer",
+				Message: "required for true_false type",
+				Value:   correctAnswer,
+				Code:    "REQUIRED",
+			})
+			return nil, errors
+		}
 		if correctAnswer != "true" && correctAnswer != "false" {
 			errors = append(errors, models.ImportValidationError{
-				Row: rowNum, Column: "correct_answer", Message: "must be 'true' or 'false'", Value: correctAnswer,
+				Row:     rowNum,
+				Column:  "correct_answer",
+				Message: fmt.Sprintf("invalid value '%s'. Must be 'true' or 'false'", correctAnswer),
+				Value:   correctAnswer,
+				Code:    "INVALID_VALUE",
 			})
 			return nil, errors
 		}
 		isTrue := correctAnswer == "true"
 		return models.TrueFalseContent{CorrectAnswer: isTrue}, nil
+
 	case models.Essay:
+		// Essay questions don't require correct_answer
 		return models.EssayContent{}, nil
+
+	case models.ShortAnswer:
+		// Short answer requires correct_answer(s)
+		correctAnswer := getColumn("correct_answer")
+		if correctAnswer == "" {
+			errors = append(errors, models.ImportValidationError{
+				Row:     rowNum,
+				Column:  "correct_answer",
+				Message: "required for short_answer type. Use '|' to separate multiple accepted answers",
+				Value:   correctAnswer,
+				Code:    "REQUIRED",
+			})
+			return nil, errors
+		}
+		// Support multiple accepted answers separated by |
+		acceptedAnswers := strings.Split(correctAnswer, "|")
+		var validAnswers []string
+		for _, ans := range acceptedAnswers {
+			trimmed := strings.TrimSpace(ans)
+			if trimmed != "" {
+				validAnswers = append(validAnswers, trimmed)
+			}
+		}
+		if len(validAnswers) == 0 {
+			errors = append(errors, models.ImportValidationError{
+				Row:     rowNum,
+				Column:  "correct_answer",
+				Message: "must have at least one non-empty accepted answer",
+				Value:   correctAnswer,
+				Code:    "INVALID_VALUE",
+			})
+			return nil, errors
+		}
+		return models.ShortAnswerContent{
+			AcceptedAnswers: validAnswers,
+			CaseSensitive:   false,
+			ExactMatch:      false,
+			MaxLength:       500,
+		}, nil
+
+	case models.FillInBlank, models.Matching, models.Ordering:
+		// These types are not yet fully supported for import
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "question_type",
+			Message: fmt.Sprintf("question type '%s' is not yet supported for Excel/CSV import. Please use the API to create this type", string(questionType)),
+			Value:   string(questionType),
+			Code:    "NOT_SUPPORTED",
+		})
+		return nil, errors
+
 	default:
 		errors = append(errors, models.ImportValidationError{
-			Row: rowNum, Column: "question_type", Message: "unsupported question type", Value: string(questionType),
+			Row:     rowNum,
+			Column:  "question_type",
+			Message: fmt.Sprintf("unknown question type '%s'. Supported types: multiple_choice, true_false, essay, short_answer", string(questionType)),
+			Value:   string(questionType),
+			Code:    "INVALID_TYPE",
 		})
 		return nil, errors
 	}
@@ -561,10 +789,22 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 	// Get options
 	var options []models.MCOption
 	optionColumns := []string{"option_a", "option_b", "option_c", "option_d"}
+	optionLabels := []string{"A", "B", "C", "D"}
 
 	for i, colName := range optionColumns {
 		optionText := getColumn(colName)
 		if optionText != "" {
+			// Validate option text length (max 1000 chars)
+			if len(optionText) > 1000 {
+				errors = append(errors, models.ImportValidationError{
+					Row:     rowNum,
+					Column:  colName,
+					Message: fmt.Sprintf("option %s text too long (%d chars). Maximum: 1000", optionLabels[i], len(optionText)),
+					Value:   optionText[:50] + "...",
+					Code:    "MAX_LENGTH",
+				})
+				return nil, errors
+			}
 			options = append(options, models.MCOption{
 				ID:    fmt.Sprintf("%d", i),
 				Text:  optionText,
@@ -573,34 +813,83 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 		}
 	}
 
+	// Validate minimum 2 options (same as Create API)
 	if len(options) < 2 {
 		errors = append(errors, models.ImportValidationError{
-			Row: rowNum, Column: "options", Message: "must have at least 2 options", Value: "",
+			Row:     rowNum,
+			Column:  "options",
+			Message: fmt.Sprintf("must have at least 2 options (found %d). Fill in option_a and option_b at minimum", len(options)),
+			Value:   fmt.Sprintf("%d options", len(options)),
+			Code:    "MIN_COUNT",
 		})
 		return nil, errors
 	}
 
-	// Parse correct answer
-	correctAnswerStr := strings.ToUpper(getColumn("correct_answer"))
-	var correctAnswers []string
+	// Validate max 10 options
+	if len(options) > 10 {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "options",
+			Message: fmt.Sprintf("too many options (%d). Maximum: 10", len(options)),
+			Value:   fmt.Sprintf("%d options", len(options)),
+			Code:    "MAX_COUNT",
+		})
+		return nil, errors
+	}
 
-	if correctAnswerStr != "" {
-		// Handle multiple correct answers (e.g., "A,C" or "A")
-		answerParts := strings.Split(correctAnswerStr, ",")
-		for _, part := range answerParts {
-			part = strings.TrimSpace(part)
-			if len(part) == 1 && part >= "A" && part <= "D" {
-				index := int(part[0] - 'A')
-				if index < len(options) {
-					correctAnswers = append(correctAnswers, fmt.Sprintf("%d", index))
-				}
-			}
+	// Parse and validate correct answer
+	correctAnswerStr := strings.ToUpper(getColumn("correct_answer"))
+	if correctAnswerStr == "" {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "correct_answer",
+			Message: "required for multiple_choice type. Use A, B, C, D or comma-separated like 'A,C' for multiple correct",
+			Value:   correctAnswerStr,
+			Code:    "REQUIRED",
+		})
+		return nil, errors
+	}
+
+	var correctAnswers []string
+	var invalidAnswers []string
+
+	// Handle multiple correct answers (e.g., "A,C" or "A")
+	answerParts := strings.Split(correctAnswerStr, ",")
+	for _, part := range answerParts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
 		}
+		if len(part) == 1 && part >= "A" && part <= "D" {
+			index := int(part[0] - 'A')
+			if index < len(options) {
+				correctAnswers = append(correctAnswers, fmt.Sprintf("%d", index))
+			} else {
+				invalidAnswers = append(invalidAnswers, fmt.Sprintf("%s (option not provided)", part))
+			}
+		} else {
+			invalidAnswers = append(invalidAnswers, part)
+		}
+	}
+
+	if len(invalidAnswers) > 0 {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "correct_answer",
+			Message: fmt.Sprintf("invalid answer(s): %s. Use only A, B, C, D that correspond to filled options", strings.Join(invalidAnswers, ", ")),
+			Value:   correctAnswerStr,
+			Code:    "INVALID_VALUE",
+		})
+		return nil, errors
 	}
 
 	if len(correctAnswers) == 0 {
 		errors = append(errors, models.ImportValidationError{
-			Row: rowNum, Column: "correct_answer", Message: "must specify at least one correct answer (A, B, C, or D)", Value: correctAnswerStr,
+			Row:     rowNum,
+			Column:  "correct_answer",
+			Message: "must specify at least one valid correct answer (A, B, C, or D)",
+			Value:   correctAnswerStr,
+			Code:    "REQUIRED",
 		})
 		return nil, errors
 	}
@@ -613,58 +902,69 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 }
 
 func (s *importExportService) saveImportedQuestions(ctx context.Context, questions []*models.Question) error {
-	// Begin transaction
-	txRepo, err := s.repo.(repositories.TransactionRepository).Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() {
-		if err != nil {
-			txRepo.(repositories.TransactionRepository).Rollback(ctx)
-		}
-	}()
-
-	// Save questions
-	for _, question := range questions {
-		if err := txRepo.Question().Create(ctx, nil, question); err != nil {
-			return fmt.Errorf("failed to create question: %w", err)
-		}
+	if len(questions) == 0 {
+		return nil
 	}
 
-	// Commit transaction
-	if err := txRepo.(repositories.TransactionRepository).Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	// Use batch insert instead of loop for better performance
+	if err := s.repo.Question().CreateBatch(ctx, nil, questions); err != nil {
+		return fmt.Errorf("failed to batch create questions: %w", err)
 	}
-
 	return nil
 }
 
 func (s *importExportService) getQuestionsForExport(ctx context.Context, questionIDs []uint, userID string) ([]*models.Question, error) {
-	var questions []*models.Question
-
-	for _, questionID := range questionIDs {
-		question, err := s.repo.Question().GetByIDWithDetails(ctx, nil, questionID)
-		if err != nil {
-			if repositories.IsNotFoundError(err) {
-				continue // Skip missing questions
-			}
-			return nil, fmt.Errorf("failed to get question %d: %w", questionID, err)
-		}
-
-		// Check access permission
-		questionService := NewQuestionService(s.repo, nil, s.logger, s.validator)
-		canAccess, err := questionService.CanAccess(ctx, questionID, userID)
-		if err != nil {
-			return nil, err
-		}
-		if !canAccess {
-			continue // Skip inaccessible questions
-		}
-
-		questions = append(questions, question)
+	if len(questionIDs) == 0 {
+		return nil, nil
 	}
 
-	return questions, nil
+	// Use batch query instead of N+1 individual queries
+	allQuestions, err := s.repo.Question().GetByIDs(ctx, nil, questionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get questions: %w", err)
+	}
+
+	// Get user role to determine access level
+	userRole, err := s.getUserRole(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user role: %w", err)
+	}
+
+	// Admin and Teacher can access all questions
+	if userRole == models.RoleAdmin || userRole == models.RoleTeacher {
+		return allQuestions, nil
+	}
+
+	// For other users, filter to only their own questions
+	var accessibleQuestions []*models.Question
+	for _, question := range allQuestions {
+		if question.CreatedBy == userID {
+			accessibleQuestions = append(accessibleQuestions, question)
+		}
+	}
+
+	return accessibleQuestions, nil
+}
+
+// getUserRole retrieves the role of a user
+func (s *importExportService) getUserRole(ctx context.Context, userID string) (models.Role, error) {
+	user, err := s.repo.User().GetByID(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get user: %w", err)
+	}
+	if user == nil {
+		return models.RoleStudent, nil // Default role
+	}
+	return user.Role, nil
+}
+
+// extractQuestionIDs extracts IDs from question slice to reduce response size
+func extractQuestionIDs(questions []*models.Question) []uint {
+	ids := make([]uint, len(questions))
+	for i, q := range questions {
+		ids[i] = q.ID
+	}
+	return ids
 }
 
 func (s *importExportService) questionToCSVRow(question *models.Question) []string {
@@ -674,7 +974,8 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 	row[1] = question.Text
 
 	// Parse content for options and correct answer
-	if question.Type == models.MultipleChoice {
+	switch question.Type {
+	case models.MultipleChoice:
 		var content models.MultipleChoiceContent
 		if err := json.Unmarshal(question.Content, &content); err == nil {
 			// Fill options
@@ -694,7 +995,8 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 			}
 			row[6] = strings.Join(correctLetters, ",")
 		}
-	} else if question.Type == models.TrueFalse {
+
+	case models.TrueFalse:
 		var content models.TrueFalseContent
 		if err := json.Unmarshal(question.Content, &content); err == nil {
 			if content.CorrectAnswer {
@@ -703,6 +1005,17 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 				row[6] = "False"
 			}
 		}
+
+	case models.ShortAnswer:
+		var content models.ShortAnswerContent
+		if err := json.Unmarshal(question.Content, &content); err == nil {
+			// Join multiple accepted answers with |
+			row[6] = strings.Join(content.AcceptedAnswers, "|")
+		}
+
+	case models.Essay:
+		// Essay doesn't have correct answer
+		row[6] = ""
 	}
 
 	row[7] = strconv.Itoa(question.Points)

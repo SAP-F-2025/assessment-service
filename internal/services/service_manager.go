@@ -238,8 +238,8 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 	sm.assessmentGroupService = NewAssessmentGroupService(sm.repo, sm.db, sm.logger, sm.validator)
 	sm.logger.Info("AssessmentGroup service initialized")
 
-	// Initialize ImportExportService
-	sm.importExportService = NewImportExportService(sm.repo, sm.logger, sm.validator)
+	// Initialize ImportExportService with injected dependencies
+	sm.importExportService = NewImportExportServiceWithDeps(sm.repo, sm.logger, sm.validator, sm.assessmentService)
 	sm.logger.Info("ImportExport service initialized")
 
 	// Initialize NotificationService
