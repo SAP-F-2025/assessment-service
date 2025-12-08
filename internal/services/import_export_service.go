@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -753,22 +754,26 @@ func (s *importExportService) parseQuestionContent(questionType models.QuestionT
 			MaxLength:       500,
 		}, nil
 
-	case models.FillInBlank, models.Matching, models.Ordering:
-		// These types are not yet fully supported for import
-		errors = append(errors, models.ImportValidationError{
-			Row:     rowNum,
-			Column:  "question_type",
-			Message: fmt.Sprintf("question type '%s' is not yet supported for Excel/CSV import. Please use the API to create this type", string(questionType)),
-			Value:   string(questionType),
-			Code:    "NOT_SUPPORTED",
-		})
-		return nil, errors
+	case models.FillInBlank:
+		// Fill in blank format: question_text contains {___} for blanks, correct_answer contains answers separated by |
+		// Example: question_text = "The {___} is the capital of {___}", correct_answer = "Paris|France"
+		return s.parseFillBlankContent(getColumn("question_text"), getColumn("correct_answer"), rowNum)
+
+	case models.Matching:
+		// Matching format: correct_answer contains pairs in format "left1:right1|left2:right2"
+		// Example: "Dog:Animal|Cat:Mammal|Eagle:Bird"
+		return s.parseMatchingContent(getColumn("correct_answer"), rowNum)
+
+	case models.Ordering:
+		// Ordering format: correct_answer contains items in order separated by >
+		// Example: "First > Second > Third > Fourth"
+		return s.parseOrderingContent(getColumn("correct_answer"), rowNum)
 
 	default:
 		errors = append(errors, models.ImportValidationError{
 			Row:     rowNum,
 			Column:  "question_type",
-			Message: fmt.Sprintf("unknown question type '%s'. Supported types: multiple_choice, true_false, essay, short_answer", string(questionType)),
+			Message: fmt.Sprintf("unknown question type '%s'. Supported types: multiple_choice, true_false, essay, short_answer, fill_blank, matching, ordering", string(questionType)),
 			Value:   string(questionType),
 			Code:    "INVALID_TYPE",
 		})
@@ -1016,6 +1021,60 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 	case models.Essay:
 		// Essay doesn't have correct answer
 		row[6] = ""
+
+	case models.FillInBlank:
+		var content models.FillBlankContent
+		if err := json.Unmarshal(question.Content, &content); err == nil {
+			// Export answers in order of blanks
+			var answers []string
+			for i := 1; ; i++ {
+				blankID := fmt.Sprintf("blank%d", i)
+				if blank, ok := content.Blanks[blankID]; ok {
+					answers = append(answers, strings.Join(blank.AcceptedAnswers, "|||"))
+				} else {
+					break
+				}
+			}
+			row[6] = strings.Join(answers, "|")
+		}
+
+	case models.Matching:
+		var content models.MatchingContent
+		if err := json.Unmarshal(question.Content, &content); err == nil {
+			// Build a map for quick lookup
+			leftMap := make(map[string]string)
+			rightMap := make(map[string]string)
+			for _, item := range content.LeftItems {
+				leftMap[item.ID] = item.Text
+			}
+			for _, item := range content.RightItems {
+				rightMap[item.ID] = item.Text
+			}
+			// Export pairs in format "left:right|left:right"
+			var pairs []string
+			for _, pair := range content.CorrectPairs {
+				leftText := leftMap[pair.LeftID]
+				rightText := rightMap[pair.RightID]
+				pairs = append(pairs, leftText+":"+rightText)
+			}
+			row[6] = strings.Join(pairs, "|")
+		}
+
+	case models.Ordering:
+		var content models.OrderingContent
+		if err := json.Unmarshal(question.Content, &content); err == nil {
+			// Build a map for quick lookup
+			itemMap := make(map[string]string)
+			for _, item := range content.Items {
+				itemMap[item.ID] = item.Text
+			}
+			// Export items in correct order
+			var orderedItems []string
+			for _, itemID := range content.CorrectOrder {
+				orderedItems = append(orderedItems, itemMap[itemID])
+			}
+			row[6] = strings.Join(orderedItems, " > ")
+		}
 	}
 
 	row[7] = strconv.Itoa(question.Points)
@@ -1039,4 +1098,201 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 	}
 
 	return row
+}
+
+// parseFillBlankContent parses fill-in-the-blank question content
+// Format: question_text contains {___} for blanks, correct_answer contains answers separated by |
+// Example: question_text = "The {___} is the capital of {___}", correct_answer = "Paris|France"
+func (s *importExportService) parseFillBlankContent(questionText, correctAnswer string, rowNum int) (interface{}, []models.ImportValidationError) {
+	var errors []models.ImportValidationError
+
+	// Count blanks in template (look for {___} or similar patterns)
+	blankPattern := regexp.MustCompile(`\{___\}|\{[^}]+\}`)
+	blanks := blankPattern.FindAllStringIndex(questionText, -1)
+	blankCount := len(blanks)
+
+	if blankCount == 0 {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "question_text",
+			Message: "fill_blank questions must contain at least one blank marker {___} or {blank1}",
+			Value:   questionText,
+			Code:    "INVALID_FORMAT",
+		})
+		return nil, errors
+	}
+
+	// Parse answers separated by |
+	if correctAnswer == "" {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "correct_answer",
+			Message: "required for fill_blank type. Use '|' to separate answers for each blank",
+			Value:   correctAnswer,
+			Code:    "REQUIRED",
+		})
+		return nil, errors
+	}
+
+	answerParts := strings.Split(correctAnswer, "|")
+	if len(answerParts) != blankCount {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "correct_answer",
+			Message: fmt.Sprintf("number of answers (%d) must match number of blanks (%d) in question text", len(answerParts), blankCount),
+			Value:   correctAnswer,
+			Code:    "INVALID_FORMAT",
+		})
+		return nil, errors
+	}
+
+	// Build template and blanks map
+	blanksMap := make(map[string]models.BlankDef)
+	for i, ans := range answerParts {
+		blankID := fmt.Sprintf("blank%d", i+1)
+		// Each answer can have multiple accepted answers separated by |||
+		acceptedAnswers := strings.Split(strings.TrimSpace(ans), "|||")
+		for j := range acceptedAnswers {
+			acceptedAnswers[j] = strings.TrimSpace(acceptedAnswers[j])
+		}
+		blanksMap[blankID] = models.BlankDef{
+			AcceptedAnswers: acceptedAnswers,
+			Points:          1,
+		}
+	}
+
+	// Replace {___} with {blank1}, {blank2}, etc. in template
+	template := questionText
+	for i := 0; i < blankCount; i++ {
+		template = strings.Replace(template, "{___}", fmt.Sprintf("{blank%d}", i+1), 1)
+	}
+
+	return models.FillBlankContent{
+		Template:      template,
+		Blanks:        blanksMap,
+		CaseSensitive: false,
+		TrimSpaces:    true,
+	}, nil
+}
+
+// parseMatchingContent parses matching question content
+// Format: correct_answer contains pairs in format "left1:right1|left2:right2"
+// Example: "Dog:Animal|Cat:Mammal|Eagle:Bird"
+func (s *importExportService) parseMatchingContent(correctAnswer string, rowNum int) (interface{}, []models.ImportValidationError) {
+	var errors []models.ImportValidationError
+
+	if correctAnswer == "" {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "correct_answer",
+			Message: "required for matching type. Format: left1:right1|left2:right2",
+			Value:   correctAnswer,
+			Code:    "REQUIRED",
+		})
+		return nil, errors
+	}
+
+	pairs := strings.Split(correctAnswer, "|")
+	if len(pairs) < 2 {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "correct_answer",
+			Message: "matching questions require at least 2 pairs. Format: left1:right1|left2:right2",
+			Value:   correctAnswer,
+			Code:    "MIN_COUNT",
+		})
+		return nil, errors
+	}
+
+	var leftItems []models.MatchItem
+	var rightItems []models.MatchItem
+	var correctPairs []models.MatchPair
+
+	for i, pair := range pairs {
+		parts := strings.SplitN(strings.TrimSpace(pair), ":", 2)
+		if len(parts) != 2 {
+			errors = append(errors, models.ImportValidationError{
+				Row:     rowNum,
+				Column:  "correct_answer",
+				Message: fmt.Sprintf("invalid pair format '%s'. Use 'left:right' format", pair),
+				Value:   pair,
+				Code:    "INVALID_FORMAT",
+			})
+			return nil, errors
+		}
+
+		leftID := fmt.Sprintf("L%d", i+1)
+		rightID := fmt.Sprintf("R%d", i+1)
+
+		leftItems = append(leftItems, models.MatchItem{
+			ID:   leftID,
+			Text: strings.TrimSpace(parts[0]),
+		})
+		rightItems = append(rightItems, models.MatchItem{
+			ID:   rightID,
+			Text: strings.TrimSpace(parts[1]),
+		})
+		correctPairs = append(correctPairs, models.MatchPair{
+			LeftID:  leftID,
+			RightID: rightID,
+		})
+	}
+
+	return models.MatchingContent{
+		LeftItems:      leftItems,
+		RightItems:     rightItems,
+		CorrectPairs:   correctPairs,
+		RandomizeLeft:  true,
+		RandomizeRight: true,
+		PartialCredit:  true,
+	}, nil
+}
+
+// parseOrderingContent parses ordering question content
+// Format: correct_answer contains items in order separated by >
+// Example: "First > Second > Third > Fourth"
+func (s *importExportService) parseOrderingContent(correctAnswer string, rowNum int) (interface{}, []models.ImportValidationError) {
+	var errors []models.ImportValidationError
+
+	if correctAnswer == "" {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "correct_answer",
+			Message: "required for ordering type. Format: item1 > item2 > item3",
+			Value:   correctAnswer,
+			Code:    "REQUIRED",
+		})
+		return nil, errors
+	}
+
+	items := strings.Split(correctAnswer, ">")
+	if len(items) < 2 {
+		errors = append(errors, models.ImportValidationError{
+			Row:     rowNum,
+			Column:  "correct_answer",
+			Message: "ordering questions require at least 2 items. Format: item1 > item2 > item3",
+			Value:   correctAnswer,
+			Code:    "MIN_COUNT",
+		})
+		return nil, errors
+	}
+
+	var orderItems []models.OrderItem
+	var correctOrder []string
+
+	for i, item := range items {
+		itemID := fmt.Sprintf("item%d", i+1)
+		orderItems = append(orderItems, models.OrderItem{
+			ID:   itemID,
+			Text: strings.TrimSpace(item),
+		})
+		correctOrder = append(correctOrder, itemID)
+	}
+
+	return models.OrderingContent{
+		Items:         orderItems,
+		CorrectOrder:  correctOrder,
+		RandomizeInit: true,
+		PartialCredit: true,
+	}, nil
 }
