@@ -72,6 +72,9 @@ func (h *SharedHelpers) ApplyAssessmentFilters(query *gorm.DB, filters repositor
 	if filters.DateTo != nil {
 		query = query.Where("created_at <= ?", *filters.DateTo)
 	}
+	if filters.Search != nil {
+		query = query.Where("title ILIKE ?", "%"+*filters.Search+"%")
+	}
 	return query
 }
 

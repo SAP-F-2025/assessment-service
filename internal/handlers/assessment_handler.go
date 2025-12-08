@@ -753,6 +753,10 @@ func (h *AssessmentHandler) parseAssessmentFilters(c *gin.Context) repositories.
 		Offset: (page - 1) * size,
 	}
 
+	if search := c.Query("search"); search != "" {
+		filters.Search = &search
+	}
+
 	if status := c.Query("status"); status != "" {
 		assessmentStatus := models.AssessmentStatus(status)
 		filters.Status = &assessmentStatus

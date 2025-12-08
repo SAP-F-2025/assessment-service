@@ -204,13 +204,11 @@ type UpdateGroupRequest struct {
 
 type AddGroupMemberRequest struct {
 	UserID string `json:"user_id" validate:"required"`
-	// Role is optional - will be auto-detected from user's system role (teacher/student)
-	// If provided, must match: "teacher" or "student"
-	Role string `json:"role" validate:"omitempty,oneof=teacher student"`
+	Role   string `json:"role" validate:"required"`
 }
 
 type UpdateMemberRoleRequest struct {
-	Role string `json:"role" validate:"required,oneof=teacher student"`
+	Role string `json:"role" validate:"required"`
 }
 
 type GroupResponse struct {

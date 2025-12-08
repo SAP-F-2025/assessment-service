@@ -52,6 +52,7 @@ type GroupMember struct {
 
 	// Relations
 	Group *Group `json:"group,omitempty" gorm:"foreignKey:GroupID"`
+	User  *User  `json:"user,omitempty" gorm:"foreignKey:UserID"`
 }
 
 func (Group) TableName() string {

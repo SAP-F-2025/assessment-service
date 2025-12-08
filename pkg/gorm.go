@@ -10,15 +10,15 @@ import (
 )
 
 func InitDatabase(cfg *config.Config) (*gorm.DB, error) {
-	var logLevel logger.LogLevel
-	if cfg.Environment == "production" {
-		logLevel = logger.Info
-	} else {
-		logLevel = logger.Error
-	}
+	//var logLevel logger.LogLevel
+	//if cfg.Environment == "production" {
+	//	logLevel = logger.Info
+	//} else {
+	//	logLevel = logger.Error
+	//}
 
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
-		Logger: logger.Default.LogMode(logLevel),
+		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)

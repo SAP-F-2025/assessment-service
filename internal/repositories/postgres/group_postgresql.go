@@ -251,6 +251,7 @@ func (g *GroupPostgreSQL) GetMembers(ctx context.Context, tx *gorm.DB, groupID u
 	var members []*models.GroupMember
 
 	if err := db.WithContext(ctx).
+		Preload("User").
 		Where("group_id = ?", groupID).
 		Order("joined_at ASC").
 		Find(&members).Error; err != nil {

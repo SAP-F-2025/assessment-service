@@ -17,6 +17,7 @@ type AssessmentFilters struct {
 	Offset    int                      `json:"offset"`
 	SortBy    string                   `json:"sort_by"`    // "created_at", "title", "due_date"
 	SortOrder string                   `json:"sort_order"` // "asc", "desc"
+	Search    *string                  `json:"search"`
 }
 
 type QuestionFilters struct {
