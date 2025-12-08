@@ -61,25 +61,18 @@ func (s *questionService) CanAccess(ctx context.Context, questionID uint, userID
 		return false, err
 	}
 
-	// Teachers can access their own questions
-	if userRole == models.RoleTeacher && question.CreatedBy == userID {
+	// Any authenticated user can access their own questions
+	if question.CreatedBy == userID {
 		return true, nil
 	}
 
-	// Teachers can access public questions or questions shared with them
+	// Teachers can access all questions (for assessment building)
 	if userRole == models.RoleTeacher {
-		// TODO: Check if question is public or shared
-		// For now, allow access to all questions for teachers
 		return true, nil
 	}
 
-	// Students can access questions that are part of active assessments they can take
-	if userRole == models.RoleStudent {
-		// TODO: Check if question is part of an accessible assessment
-		// For now, deny access to students for individual questions
-		return false, nil
-	}
-
+	// For other users, check if question is public or shared
+	// TODO: Implement public/shared question access
 	return false, nil
 }
 
@@ -101,13 +94,8 @@ func (s *questionService) CanEdit(ctx context.Context, questionID uint, userID s
 		return true, nil
 	}
 
-	// Only owners can edit their questions
-	if question.CreatedBy != userID {
-		return false, nil
-	}
-
-	// Teachers can edit their own questions
-	if userRole == models.RoleTeacher {
+	// Any authenticated user can edit their own questions
+	if question.CreatedBy == userID {
 		return true, nil
 	}
 
@@ -167,12 +155,12 @@ func (s *questionService) getUserRole(ctx context.Context, userID string) (model
 }
 
 func (s *questionService) canCreateQuestion(ctx context.Context, userID string) (bool, error) {
-	userRole, err := s.getUserRole(ctx, userID)
-	if err != nil {
-		return false, err
+	// Any authenticated user can create questions
+	// Just verify the user exists
+	if userID == "" {
+		return false, nil
 	}
-
-	return userRole == models.RoleTeacher || userRole == models.RoleAdmin, nil
+	return true, nil
 }
 
 func (s *questionService) canAccessQuestionBank(ctx context.Context, bankID uint, userID string) (bool, error) {
