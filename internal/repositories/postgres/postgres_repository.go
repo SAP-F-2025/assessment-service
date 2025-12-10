@@ -32,6 +32,7 @@ type PostgreSQLRepository struct {
 	user               repositories.UserRepository
 	dashboard          repositories.DashboardRepository
 	group              repositories.GroupRepository
+	groupInvite        repositories.GroupInviteRepository
 	assessmentGroup    repositories.AssessmentGroupRepository
 }
 
@@ -67,6 +68,9 @@ func NewPostgreSQLRepository(config RepositoryConfig) repositories.Repository {
 
 	// Group repository
 	repo.group = NewGroupPostgreSQL(config.DB)
+
+	// Group invite repository
+	repo.groupInvite = NewGroupInvitePostgreSQL(config.DB)
 
 	// Assessment-Group repository
 	repo.assessmentGroup = NewAssessmentGroupPostgreSQL(config.DB)
@@ -140,6 +144,11 @@ func (r *PostgreSQLRepository) Group() repositories.GroupRepository {
 	return r.group
 }
 
+// GroupInvite returns the group invite repository
+func (r *PostgreSQLRepository) GroupInvite() repositories.GroupInviteRepository {
+	return r.groupInvite
+}
+
 // AssessmentGroup returns the assessment-group repository
 func (r *PostgreSQLRepository) AssessmentGroup() repositories.AssessmentGroupRepository {
 	return r.assessmentGroup
@@ -170,6 +179,9 @@ func (r *PostgreSQLRepository) WithTransaction(ctx context.Context, fn func(repo
 
 		// Group repository with transaction
 		txRepo.group = NewGroupPostgreSQL(tx)
+
+		// Group invite repository with transaction
+		txRepo.groupInvite = NewGroupInvitePostgreSQL(tx)
 
 		// Assessment-Group repository with transaction
 		txRepo.assessmentGroup = NewAssessmentGroupPostgreSQL(tx)

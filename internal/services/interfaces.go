@@ -472,6 +472,18 @@ type GroupService interface {
 	UpdateMemberRole(ctx context.Context, groupID uint, memberUserID string, req *UpdateMemberRoleRequest, userID string) error
 	GetMembers(ctx context.Context, groupID uint, userID string) ([]*GroupMemberResponse, error)
 	GetMemberGroups(ctx context.Context, memberUserID string) ([]*GroupResponse, error)
+	LeaveGroup(ctx context.Context, groupID uint, userID string) error
+
+	// Invite management
+	CreateInviteLink(ctx context.Context, groupID uint, req *CreateInviteLinkRequest, userID string) (*GroupInviteResponse, error)
+	CreateInviteCode(ctx context.Context, groupID uint, req *CreateInviteCodeRequest, userID string) (*GroupInviteResponse, error)
+	GetGroupInvites(ctx context.Context, groupID uint, userID string) ([]*GroupInviteResponse, error)
+	DeleteInvite(ctx context.Context, inviteID uint, userID string) error
+	RegenerateInvite(ctx context.Context, inviteID uint, userID string) (*GroupInviteResponse, error)
+
+	// Join via invite
+	JoinViaLink(ctx context.Context, token string, userID string) (*GroupResponse, error)
+	JoinViaCode(ctx context.Context, code string, userID string) (*GroupResponse, error)
 
 	// Permission checks
 	CanAccess(ctx context.Context, groupID uint, userID string) (bool, error)

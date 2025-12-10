@@ -278,6 +278,20 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			groups.DELETE("/:id/members/:userId", hm.groupHandler.RemoveMember)
 			groups.PUT("/:id/members/:userId/role", hm.groupHandler.UpdateMemberRole)
 
+			// Leave group - Member self-removal
+			groups.DELETE("/:id/leave", hm.groupHandler.LeaveGroup)
+
+			// Invite management - Owner/Co-owner can manage invites
+			groups.POST("/:id/invites/link", hm.groupHandler.CreateInviteLink)
+			groups.POST("/:id/invites/code", hm.groupHandler.CreateInviteCode)
+			groups.GET("/:id/invites", hm.groupHandler.GetGroupInvites)
+			groups.DELETE("/:id/invites/:inviteId", hm.groupHandler.DeleteInvite)
+			groups.POST("/:id/invites/:inviteId/regenerate", hm.groupHandler.RegenerateInvite)
+
+			// Join via invite - Any authenticated user
+			groups.POST("/join/link/:token", hm.groupHandler.JoinViaLink)
+			groups.POST("/join/code", hm.groupHandler.JoinViaCode)
+
 			// Group assessments - Get assessments assigned to this group
 			groups.GET("/:id/assessments", hm.assessmentGroupHandler.GetGroupAssessments)
 		}

@@ -273,10 +273,10 @@ func (s *importExportService) ExportQuestionsToCSV(ctx context.Context, question
 	var buf strings.Builder
 	writer := csv.NewWriter(&buf)
 
-	// Write header
+	// Write header - use snake_case to match import expectations
 	headers := []string{
-		"Question Type", "Question Text", "Option A", "Option B", "Option C", "Option D",
-		"Correct Answer", "Points", "Category", "Difficulty", "Tags", "Explanation",
+		"question_type", "question_text", "option_a", "option_b", "option_c", "option_d",
+		"correct_answer", "points", "category", "difficulty", "tags", "explanation",
 	}
 	if err := writer.Write(headers); err != nil {
 		return nil, fmt.Errorf("failed to write CSV header: %w", err)
@@ -319,10 +319,10 @@ func (s *importExportService) ExportQuestionsToExcel(ctx context.Context, questi
 	// Delete default "Sheet1"
 	f.DeleteSheet("Sheet1")
 
-	// Write headers
+	// Write headers - use snake_case to match import expectations
 	headers := []string{
-		"Question Type", "Question Text", "Option A", "Option B", "Option C", "Option D",
-		"Correct Answer", "Points", "Category", "Difficulty", "Tags", "Explanation",
+		"question_type", "question_text", "option_a", "option_b", "option_c", "option_d",
+		"correct_answer", "points", "category", "difficulty", "tags", "explanation",
 	}
 
 	for i, header := range headers {

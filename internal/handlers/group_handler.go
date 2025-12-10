@@ -553,6 +553,346 @@ func (h *GroupHandler) UpdateMemberRole(c *gin.Context) {
 	})
 }
 
+// ===== INVITE MANAGEMENT ENDPOINTS =====
+
+// CreateInviteLink creates an invite link for a group
+// @Summary Create invite link
+// @Description Create an invite link for a group. Only owner or co-owner can create invites.
+// @Tags groups
+// @Accept json
+// @Produce json
+// @Param id path int true "Group ID"
+// @Param request body services.CreateInviteLinkRequest false "Invite link settings"
+// @Success 201 {object} services.GroupInviteResponse
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - not owner or co-owner"
+// @Failure 404 {object} ErrorResponse "Not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /groups/{id}/invites/link [post]
+func (h *GroupHandler) CreateInviteLink(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid group ID",
+		})
+		return
+	}
+
+	var req services.CreateInviteLinkRequest
+	// Request body is optional
+	_ = c.ShouldBindJSON(&req)
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	response, err := h.service.CreateInviteLink(c.Request.Context(), uint(id), &req, userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, response)
+}
+
+// CreateInviteCode creates an invite code for a group
+// @Summary Create invite code
+// @Description Create a short invite code for a group. Only owner or co-owner can create invites.
+// @Tags groups
+// @Accept json
+// @Produce json
+// @Param id path int true "Group ID"
+// @Param request body services.CreateInviteCodeRequest false "Invite code settings"
+// @Success 201 {object} services.GroupInviteResponse
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - not owner or co-owner"
+// @Failure 404 {object} ErrorResponse "Not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /groups/{id}/invites/code [post]
+func (h *GroupHandler) CreateInviteCode(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid group ID",
+		})
+		return
+	}
+
+	var req services.CreateInviteCodeRequest
+	// Request body is optional
+	_ = c.ShouldBindJSON(&req)
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	response, err := h.service.CreateInviteCode(c.Request.Context(), uint(id), &req, userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, response)
+}
+
+// GetGroupInvites gets all invites for a group
+// @Summary Get group invites
+// @Description Get all invites for a group. Only owner or co-owner can view invites.
+// @Tags groups
+// @Accept json
+// @Produce json
+// @Param id path int true "Group ID"
+// @Success 200 {array} services.GroupInviteResponse
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - not owner or co-owner"
+// @Failure 404 {object} ErrorResponse "Not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /groups/{id}/invites [get]
+func (h *GroupHandler) GetGroupInvites(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid group ID",
+		})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	response, err := h.service.GetGroupInvites(c.Request.Context(), uint(id), userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// DeleteInvite deletes an invite
+// @Summary Delete invite
+// @Description Delete an invite. Only owner or co-owner can delete invites.
+// @Tags groups
+// @Accept json
+// @Produce json
+// @Param id path int true "Group ID"
+// @Param inviteId path int true "Invite ID"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - not owner or co-owner"
+// @Failure 404 {object} ErrorResponse "Not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /groups/{id}/invites/{inviteId} [delete]
+func (h *GroupHandler) DeleteInvite(c *gin.Context) {
+	inviteID, err := strconv.ParseUint(c.Param("inviteId"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid invite ID",
+		})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	err = h.service.DeleteInvite(c.Request.Context(), uint(inviteID), userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// RegenerateInvite regenerates an invite token/code
+// @Summary Regenerate invite
+// @Description Regenerate an invite's token or code. Only owner or co-owner can regenerate invites.
+// @Tags groups
+// @Accept json
+// @Produce json
+// @Param id path int true "Group ID"
+// @Param inviteId path int true "Invite ID"
+// @Success 200 {object} services.GroupInviteResponse
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 403 {object} ErrorResponse "Forbidden - not owner or co-owner"
+// @Failure 404 {object} ErrorResponse "Not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /groups/{id}/invites/{inviteId}/regenerate [post]
+func (h *GroupHandler) RegenerateInvite(c *gin.Context) {
+	inviteID, err := strconv.ParseUint(c.Param("inviteId"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid invite ID",
+		})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	response, err := h.service.RegenerateInvite(c.Request.Context(), uint(inviteID), userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// ===== JOIN VIA INVITE ENDPOINTS =====
+
+// JoinViaLink allows joining a group via invite link
+// @Summary Join group via invite link
+// @Description Join a group using an invite link token.
+// @Tags groups
+// @Accept json
+// @Produce json
+// @Param token path string true "Invite token"
+// @Success 200 {object} services.GroupResponse
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 404 {object} ErrorResponse "Invite not found"
+// @Failure 409 {object} ErrorResponse "Already a member"
+// @Failure 410 {object} ErrorResponse "Invite expired or exhausted"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /groups/join/link/{token} [post]
+func (h *GroupHandler) JoinViaLink(c *gin.Context) {
+	token := c.Param("token")
+	if token == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid invite token",
+		})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	response, err := h.service.JoinViaLink(c.Request.Context(), token, userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// JoinViaCode allows joining a group via invite code
+// @Summary Join group via invite code
+// @Description Join a group using a short invite code.
+// @Tags groups
+// @Accept json
+// @Produce json
+// @Param request body services.JoinViaCodeRequest true "Join via code request"
+// @Success 200 {object} services.GroupResponse
+// @Failure 400 {object} ErrorResponse "Bad request"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 404 {object} ErrorResponse "Invite not found"
+// @Failure 409 {object} ErrorResponse "Already a member"
+// @Failure 410 {object} ErrorResponse "Invite expired or exhausted"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /groups/join/code [post]
+func (h *GroupHandler) JoinViaCode(c *gin.Context) {
+	var req services.JoinViaCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid request payload",
+			Details: err.Error(),
+		})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	response, err := h.service.JoinViaCode(c.Request.Context(), req.Code, userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// ===== LEAVE GROUP ENDPOINT =====
+
+// LeaveGroup allows a member to leave a group
+// @Summary Leave group
+// @Description Leave a group. Owners cannot leave their own groups.
+// @Tags groups
+// @Accept json
+// @Produce json
+// @Param id path int true "Group ID"
+// @Success 204 "No Content"
+// @Failure 400 {object} ErrorResponse "Bad request - owner cannot leave"
+// @Failure 401 {object} ErrorResponse "Unauthorized"
+// @Failure 404 {object} ErrorResponse "Not a member"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /groups/{id}/leave [delete]
+func (h *GroupHandler) LeaveGroup(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid group ID",
+		})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	err = h.service.LeaveGroup(c.Request.Context(), uint(id), userID.(string))
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
 // ===== ERROR HANDLING =====
 
 func (h *GroupHandler) handleServiceError(c *gin.Context, err error) {
@@ -613,9 +953,29 @@ func (h *GroupHandler) handleServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Message: "Cannot remove group owner",
 		})
+	case errors.Is(err, services.ErrGroupOwnerCannotLeave):
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Group owner cannot leave their own group",
+		})
 	case errors.Is(err, services.ErrGroupAccessDenied):
 		c.JSON(http.StatusForbidden, ErrorResponse{
 			Message: "Access denied to group",
+		})
+	case errors.Is(err, services.ErrGroupInviteNotFound):
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Message: "Invite not found",
+		})
+	case errors.Is(err, services.ErrGroupInviteExpired):
+		c.JSON(http.StatusGone, ErrorResponse{
+			Message: "Invite has expired",
+		})
+	case errors.Is(err, services.ErrGroupInviteExhausted):
+		c.JSON(http.StatusGone, ErrorResponse{
+			Message: "Invite has reached maximum uses",
+		})
+	case errors.Is(err, services.ErrGroupInviteInvalid):
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid invite",
 		})
 	case errors.Is(err, services.ErrValidationFailed):
 		c.JSON(http.StatusBadRequest, ErrorResponse{
