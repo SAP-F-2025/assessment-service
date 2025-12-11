@@ -208,9 +208,8 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			attempts.GET("/student/:student_id", hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin), hm.attemptHandler.GetAttemptsByStudent)
 		}
 
-		// Grading routes - Teachers, Proctors and Admins only
+		// Grading routes - Permission checked at service layer based on ownership
 		grading := v1.Group("/grading")
-		grading.Use(hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleProctor, models.RoleAdmin))
 		{
 			// Manual grading
 			grading.POST("/answers/:answer_id", hm.gradingHandler.GradeAnswer)

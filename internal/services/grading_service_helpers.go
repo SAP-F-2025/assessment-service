@@ -464,28 +464,65 @@ func (s *gradingService) generateOrderingFeedback(questionContent json.RawMessag
 // ===== HELPER FUNCTIONS =====
 
 func (s *gradingService) checkGradingPermission(ctx context.Context, answer *models.StudentAnswer, graderID string) error {
-	// Get user role
-	userRole, err := s.getUserRole(ctx, graderID)
+	assessmentID := answer.Attempt.AssessmentID
+
+	// Check 1: Is user admin?
+	userRole, _ := s.getUserRole(ctx, graderID)
+	if userRole == models.RoleAdmin {
+		return nil
+	}
+
+	// Check 2: Is user the assessment creator?
+	assessment, err := s.repo.Assessment().GetByID(ctx, nil, assessmentID)
+	if err != nil {
+		return fmt.Errorf("failed to get assessment: %w", err)
+	}
+	if assessment.CreatedBy == graderID {
+		return nil
+	}
+
+	// Check 3: Is user owner/co-owner of any group this assessment is assigned to?
+	canGrade, err := s.isGroupOwnerForAssessment(ctx, assessmentID, graderID)
 	if err != nil {
 		return err
 	}
-
-	// Only teachers and admins can grade
-	if userRole != models.RoleTeacher && userRole != models.RoleAdmin {
-		return NewPermissionError(graderID, answer.ID, "answer", "grade", "insufficient role permissions")
+	if canGrade {
+		return nil
 	}
 
-	// Check if grader has access to the assessment
-	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
-	canAccess, err := assessmentService.CanAccess(ctx, answer.Attempt.AssessmentID, graderID)
+	return NewPermissionError(graderID, assessmentID, "assessment", "grade", "not owner or group owner/co-owner")
+}
+
+// isGroupOwnerForAssessment checks if user is owner/co-owner of any group the assessment is assigned to
+func (s *gradingService) isGroupOwnerForAssessment(ctx context.Context, assessmentID uint, userID string) (bool, error) {
+	// Get all groups this assessment is assigned to
+	assignedGroups, err := s.repo.AssessmentGroup().GetGroupsByAssessment(ctx, nil, assessmentID)
 	if err != nil {
-		return err
-	}
-	if !canAccess {
-		return NewPermissionError(graderID, answer.Attempt.AssessmentID, "assessment", "grade", "not owner or insufficient permissions")
+		return false, err
 	}
 
-	return nil
+	for _, group := range assignedGroups {
+		// Check if user is group creator
+		if group.CreatedBy == userID {
+			return true, nil
+		}
+
+		// Check if user is owner/co-owner member
+		members, err := s.repo.Group().GetMembers(ctx, nil, group.ID)
+		if err != nil {
+			continue
+		}
+
+		for _, member := range members {
+			if member.UserID == userID {
+				if member.Role == models.GroupMemberRoleOwner || member.Role == models.GroupMemberRoleCoOwner {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
 }
 
 func (s *gradingService) getUserRole(ctx context.Context, userID string) (models.UserRole, error) {
