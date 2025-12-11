@@ -675,7 +675,11 @@ func (s *groupService) CanManageMembers(ctx context.Context, groupID uint, userI
 func (s *groupService) IsOwner(ctx context.Context, groupID uint, userID string) (bool, error) {
 	group, err := s.repo.Group().GetByID(ctx, nil, groupID)
 	if err != nil {
-		return false, err
+		// Translate repository error to service error for proper HTTP status mapping
+		if repositories.IsNotFoundError(err) {
+			return false, ErrGroupNotFound
+		}
+		return false, fmt.Errorf("failed to check group ownership: %w", err)
 	}
 
 	return group.CreatedBy == userID, nil
@@ -734,6 +738,9 @@ func (s *groupService) buildGroupResponse(ctx context.Context, group *models.Gro
 func (s *groupService) getMemberRole(ctx context.Context, groupID uint, userID string) (models.GroupMemberRole, error) {
 	members, err := s.repo.Group().GetMembers(ctx, nil, groupID)
 	if err != nil {
+		if repositories.IsNotFoundError(err) {
+			return "", ErrGroupNotFound
+		}
 		return "", fmt.Errorf("failed to get members: %w", err)
 	}
 
@@ -743,7 +750,7 @@ func (s *groupService) getMemberRole(ctx context.Context, groupID uint, userID s
 		}
 	}
 
-	return "", fmt.Errorf("user is not a member of this group")
+	return "", ErrGroupMemberNotFound
 }
 
 // getUserRole returns the system role of a user

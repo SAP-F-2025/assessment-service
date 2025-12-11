@@ -29,6 +29,7 @@ type Repository interface {
 
 	// Group domain
 	Group() GroupRepository
+	GroupInvite() GroupInviteRepository
 
 	// Assessment-Group relationship
 	AssessmentGroup() AssessmentGroupRepository

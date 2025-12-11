@@ -207,6 +207,13 @@ func (s *assessmentGroupService) GetAssignedGroups(ctx context.Context, assessme
 
 // GetGroupAssessments retrieves all assessments assigned to a group with detailed information
 func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupID uint, userID string) (*GroupAssessmentListResponse, error) {
+	// Check if user is Admin (Admin can view all groups' assessments)
+	isAdmin := false
+	user, err := s.repo.User().GetByID(ctx, userID)
+	if err == nil && user.Role == models.RoleAdmin {
+		isAdmin = true
+	}
+
 	// Check if user is member of the group
 	isMember, err := s.repo.Group().IsMember(ctx, nil, groupID, userID)
 	if err != nil {
@@ -224,7 +231,8 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 
 	isOwner := group.CreatedBy == userID
 
-	if !isMember && !isOwner {
+	// Admin bypass - can access any group's assessments
+	if !isAdmin && !isMember && !isOwner {
 		return nil, NewPermissionError(userID, groupID, "assessment-group", "view",
 			"must be group member or owner")
 	}
@@ -373,9 +381,9 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 			TotalPoints:    stat.TotalPoints,
 			Settings:       setting,
 			IsExpired:      isExpired,
-			CanEdit:        assessment.CreatedBy == userID,
-			CanDelete:      assessment.CreatedBy == userID,
-			CanTake:        true, // Member can take assessments assigned to their group
+			CanEdit:        isAdmin || assessment.CreatedBy == userID,
+			CanDelete:      isAdmin || assessment.CreatedBy == userID,
+			CanTake:        !isAdmin && (isMember || isOwner), // Admin doesn't take assessments
 		}
 
 		// Populate member-specific fields (from maps - no queries!)

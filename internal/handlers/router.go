@@ -22,6 +22,7 @@ type HandlerManager struct {
 	groupHandler           *GroupHandler
 	assessmentGroupHandler *AssessmentGroupHandler
 	userHandler            *UserHandler
+	importExportHandler    *ImportExportHandler
 	authMiddleware         *CasdoorAuthMiddleware
 }
 
@@ -45,6 +46,7 @@ func NewHandlerManager(
 		groupHandler:           NewGroupHandler(serviceManager.Group(), logger),
 		assessmentGroupHandler: NewAssessmentGroupHandler(serviceManager.AssessmentGroup(), logger),
 		userHandler:            NewUserHandler(userRepo, logger),
+		importExportHandler:    NewImportExportHandler(serviceManager.ImportExport(), logger),
 		authMiddleware:         authMiddleware,
 	}
 }
@@ -101,6 +103,9 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			assessments.POST("/:id/groups", hm.assessmentGroupHandler.AssignToGroups)
 			assessments.DELETE("/:id/groups", hm.assessmentGroupHandler.UnassignFromGroups)
 			assessments.GET("/:id/groups", hm.assessmentGroupHandler.GetAssignedGroups)
+
+			// Export assessment results
+			assessments.GET("/:id/results/export", hm.importExportHandler.ExportAssessmentResults)
 		}
 
 		// Question routes
@@ -126,6 +131,11 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			// Creator-specific routes
 			questions.GET("/creator/:creator_id", hm.questionHandler.GetQuestionsByCreator)
 			questions.GET("/creator/:creator_id/usage-stats", hm.questionHandler.GetQuestionUsageStats)
+
+			// Import/Export routes
+			questions.POST("/import", hm.importExportHandler.ImportQuestions)
+			questions.GET("/export", hm.importExportHandler.ExportQuestions)
+			questions.GET("/template", hm.importExportHandler.DownloadTemplate)
 		}
 
 		// Question Bank routes
@@ -164,6 +174,12 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			users.GET("", hm.userHandler.ListUsers)
 			users.GET("/search", hm.userHandler.SearchUsers)
 			users.GET("/:id", hm.userHandler.GetUser)
+		}
+
+		// Import job tracking routes
+		importJobs := v1.Group("/import-jobs")
+		{
+			importJobs.GET("/:id", hm.importExportHandler.GetImportJobStatus)
 		}
 
 		// Attempt routes
@@ -261,6 +277,20 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			groups.POST("/:id/members", hm.groupHandler.AddMember)
 			groups.DELETE("/:id/members/:userId", hm.groupHandler.RemoveMember)
 			groups.PUT("/:id/members/:userId/role", hm.groupHandler.UpdateMemberRole)
+
+			// Leave group - Member self-removal
+			groups.DELETE("/:id/leave", hm.groupHandler.LeaveGroup)
+
+			// Invite management - Owner/Co-owner can manage invites
+			groups.POST("/:id/invites/link", hm.groupHandler.CreateInviteLink)
+			groups.POST("/:id/invites/code", hm.groupHandler.CreateInviteCode)
+			groups.GET("/:id/invites", hm.groupHandler.GetGroupInvites)
+			groups.DELETE("/:id/invites/:inviteId", hm.groupHandler.DeleteInvite)
+			groups.POST("/:id/invites/:inviteId/regenerate", hm.groupHandler.RegenerateInvite)
+
+			// Join via invite - Any authenticated user
+			groups.POST("/join/link/:token", hm.groupHandler.JoinViaLink)
+			groups.POST("/join/code", hm.groupHandler.JoinViaCode)
 
 			// Group assessments - Get assessments assigned to this group
 			groups.GET("/:id/assessments", hm.assessmentGroupHandler.GetGroupAssessments)
