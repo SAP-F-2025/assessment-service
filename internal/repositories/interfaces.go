@@ -30,6 +30,7 @@ type QuestionFilters struct {
 	Offset     int                     `json:"offset"`
 	SortBy     string                  `json:"sort_by"`
 	SortOrder  string                  `json:"sort_order"`
+	ExcludeIDs []uint                  `json:"exclude_ids"`
 }
 
 type RandomQuestionFilters struct {
