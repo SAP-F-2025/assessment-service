@@ -274,8 +274,11 @@ func (s *importExportService) ExportQuestionsToCSV(ctx context.Context, question
 	writer := csv.NewWriter(&buf)
 
 	// Write header - use snake_case to match import expectations
+	// Support up to 10 options (A-J) to match model validation
 	headers := []string{
-		"question_type", "question_text", "option_a", "option_b", "option_c", "option_d",
+		"question_type", "question_text",
+		"option_a", "option_b", "option_c", "option_d", "option_e",
+		"option_f", "option_g", "option_h", "option_i", "option_j",
 		"correct_answer", "points", "category", "difficulty", "tags", "explanation",
 	}
 	if err := writer.Write(headers); err != nil {
@@ -320,8 +323,11 @@ func (s *importExportService) ExportQuestionsToExcel(ctx context.Context, questi
 	f.DeleteSheet("Sheet1")
 
 	// Write headers - use snake_case to match import expectations
+	// Support up to 10 options (A-J) to match model validation
 	headers := []string{
-		"question_type", "question_text", "option_a", "option_b", "option_c", "option_d",
+		"question_type", "question_text",
+		"option_a", "option_b", "option_c", "option_d", "option_e",
+		"option_f", "option_g", "option_h", "option_i", "option_j",
 		"correct_answer", "points", "category", "difficulty", "tags", "explanation",
 	}
 
@@ -791,10 +797,11 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 		return ""
 	}
 
-	// Get options
+	// Get options - support up to 10 options (A-J)
 	var options []models.MCOption
-	optionColumns := []string{"option_a", "option_b", "option_c", "option_d"}
-	optionLabels := []string{"A", "B", "C", "D"}
+	optionColumns := []string{"option_a", "option_b", "option_c", "option_d", "option_e", "option_f", "option_g", "option_h", "option_i", "option_j"}
+	optionLabels := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J"}
+	// Use uppercase letters for option IDs to match FE format
 
 	for i, colName := range optionColumns {
 		optionText := getColumn(colName)
@@ -811,9 +818,9 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 				return nil, errors
 			}
 			options = append(options, models.MCOption{
-				ID:    fmt.Sprintf("%d", i),
+				ID:    optionLabels[i], // Use uppercase letter ID ("A", "B", "C"...)
 				Text:  optionText,
-				Order: i,
+				Order: i + 1, // Order starts from 1
 			})
 		}
 	}
@@ -858,17 +865,19 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 	var correctAnswers []string
 	var invalidAnswers []string
 
-	// Handle multiple correct answers (e.g., "A,C" or "A")
+	// Handle multiple correct answers (e.g., "A,C" or "A", supports A-J)
 	answerParts := strings.Split(correctAnswerStr, ",")
 	for _, part := range answerParts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
-		if len(part) == 1 && part >= "A" && part <= "D" {
+		// Support A-J (10 options)
+		if len(part) == 1 && part >= "A" && part <= "J" {
 			index := int(part[0] - 'A')
 			if index < len(options) {
-				correctAnswers = append(correctAnswers, fmt.Sprintf("%d", index))
+				// Use uppercase letter as correct answer ID (matches option ID format)
+				correctAnswers = append(correctAnswers, part)
 			} else {
 				invalidAnswers = append(invalidAnswers, fmt.Sprintf("%s (option not provided)", part))
 			}
@@ -881,7 +890,7 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 		errors = append(errors, models.ImportValidationError{
 			Row:     rowNum,
 			Column:  "correct_answer",
-			Message: fmt.Sprintf("invalid answer(s): %s. Use only A, B, C, D that correspond to filled options", strings.Join(invalidAnswers, ", ")),
+			Message: fmt.Sprintf("invalid answer(s): %s. Use only A-J that correspond to filled options", strings.Join(invalidAnswers, ", ")),
 			Value:   correctAnswerStr,
 			Code:    "INVALID_VALUE",
 		})
@@ -892,7 +901,7 @@ func (s *importExportService) parseMultipleChoiceContent(record []string, header
 		errors = append(errors, models.ImportValidationError{
 			Row:     rowNum,
 			Column:  "correct_answer",
-			Message: "must specify at least one valid correct answer (A, B, C, or D)",
+			Message: "must specify at least one valid correct answer (A through J)",
 			Value:   correctAnswerStr,
 			Code:    "REQUIRED",
 		})
@@ -973,7 +982,8 @@ func extractQuestionIDs(questions []*models.Question) []uint {
 }
 
 func (s *importExportService) questionToCSVRow(question *models.Question) []string {
-	row := make([]string, 12) // 12 columns as defined in headers
+	// 18 columns: question_type, question_text, option_a-j (10), correct_answer, points, category, difficulty, tags, explanation
+	row := make([]string, 18)
 
 	row[0] = string(question.Type)
 	row[1] = question.Text
@@ -983,31 +993,43 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 	case models.MultipleChoice:
 		var content models.MultipleChoiceContent
 		if err := json.Unmarshal(question.Content, &content); err == nil {
-			// Fill options
+			// Build a map from option ID to its position index
+			optionIDToIndex := make(map[string]int)
 			for i, option := range content.Options {
-				if i < 4 { // A, B, C, D
+				optionIDToIndex[option.ID] = i
+				// Fill options (up to 10: A-J)
+				if i < 10 {
 					row[2+i] = option.Text
 				}
 			}
 
-			// Fill correct answer
+			// Fill correct answer (support A-J)
 			var correctLetters []string
 			for _, optionID := range content.CorrectAnswers {
-				// Convert option ID (string) to index
-				if idx, err := strconv.Atoi(optionID); err == nil && idx < 4 {
+				// Try to find the option index from the map
+				if idx, ok := optionIDToIndex[optionID]; ok && idx < 10 {
 					correctLetters = append(correctLetters, string('A'+rune(idx)))
+				} else if idx, ok := optionIDToIndex[strings.ToLower(optionID)]; ok && idx < 10 {
+					// Try lowercase match
+					correctLetters = append(correctLetters, string('A'+rune(idx)))
+				} else if idx, ok := optionIDToIndex[strings.ToUpper(optionID)]; ok && idx < 10 {
+					// Try uppercase match
+					correctLetters = append(correctLetters, string('A'+rune(idx)))
+				} else if numIdx, err := strconv.Atoi(optionID); err == nil && numIdx < 10 {
+					// Fallback: try to parse as numeric index
+					correctLetters = append(correctLetters, string('A'+rune(numIdx)))
 				}
 			}
-			row[6] = strings.Join(correctLetters, ",")
+			row[12] = strings.Join(correctLetters, ",") // correct_answer is at index 12
 		}
 
 	case models.TrueFalse:
 		var content models.TrueFalseContent
 		if err := json.Unmarshal(question.Content, &content); err == nil {
 			if content.CorrectAnswer {
-				row[6] = "True"
+				row[12] = "True"
 			} else {
-				row[6] = "False"
+				row[12] = "False"
 			}
 		}
 
@@ -1015,12 +1037,12 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 		var content models.ShortAnswerContent
 		if err := json.Unmarshal(question.Content, &content); err == nil {
 			// Join multiple accepted answers with |
-			row[6] = strings.Join(content.AcceptedAnswers, "|")
+			row[12] = strings.Join(content.AcceptedAnswers, "|")
 		}
 
 	case models.Essay:
 		// Essay doesn't have correct answer
-		row[6] = ""
+		row[12] = ""
 
 	case models.FillInBlank:
 		var content models.FillBlankContent
@@ -1035,7 +1057,7 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 					break
 				}
 			}
-			row[6] = strings.Join(answers, "|")
+			row[12] = strings.Join(answers, "|")
 		}
 
 	case models.Matching:
@@ -1057,7 +1079,7 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 				rightText := rightMap[pair.RightID]
 				pairs = append(pairs, leftText+":"+rightText)
 			}
-			row[6] = strings.Join(pairs, "|")
+			row[12] = strings.Join(pairs, "|")
 		}
 
 	case models.Ordering:
@@ -1073,28 +1095,29 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 			for _, itemID := range content.CorrectOrder {
 				orderedItems = append(orderedItems, itemMap[itemID])
 			}
-			row[6] = strings.Join(orderedItems, " > ")
+			row[12] = strings.Join(orderedItems, " > ")
 		}
 	}
 
-	row[7] = strconv.Itoa(question.Points)
+	// Fixed column indices for 18-column format
+	row[13] = strconv.Itoa(question.Points)
 
 	if question.Category != nil {
-		row[8] = question.Category.Name
+		row[14] = question.Category.Name
 	}
 
-	row[9] = string(question.Difficulty)
+	row[15] = string(question.Difficulty)
 
 	// Handle tags
 	var tags []string
 	if err := json.Unmarshal(question.Tags, &tags); err == nil {
-		row[10] = strings.Join(tags, ",")
+		row[16] = strings.Join(tags, ",")
 	} else {
-		row[10] = ""
+		row[16] = ""
 	}
 
 	if question.Explanation != nil {
-		row[11] = *question.Explanation
+		row[17] = *question.Explanation
 	}
 
 	return row
