@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
@@ -759,6 +760,33 @@ func (h *QuestionHandler) parseIntQuery(c *gin.Context, param string, defaultVal
 	return value
 }
 
+func (h *QuestionHandler) parseUintArray(c *gin.Context, param string) []uint {
+	var result []uint
+
+	// Try to get as slice first (key=1&key=2)
+	values := c.QueryArray(param)
+
+	// If empty, try as just param (key=1) or verify if comma separated
+	if len(values) == 0 {
+		val := c.Query(param)
+		if val != "" {
+			if strings.Contains(val, ",") {
+				values = strings.Split(val, ",")
+			} else {
+				values = []string{val}
+			}
+		}
+	}
+
+	for _, v := range values {
+		if id, err := strconv.ParseUint(strings.TrimSpace(v), 10, 32); err == nil {
+			result = append(result, uint(id))
+		}
+	}
+
+	return result
+}
+
 func (h *QuestionHandler) parseQuestionFilters(c *gin.Context) repositories.QuestionFilters {
 	page := h.parseIntQuery(c, "page", 1)
 	size := h.parseIntQuery(c, "size", 10)
@@ -787,6 +815,11 @@ func (h *QuestionHandler) parseQuestionFilters(c *gin.Context) repositories.Ques
 			id := uint(categoryID)
 			filters.CategoryID = &id
 		}
+	}
+
+	// Parse exclude_ids
+	if excludeIDs := h.parseUintArray(c, "exclude_ids"); len(excludeIDs) > 0 {
+		filters.ExcludeIDs = excludeIDs
 	}
 
 	return filters
@@ -935,6 +968,11 @@ func (h *QuestionHandler) parseRandomQuestionFilters(c *gin.Context) repositorie
 			id := uint(categoryID)
 			filters.CategoryID = &id
 		}
+	}
+
+	// Parse exclude_ids
+	if excludeIDs := h.parseUintArray(c, "exclude_ids"); len(excludeIDs) > 0 {
+		filters.ExcludeIDs = excludeIDs
 	}
 
 	return filters

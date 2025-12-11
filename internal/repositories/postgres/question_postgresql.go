@@ -758,6 +758,9 @@ func (q *QuestionPostgreSQL) applyQuestionFilters(query *gorm.DB, filters reposi
 			query = query.Where("tags::text LIKE ?", "%\""+tag+"\"%")
 		}
 	}
+	if len(filters.ExcludeIDs) > 0 {
+		query = query.Where("id NOT IN ?", filters.ExcludeIDs)
+	}
 
 	return query
 }
