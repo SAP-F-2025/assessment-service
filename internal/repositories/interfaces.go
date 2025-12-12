@@ -31,6 +31,7 @@ type QuestionFilters struct {
 	SortBy     string                  `json:"sort_by"`
 	SortOrder  string                  `json:"sort_order"`
 	ExcludeIDs []uint                  `json:"exclude_ids"`
+	BankID     *uint                   `json:"bank_id"`
 }
 
 type RandomQuestionFilters struct {
