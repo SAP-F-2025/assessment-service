@@ -766,7 +766,12 @@ func (h *QuestionHandler) parseUintArray(c *gin.Context, param string) []uint {
 	// Try to get as slice first (key=1&key=2)
 	values := c.QueryArray(param)
 
-	// If empty, try as just param (key=1) or verify if comma separated
+	// If empty, try with brackets (key[]=1&key[]=2)
+	if len(values) == 0 {
+		values = c.QueryArray(param + "[]")
+	}
+
+	// If still empty, try as just param (key=1) or verify if comma separated
 	if len(values) == 0 {
 		val := c.Query(param)
 		if val != "" {
