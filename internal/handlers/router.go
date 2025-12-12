@@ -116,6 +116,7 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 			questions.PUT("/batch", hm.questionHandler.UpdateQuestionsBatch)
 			questions.GET("", hm.questionHandler.ListQuestions)
 			questions.GET("/search", hm.questionHandler.SearchQuestions)
+			questions.POST("/filter", hm.questionHandler.FilterQuestions)
 			questions.GET("/random", hm.questionHandler.GetRandomQuestions)
 			questions.GET("/:id", hm.questionHandler.GetQuestion)
 			questions.GET("/:id/details", hm.questionHandler.GetQuestionWithDetails)

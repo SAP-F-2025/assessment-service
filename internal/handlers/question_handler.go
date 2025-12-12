@@ -377,7 +377,100 @@ func (h *QuestionHandler) SearchQuestions(c *gin.Context) {
 	c.JSON(http.StatusOK, questions)
 }
 
-// GetRandomQuestions gets random questions
+// FilterQuestionsRequest represents the request body for filtering questions
+type FilterQuestionsRequest struct {
+	Page       int    `json:"page"`
+	Size       int    `json:"size"`
+	Type       string `json:"type,omitempty"`
+	Difficulty string `json:"difficulty,omitempty"`
+	Search     string `json:"search,omitempty"`
+	ExcludeIDs []uint `json:"exclude_ids,omitempty"`
+	BankID     *uint  `json:"bank_id,omitempty"`
+}
+
+// FilterQuestions filters questions with complex criteria
+// @Summary Filter questions
+// @Description Filter questions with complex criteria using POST body
+// @Tags questions
+// @Accept json
+// @Produce json
+// @Param request body FilterQuestionsRequest true "Filter criteria"
+// @Success 200 {object} SuccessResponse{data=services.QuestionListResponse}
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /questions/filter [post]
+func (h *QuestionHandler) FilterQuestions(c *gin.Context) {
+	h.LogRequest(c, "Filtering questions")
+
+	var req FilterQuestionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Invalid request payload",
+			Details: err.Error(),
+		})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	// Set defaults
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.Size <= 0 {
+		req.Size = 10
+	}
+	if req.Size > 100 {
+		req.Size = 100
+	}
+
+	// Build filters
+	filters := repositories.QuestionFilters{
+		Limit:  req.Size,
+		Offset: (req.Page - 1) * req.Size,
+	}
+
+	if req.Type != "" {
+		qType := models.QuestionType(req.Type)
+		filters.Type = &qType
+	}
+
+	if req.Difficulty != "" {
+		diffLevel := models.DifficultyLevel(req.Difficulty)
+		filters.Difficulty = &diffLevel
+	}
+
+	if len(req.ExcludeIDs) > 0 {
+		filters.ExcludeIDs = req.ExcludeIDs
+	}
+
+	if req.BankID != nil {
+		filters.BankID = req.BankID
+	}
+
+	// If search is provided, use search endpoint logic
+	var questions interface{}
+	var err error
+	if req.Search != "" {
+		questions, err = h.questionService.Search(c.Request.Context(), req.Search, filters, userID.(string))
+	} else {
+		questions, err = h.questionService.List(c.Request.Context(), filters, userID.(string))
+	}
+
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, questions)
+}
 // @Summary Get random questions
 // @Description Gets random questions based on filters
 // @Tags questions
@@ -766,7 +859,12 @@ func (h *QuestionHandler) parseUintArray(c *gin.Context, param string) []uint {
 	// Try to get as slice first (key=1&key=2)
 	values := c.QueryArray(param)
 
-	// If empty, try as just param (key=1) or verify if comma separated
+	// If empty, try with brackets (key[]=1&key[]=2)
+	if len(values) == 0 {
+		values = c.QueryArray(param + "[]")
+	}
+
+	// If still empty, try as just param (key=1) or verify if comma separated
 	if len(values) == 0 {
 		val := c.Query(param)
 		if val != "" {

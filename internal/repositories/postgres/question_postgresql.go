@@ -761,6 +761,10 @@ func (q *QuestionPostgreSQL) applyQuestionFilters(query *gorm.DB, filters reposi
 	if len(filters.ExcludeIDs) > 0 {
 		query = query.Where("id NOT IN ?", filters.ExcludeIDs)
 	}
+	if filters.BankID != nil {
+		query = query.Joins("INNER JOIN question_bank_questions qbq ON questions.id = qbq.question_id").
+			Where("qbq.question_bank_id = ?", *filters.BankID)
+	}
 
 	return query
 }
