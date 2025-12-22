@@ -26,11 +26,13 @@ type QuestionFilters struct {
 	CategoryID *uint                   `json:"category_id"`
 	CreatedBy  *string                 `json:"created_by"`
 	Tags       []string                `json:"tags"`
+	Search     *string                 `json:"search"`
 	Limit      int                     `json:"limit"`
 	Offset     int                     `json:"offset"`
 	SortBy     string                  `json:"sort_by"`
 	SortOrder  string                  `json:"sort_order"`
 	ExcludeIDs []uint                  `json:"exclude_ids"`
+	BankId     *uint                   `json:"bank_id"`
 }
 
 type RandomQuestionFilters struct {

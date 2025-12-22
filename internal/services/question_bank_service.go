@@ -580,19 +580,44 @@ func (s *questionBankService) GetStats(ctx context.Context, bankID uint, userID 
 
 // ===== PERMISSION CHECKS =====
 
+// isAdmin checks if the user has admin role
+func (s *questionBankService) isAdmin(ctx context.Context, userID string) bool {
+	userRole, err := s.getUserRole(ctx, userID)
+	if err != nil {
+		return false
+	}
+	return userRole == models.RoleAdmin
+}
+
 func (s *questionBankService) CanAccess(ctx context.Context, bankID uint, userID string) (bool, error) {
+	// Admin has full access to all question banks
+	if s.isAdmin(ctx, userID) {
+		return true, nil
+	}
 	return s.repo.QuestionBank().CanAccess(ctx, nil, bankID, userID)
 }
 
 func (s *questionBankService) CanEdit(ctx context.Context, bankID uint, userID string) (bool, error) {
+	// Admin has full edit access to all question banks
+	if s.isAdmin(ctx, userID) {
+		return true, nil
+	}
 	return s.repo.QuestionBank().CanEdit(ctx, nil, bankID, userID)
 }
 
 func (s *questionBankService) CanDelete(ctx context.Context, bankID uint, userID string) (bool, error) {
+	// Admin has full delete access to all question banks
+	if s.isAdmin(ctx, userID) {
+		return true, nil
+	}
 	return s.repo.QuestionBank().CanDelete(ctx, nil, bankID, userID)
 }
 
 func (s *questionBankService) IsOwner(ctx context.Context, bankID uint, userID string) (bool, error) {
+	// Admin is treated as owner for all question banks (can share, unshare, etc.)
+	if s.isAdmin(ctx, userID) {
+		return true, nil
+	}
 	return s.repo.QuestionBank().IsOwner(ctx, nil, bankID, userID)
 }
 
@@ -604,8 +629,15 @@ func (s *questionBankService) buildQuestionBankResponse(ctx context.Context, ban
 		IsOwner:      bank.CreatedBy == userID,
 	}
 
-	// Determine access level
-	if bank.CreatedBy == userID {
+	// Check if user is admin - admin has full access to all banks
+	if s.isAdmin(ctx, userID) {
+		response.AccessLevel = "admin"
+		response.CanEdit = true
+		response.CanDelete = true
+		// Also set IsOwner to true for admin to enable all owner actions in UI
+		response.IsOwner = true
+	} else if bank.CreatedBy == userID {
+		// Determine access level for owner
 		response.AccessLevel = "owner"
 		response.CanEdit = true
 		response.CanDelete = true

@@ -763,10 +763,32 @@ func (h *QuestionHandler) parseIntQuery(c *gin.Context, param string, defaultVal
 func (h *QuestionHandler) parseUintArray(c *gin.Context, param string) []uint {
 	var result []uint
 
-	// Try to get as slice first (key=1&key=2)
+	var values []string
+	val := c.Query(param)
+	if val != "" {
+		if strings.Contains(val, ",") {
+			values = strings.Split(val, ",")
+		} else {
+			values = []string{val}
+		}
+	}
+
+	for _, v := range values {
+		if id, err := strconv.ParseUint(strings.TrimSpace(v), 10, 32); err == nil {
+			result = append(result, uint(id))
+		}
+	}
+
+	return result
+}
+
+func (h *QuestionHandler) parseStringArray(c *gin.Context, param string) []string {
+	var result []string
+
+	// Try to get as slice first (key=val1&key=val2)
 	values := c.QueryArray(param)
 
-	// If empty, try as just param (key=1) or verify if comma separated
+	// If empty, try as just param (key=val) or verify if comma separated
 	if len(values) == 0 {
 		val := c.Query(param)
 		if val != "" {
@@ -779,8 +801,9 @@ func (h *QuestionHandler) parseUintArray(c *gin.Context, param string) []uint {
 	}
 
 	for _, v := range values {
-		if id, err := strconv.ParseUint(strings.TrimSpace(v), 10, 32); err == nil {
-			result = append(result, uint(id))
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			result = append(result, trimmed)
 		}
 	}
 
@@ -820,6 +843,31 @@ func (h *QuestionHandler) parseQuestionFilters(c *gin.Context) repositories.Ques
 	// Parse exclude_ids
 	if excludeIDs := h.parseUintArray(c, "exclude_ids"); len(excludeIDs) > 0 {
 		filters.ExcludeIDs = excludeIDs
+	}
+
+	if bankId := c.Query("bank_id"); bankId != "" {
+		if bankID, err := strconv.ParseUint(bankId, 10, 32); err == nil {
+			id := uint(bankID)
+			filters.BankId = &id
+		}
+	}
+
+	if search := c.Query("search"); search != "" {
+		filters.Search = &search
+	}
+
+	// Parse tags - supports both comma-separated and multiple query params
+	if tags := h.parseStringArray(c, "tags"); len(tags) > 0 {
+		filters.Tags = tags
+	}
+
+	// Parse sorting options
+	if sortBy := c.Query("sort_by"); sortBy != "" {
+		filters.SortBy = sortBy
+	}
+
+	if sortOrder := c.Query("sort_order"); sortOrder != "" {
+		filters.SortOrder = sortOrder
 	}
 
 	return filters
