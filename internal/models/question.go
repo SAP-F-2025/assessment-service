@@ -45,10 +45,11 @@ type Question struct {
 	Tags       datatypes.JSON  `json:"tags" gorm:"type:jsonb"` // []string
 
 	// Metadata
-	Explanation *string   `json:"explanation" gorm:"type:text"`
-	CreatedBy   string    `json:"created_by" gorm:"not null;index;size:255"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Explanation *string        `json:"explanation" gorm:"type:text"`
+	CreatedBy   string         `json:"created_by" gorm:"not null;index;size:255"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
 	// Relations
 	Category    *QuestionCategory    `json:"category" gorm:"foreignKey:CategoryID"`
@@ -73,8 +74,9 @@ type AssessmentQuestion struct {
 	TimeLimit *int     `json:"time_limit"` // DEPRECATED: Not used in timing logic. Use Assessment.Duration instead. Kept for backward compatibility.
 	Required  bool     `json:"required" gorm:"default:true"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
 	// Relations
 	Assessment Assessment `json:"assessment" gorm:"foreignKey:AssessmentID"`

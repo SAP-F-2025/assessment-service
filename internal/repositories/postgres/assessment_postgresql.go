@@ -178,7 +178,7 @@ func (a *AssessmentPostgreSQL) Delete(ctx context.Context, tx *gorm.DB, id uint)
 		return fmt.Errorf("cannot delete assessment with existing attempts")
 	}
 
-	if err := tx.WithContext(ctx).Unscoped().Delete(&models.Assessment{}, id).Error; err != nil {
+	if err := tx.WithContext(ctx).Delete(&models.Assessment{}, id).Error; err != nil {
 		return fmt.Errorf("failed to delete assessment: %w", err)
 	}
 
@@ -477,16 +477,16 @@ func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, tx *gorm.DB,
 	var totalQuestions int64
 	db.WithContext(ctx).
 		Table("assessment_questions aq").
-		Joins("JOIN assessments a ON aq.assessment_id = a.id").
-		Where("a.created_by = ?", creatorID).
+		Joins("JOIN assessments a ON aq.assessment_id = a.id AND a.deleted_at IS NULL").
+		Where("a.created_by = ? AND aq.deleted_at IS NULL", creatorID).
 		Count(&totalQuestions)
 
 	// Total attempts on creator's assessments
 	var totalAttempts int64
 	db.WithContext(ctx).
 		Table("assessment_attempts att").
-		Joins("JOIN assessments a ON att.assessment_id = a.id").
-		Where("a.created_by = ?", creatorID).
+		Joins("JOIN assessments a ON att.assessment_id = a.id AND a.deleted_at IS NULL").
+		Where("a.created_by = ? AND att.deleted_at IS NULL", creatorID).
 		Count(&totalAttempts)
 
 	stats.TotalAssessments = int(totalAssessments)
@@ -506,8 +506,8 @@ func (a *AssessmentPostgreSQL) GetPopularAssessments(ctx context.Context, tx *go
 	err := db.WithContext(ctx).
 		Table("assessments a").
 		Select("a.*, COUNT(att.id) as attempt_count").
-		Joins("LEFT JOIN assessment_attempts att ON a.id = att.assessment_id").
-		Where("a.status = ?", models.StatusActive).
+		Joins("LEFT JOIN assessment_attempts att ON a.id = att.assessment_id AND att.deleted_at IS NULL").
+		Where("a.status = ? AND a.deleted_at IS NULL", models.StatusActive).
 		Group("a.id").
 		Order("attempt_count DESC").
 		Limit(limit).

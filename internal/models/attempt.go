@@ -53,17 +53,15 @@ type AssessmentAttempt struct {
 	SessionData datatypes.JSON `json:"session_data" gorm:"type:jsonb"` // Browser info, screen resolution, etc.
 	EndReason   *string        `json:"end_reason" gorm:"type:text"`    // e.g., "time_out", "abandoned", "completed"
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
 	// Relations
 	Assessment       Assessment        `json:"assessment" gorm:"foreignKey:AssessmentID"`
 	Student          User              `json:"student" gorm:"foreignKey:StudentID"`
 	Answers          []StudentAnswer   `json:"answers" gorm:"foreignKey:AttemptID"`
 	ProctoringEvents []ProctoringEvent `json:"proctoring_events" gorm:"foreignKey:AttemptID"`
-
-	// Unique constraint per student per assessment
-	gorm.Model `gorm:"uniqueIndex:idx_student_assessment_attempt"`
 }
 
 type StudentAnswer struct {

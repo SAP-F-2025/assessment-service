@@ -2,6 +2,8 @@ package models
 
 import (
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type AssessmentStatus string
@@ -38,9 +40,10 @@ type Assessment struct {
 	Type AssessmentType `json:"type" gorm:"size:20;default:'teacher';index"`
 
 	// Metadata
-	CreatedBy string    `json:"created_by" gorm:"not null;index;size:255"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedBy string         `json:"created_by" gorm:"not null;index;size:255"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
 	// Version control
 	Version int `json:"version" gorm:"default:1"`

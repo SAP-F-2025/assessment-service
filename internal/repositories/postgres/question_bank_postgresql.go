@@ -65,7 +65,7 @@ func (r *questionBankRepository) Update(ctx context.Context, tx *gorm.DB, bank *
 
 func (r *questionBankRepository) Delete(ctx context.Context, tx *gorm.DB, id uint) error {
 	db := r.getDB(tx)
-	if err := db.WithContext(ctx).Unscoped().Delete(&models.QuestionBank{}, id).Error; err != nil {
+	if err := db.WithContext(ctx).Delete(&models.QuestionBank{}, id).Error; err != nil {
 		return r.handleDBError(err, "delete question bank")
 	}
 	return nil
@@ -117,8 +117,8 @@ func (r *questionBankRepository) GetSharedWithUser(ctx context.Context, tx *gorm
 	query := db.WithContext(ctx).
 		Table("question_banks qb").
 		Model(&models.QuestionBank{}).
-		Joins("INNER JOIN question_bank_shares qbs ON qb.id = qbs.bank_id").
-		Where("qbs.user_id = ?", userID).
+		Joins("INNER JOIN question_bank_shares qbs ON qb.id = qbs.bank_id AND qbs.deleted_at IS NULL").
+		Where("qbs.user_id = ? AND qb.deleted_at IS NULL", userID).
 		Preload("Creator")
 
 	// Apply filters
@@ -184,7 +184,6 @@ func (r *questionBankRepository) UnshareBank(ctx context.Context, tx *gorm.DB, b
 	db := r.getDB(tx)
 	if err := db.WithContext(ctx).
 		Where("bank_id = ? AND user_id = ?", bankID, userID).
-		Unscoped().
 		Delete(&models.QuestionBankShare{}).Error; err != nil {
 		return r.handleDBError(err, "unshare question bank")
 	}
@@ -318,7 +317,7 @@ func (r *questionBankRepository) GetBankQuestions(ctx context.Context, tx *gorm.
 		Table("questions q").
 		Model(&models.Question{}).
 		Joins("INNER JOIN question_bank_questions qbq ON q.id = qbq.question_id").
-		Where("qbq.question_bank_id = ?", bankID).
+		Where("qbq.question_bank_id = ? AND q.deleted_at IS NULL", bankID).
 		Preload("Category").
 		Preload("Creator")
 
@@ -540,7 +539,7 @@ func (r *questionBankRepository) GetBankStats(ctx context.Context, tx *gorm.DB, 
 		Table("questions q").
 		Select("q.type, COUNT(*) as count").
 		Joins("INNER JOIN question_bank_questions qbq ON q.id = qbq.question_id").
-		Where("qbq.question_bank_id = ?", bankID).
+		Where("qbq.question_bank_id = ? AND q.deleted_at IS NULL", bankID).
 		Group("q.type").
 		Scan(&typeCounts).Error; err != nil {
 		return nil, r.handleDBError(err, "count questions by type")
@@ -560,7 +559,7 @@ func (r *questionBankRepository) GetBankStats(ctx context.Context, tx *gorm.DB, 
 		Table("questions q").
 		Select("q.difficulty, COUNT(*) as count").
 		Joins("INNER JOIN question_bank_questions qbq ON q.id = qbq.question_id").
-		Where("qbq.question_bank_id = ?", bankID).
+		Where("qbq.question_bank_id = ? AND q.deleted_at IS NULL", bankID).
 		Group("q.difficulty").
 		Scan(&diffCounts).Error; err != nil {
 		return nil, r.handleDBError(err, "count questions by difficulty")

@@ -112,7 +112,7 @@ func (q *QuestionPostgreSQL) Delete(ctx context.Context, tx *gorm.DB, id uint) e
 
 	err := db.Transaction(func(tx *gorm.DB) error {
 		// delete question in assessment_questions first due to foreign key constraint
-		if err := tx.WithContext(ctx).Unscoped().Where("question_id = ?", id).Delete(&models.AssessmentQuestion{}).Error; err != nil {
+		if err := tx.WithContext(ctx).Where("question_id = ?", id).Delete(&models.AssessmentQuestion{}).Error; err != nil {
 			return fmt.Errorf("failed to delete question from assessment_questions: %w", err)
 		}
 
@@ -120,8 +120,8 @@ func (q *QuestionPostgreSQL) Delete(ctx context.Context, tx *gorm.DB, id uint) e
 		if err := tx.WithContext(ctx).Exec(queryDeleteQuestionBank, id).Error; err != nil {
 			return fmt.Errorf("failed to delete question from question_bank_questions: %w", err)
 		}
-		// delete the question (hard delete)
-		if err := tx.WithContext(ctx).Unscoped().Delete(&models.Question{}, id).Error; err != nil {
+		// delete the question (soft delete)
+		if err := tx.WithContext(ctx).Delete(&models.Question{}, id).Error; err != nil {
 			return fmt.Errorf("failed to delete question: %w", err)
 		}
 
@@ -190,7 +190,7 @@ func (q *QuestionPostgreSQL) DeleteBatch(ctx context.Context, tx *gorm.DB, ids [
 	}
 
 	db := q.getDB(tx)
-	if err := db.WithContext(ctx).Unscoped().Delete(&models.Question{}, ids).Error; err != nil {
+	if err := db.WithContext(ctx).Delete(&models.Question{}, ids).Error; err != nil {
 		return fmt.Errorf("failed to delete questions batch: %w", err)
 	}
 
@@ -307,7 +307,7 @@ func (q *QuestionPostgreSQL) GetByAssessment(ctx context.Context, tx *gorm.DB, a
 	err := q.cacheManager.Question.CacheOrExecute(ctx, cacheKey, &questions, cache.QuestionCacheConfig.TTL, func() (interface{}, error) {
 		var dbQuestions []*models.Question
 		if err := db.WithContext(ctx).
-			Joins("JOIN assessment_questions aq ON aq.question_id = questions.id").
+			Joins("JOIN assessment_questions aq ON aq.question_id = questions.id AND aq.deleted_at IS NULL").
 			Where("aq.assessment_id = ?", assessmentID).
 			Order("aq.order ASC").
 			Find(&dbQuestions).Error; err != nil {
@@ -464,7 +464,7 @@ func (q *QuestionPostgreSQL) GetQuestionStats(ctx context.Context, tx *gorm.DB, 
 	var usageCount int64
 	if err := db.WithContext(ctx).
 		Table("assessment_questions").
-		Where("question_id = ?", id).
+		Where("question_id = ? AND deleted_at IS NULL", id).
 		Count(&usageCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to get question usage count: %w", err)
 	}
@@ -582,7 +582,7 @@ func (q *QuestionPostgreSQL) IsUsedInAssessments(ctx context.Context, tx *gorm.D
 	var count int64
 	if err := db.WithContext(ctx).
 		Table("assessment_questions").
-		Where("question_id = ?", id).
+		Where("question_id = ? AND deleted_at IS NULL", id).
 		Count(&count).Error; err != nil {
 		return false, fmt.Errorf("failed to check question usage in assessments: %w", err)
 	}
@@ -596,7 +596,7 @@ func (q *QuestionPostgreSQL) GetUsageCount(ctx context.Context, tx *gorm.DB, id 
 	var count int64
 	if err := db.WithContext(ctx).
 		Table("assessment_questions").
-		Where("question_id = ?", id).
+		Where("question_id = ? AND deleted_at IS NULL", id).
 		Count(&count).Error; err != nil {
 		return 0, fmt.Errorf("failed to get question usage count: %w", err)
 	}
@@ -648,7 +648,7 @@ func (q *QuestionPostgreSQL) GetByBank(ctx context.Context, bankID uint, filters
 		Table("questions q").
 		Select("q.*").
 		Joins("INNER JOIN question_bank_questions qbq ON q.id = qbq.question_id").
-		Where("qbq.question_bank_id = ?", bankID).
+		Where("qbq.question_bank_id = ? AND q.deleted_at IS NULL", bankID).
 		Preload("Category").
 		Preload("Creator").
 		Preload("Attachments")
@@ -767,7 +767,7 @@ func (q *QuestionPostgreSQL) applyQuestionFilters(query *gorm.DB, filters reposi
 	}
 	if filters.BankId != nil {
 		query = query.Joins("INNER JOIN question_bank_questions qbq ON questions.id = qbq.question_id").
-			Where("qbq.question_bank_id = ?", *filters.BankId)
+			Where("qbq.question_bank_id = ? AND questions.deleted_at IS NULL", *filters.BankId)
 	}
 
 	return query
@@ -795,7 +795,7 @@ func (q *QuestionPostgreSQL) invalidateAssessmentCachesForQuestion(ctx context.C
 	var assessmentIDs []uint
 	if err := db.WithContext(ctx).
 		Table("assessment_questions").
-		Where("question_id = ?", questionID).
+		Where("question_id = ? AND deleted_at IS NULL", questionID).
 		Pluck("assessment_id", &assessmentIDs).Error; err != nil {
 		// Log error but don't fail the operation
 		return
