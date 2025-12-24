@@ -535,9 +535,9 @@ func (s *importExportService) parseCSVRow(record []string, headerMap map[string]
 
 	// ===== VALIDATE POINTS (1-100) =====
 	pointsStr := getColumn("points")
-	points := 10 // Default
+	points := 10.0 // Default
 	if pointsStr != "" {
-		p, err := strconv.Atoi(pointsStr)
+		p, err := strconv.ParseFloat(pointsStr, 64)
 		if err != nil {
 			errors = append(errors, models.ImportValidationError{
 				Row:     rowNum,
@@ -552,7 +552,7 @@ func (s *importExportService) parseCSVRow(record []string, headerMap map[string]
 			errors = append(errors, models.ImportValidationError{
 				Row:     rowNum,
 				Column:  "points",
-				Message: fmt.Sprintf("points must be between 1 and 100, got %d", p),
+				Message: fmt.Sprintf("points must be between 1 and 100, got %.1f", p),
 				Value:   pointsStr,
 				Code:    "OUT_OF_RANGE",
 			})
@@ -1100,7 +1100,7 @@ func (s *importExportService) questionToCSVRow(question *models.Question) []stri
 	}
 
 	// Fixed column indices for 18-column format
-	row[13] = strconv.Itoa(question.Points)
+	row[13] = strconv.FormatFloat(question.Points, 'f', -1, 64)
 
 	if question.Category != nil {
 		row[14] = question.Category.Name

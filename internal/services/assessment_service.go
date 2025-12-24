@@ -458,7 +458,7 @@ func (s *assessmentService) Archive(ctx context.Context, id uint, userID string)
 
 // ===== QUESTION MANAGEMENT =====
 
-func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points int, userID string) error {
+func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points float64, userID string) error {
 	s.logger.Info("Adding question to assessment",
 		"assessment_id", assessmentID,
 		"question_id", questionID,
@@ -569,12 +569,12 @@ func (s *assessmentService) AddQuestionsBatch(ctx context.Context, assessmentID 
 		}
 
 		// 2. Calculate new total points
-		newPointsTotal := 0
+		newPointsTotal := 0.0
 		questionIDs := make([]uint, len(questions))
 		for i, q := range questions {
 			// Validate points range
 			if q.Points < 1 || q.Points > 100 {
-				return fmt.Errorf("question %d has invalid points %d (must be 1-100)", q.QuestionID, q.Points)
+				return fmt.Errorf("question %d has invalid points %.1f (must be 1-100)", q.QuestionID, q.Points)
 			}
 			newPointsTotal += q.Points
 			questionIDs[i] = q.QuestionID
@@ -592,7 +592,7 @@ func (s *assessmentService) AddQuestionsBatch(ctx context.Context, assessmentID 
 		// 3. Validate total points would not exceed 100
 		finalTotal := currentTotal + newPointsTotal
 		if finalTotal > 100 {
-			return fmt.Errorf("total points (%d) would exceed maximum allowed (100). Current: %d, adding: %d",
+			return fmt.Errorf("total points (%.1f) would exceed maximum allowed (100). Current: %.1f, adding: %.1f",
 				finalTotal, currentTotal, newPointsTotal)
 		}
 
@@ -725,7 +725,7 @@ func (s *assessmentService) AutoAssignQuestions(ctx context.Context, assessmentI
 		totalQuestions := len(existingQuestions) + len(questionIDs)
 
 		for i, aq := range existingQuestions {
-			newPoints := basePoints
+			newPoints := float64(basePoints)
 			if i < remainder {
 				newPoints++ // First N questions get extra point
 			}
@@ -752,7 +752,7 @@ func (s *assessmentService) AutoAssignQuestions(ctx context.Context, assessmentI
 			// Index in total questions (for remainder calculation)
 			totalIndex := len(existingQuestions) + i
 
-			newPoints := basePoints
+			newPoints := float64(basePoints)
 			if totalIndex < remainder {
 				newPoints++ // Continue remainder distribution
 			}
@@ -904,7 +904,7 @@ func (s *assessmentService) UpdateAssessmentQuestionBatch(ctx context.Context, a
 		}
 
 		// Calculate new total by subtracting old points and adding new points for each question
-		updatedQuestionPoints := make(map[uint]int)
+		updatedQuestionPoints := make(map[uint]float64)
 		for _, req := range reqs {
 			// Get current points for this question
 			assessmentQuestion, err := s.repo.AssessmentQuestion().GetQuestionAssessmentByAssessmentIdAndQuestionId(ctx, tx, assessmentID, req.QuestionId)
@@ -913,7 +913,7 @@ func (s *assessmentService) UpdateAssessmentQuestionBatch(ctx context.Context, a
 			}
 
 			// Track old and new points
-			oldPoints := 0
+			oldPoints := 0.0
 			if assessmentQuestion.Points != nil {
 				oldPoints = *assessmentQuestion.Points
 			}
@@ -925,7 +925,7 @@ func (s *assessmentService) UpdateAssessmentQuestionBatch(ctx context.Context, a
 
 		// Validate new total
 		if currentTotal > 100 {
-			return fmt.Errorf("total points (%d) would exceed maximum allowed (100) after batch update", currentTotal)
+			return fmt.Errorf("total points (%.1f) would exceed maximum allowed (100) after batch update", currentTotal)
 		}
 
 		// Now perform the updates

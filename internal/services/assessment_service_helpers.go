@@ -316,7 +316,7 @@ func (s *assessmentService) validateCreateRequest(ctx context.Context, req *Crea
 	// Validate questions if provided
 	if len(req.Questions) > 0 {
 		orderMap := make(map[int]bool)
-		totalPoints := 0
+		totalPoints := 0.0
 
 		for i, q := range req.Questions {
 			// Check for duplicate orders
@@ -511,7 +511,7 @@ func (s *assessmentService) listAssessments(ctx context.Context, filters reposit
 // validateTotalPoints validates that total points for assessment does not exceed 100
 // pointsToAdd: points for the new question being added (use 0 if not adding)
 // excludeQuestionID: question ID to exclude from total (use when updating existing question's points)
-func (s *assessmentService) validateTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint, pointsToAdd int, excludeQuestionID uint) error {
+func (s *assessmentService) validateTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint, pointsToAdd float64, excludeQuestionID uint) error {
 	db := s.db
 	if tx != nil {
 		db = tx

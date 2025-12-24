@@ -102,7 +102,7 @@ func (aq *AssessmentQuestionPostgreSQL) Delete(ctx context.Context, tx *gorm.DB,
 // ===== RELATIONSHIP MANAGEMENT =====
 
 // AddQuestion adds a question to an assessment with specified order and points
-func (aq *AssessmentQuestionPostgreSQL) AddQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, order int, points *int) error {
+func (aq *AssessmentQuestionPostgreSQL) AddQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, order int, points *float64) error {
 	// Check if relationship already exists
 	exists, err := aq.Exists(ctx, tx, assessmentID, questionID)
 	if err != nil {
@@ -568,7 +568,7 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentCount(ctx context.Context, 
 // ===== POINTS MANAGEMENT =====
 
 // UpdatePoints updates the points for a specific question in an assessment
-func (aq *AssessmentQuestionPostgreSQL) UpdatePoints(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, points int) error {
+func (aq *AssessmentQuestionPostgreSQL) UpdatePoints(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, points float64) error {
 	db := aq.getDB(tx)
 	result := db.WithContext(ctx).
 		Model(&models.AssessmentQuestion{}).
@@ -590,9 +590,9 @@ func (aq *AssessmentQuestionPostgreSQL) UpdatePoints(ctx context.Context, tx *go
 }
 
 // GetTotalPoints calculates the total points for all questions in an assessment
-func (aq *AssessmentQuestionPostgreSQL) GetTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint) (int, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint) (float64, error) {
 	db := aq.getDB(tx)
-	var totalPoints int
+	var totalPoints float64
 
 	// Use COALESCE to handle NULL points and wrap SUM to handle empty result set
 	err := db.WithContext(ctx).

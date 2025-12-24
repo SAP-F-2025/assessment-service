@@ -36,7 +36,7 @@ type AssessmentAttempt struct {
 
 	// Scoring
 	Score      float64 `json:"score"`
-	MaxScore   int     `json:"max_score"`
+	MaxScore   float64 `json:"max_score"`
 	Percentage float64 `json:"percentage"`
 	Passed     bool    `json:"passed"`
 	IsGraded   bool    `json:"is_graded"`
@@ -76,7 +76,7 @@ type StudentAnswer struct {
 
 	// Grading
 	Score     float64    `json:"score"`
-	MaxScore  int        `json:"max_score"`
+	MaxScore  float64    `json:"max_score"`
 	IsCorrect *bool      `json:"is_correct"`                // null for essay/manual grading
 	GradedBy  *string    `json:"graded_by" gorm:"size:255"` // Teacher ID for manual grading
 	GradedAt  *time.Time `json:"graded_at"`

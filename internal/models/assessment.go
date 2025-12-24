@@ -54,7 +54,7 @@ type Assessment struct {
 
 	// Computed fields (not stored)
 	QuestionsCount int     `json:"questions_count" gorm:"-"`
-	TotalPoints    int     `json:"total_points" gorm:"-"`
+	TotalPoints    float64 `json:"total_points" gorm:"-"`
 	AttemptCount   int     `json:"attempt_count" gorm:"-"`
 	AvgScore       float64 `json:"avg_score" gorm:"-"`
 }

@@ -685,7 +685,7 @@ func (a *AssessmentPostgreSQL) calculateComputedFields(assessment *models.Assess
 	assessment.QuestionsCount = len(assessment.Questions)
 
 	// Calculate total points
-	totalPoints := 0
+	totalPoints := 0.0
 	for _, aq := range assessment.Questions {
 		if aq.Points != nil {
 			totalPoints += *aq.Points

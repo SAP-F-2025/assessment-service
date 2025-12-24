@@ -9,28 +9,15 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// InitDatabase initializes database connection
+// Note: With Orchestrion, GORM is auto-instrumented - no manual tracing needed!
 func InitDatabase(cfg *config.Config) (*gorm.DB, error) {
-	//var logLevel logger.LogLevel
-	//if cfg.Environment == "production" {
-	//	logLevel = logger.Info
-	//} else {
-	//	logLevel = logger.Error
-	//}
-
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-
-	//err = db.AutoMigrate(&models.Question{}, &models.QuestionBank{},
-	//	&models.Assessment{}, &models.AssessmentQuestion{}, &models.QuestionBankShare{}, &models.AssessmentSettings{},
-	//	&models.AssessmentAttempt{}, &models.StudentAnswer{}, &models.QuestionCategory{}, &models.QuestionAttachment{},
-	//	&models.ImportJob{})
-	//if err != nil {
-	//	return nil, err
-	//}
 
 	return db, nil
 }

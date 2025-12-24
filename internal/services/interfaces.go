@@ -42,9 +42,9 @@ type UpdateStatusRequest struct {
 }
 
 type UpdateAssessmentQuestionRequest struct {
-	QuestionId uint `json:"question_id"`
-	Points     int  `json:"points" validate:"required,min=1,max=100"`       // Required: Actual points for this question in the assessment
-	TimeLimit  *int `json:"time_limit" validate:"omitempty,min=5,max=3600"` // DEPRECATED: Not used in timing logic
+	QuestionId uint    `json:"question_id"`
+	Points     float64 `json:"points" validate:"required,min=1,max=100"`       // Required: Actual points for this question in the assessment
+	TimeLimit  *int    `json:"time_limit" validate:"omitempty,min=5,max=3600"` // DEPRECATED: Not used in timing logic
 }
 
 type ReorderQuestionsRequest struct {
@@ -91,7 +91,7 @@ type CreateQuestionRequest = validator.QuestionCreateRequest
 type UpdateQuestionRequest struct {
 	Text        *string                 `json:"text" validate:"omitempty,max=2000"`
 	Content     interface{}             `json:"content"`
-	Points      *int                    `json:"points" validate:"omitempty,min=1,max=100"`
+	Points      *float64                `json:"points" validate:"omitempty,min=1,max=100"`
 	TimeLimit   *int                    `json:"time_limit" validate:"omitempty,min=5,max=3600"` // DEPRECATED: Not used in timing logic
 	Difficulty  *models.DifficultyLevel `json:"difficulty"`
 	CategoryID  *uint                   `json:"category_id"`
@@ -305,7 +305,7 @@ type AssessmentService interface {
 	Archive(ctx context.Context, id uint, userID string) error
 
 	// Question management
-	AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points int, userID string) error
+	AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points float64, userID string) error
 	AddQuestions(ctx context.Context, assessmentID uint, questionsId []uint, userID string) error // Deprecated: Use AddQuestionsBatch
 	AddQuestionsBatch(ctx context.Context, assessmentID uint, questions []AssessmentQuestionRequest, userID string) error
 	AutoAssignQuestions(ctx context.Context, assessmentID uint, questionIDs []uint, userID string) error // Auto-calculate and assign points evenly
