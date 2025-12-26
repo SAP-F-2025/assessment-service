@@ -397,6 +397,7 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 	}
 
 	// Process each answer
+	answeredQuestions := make(map[uint]struct{})
 	for _, answer := range answers {
 		assessmentQuestion, exists := mapAssessmentQuestions[answer.QuestionID]
 		if !exists {
@@ -405,6 +406,7 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 				"assessment_id", assessmentId)
 			continue
 		}
+		answeredQuestions[answer.QuestionID] = struct{}{}
 
 		// If already graded, include in results but don't update
 		//if answer.IsGraded {
@@ -494,6 +496,24 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 			GradedAt:      time.Now(),
 			GradedBy:      nil, // Auto-graded
 		})
+	}
+
+	for _, remainingQuestions := range mapAssessmentQuestions {
+		if _, answered := answeredQuestions[remainingQuestions.QuestionID]; !answered {
+			s.logger.Warn("No answer found for question in auto-grading",
+				"question_id", remainingQuestions.QuestionID,
+				"assessment_id", assessmentId)
+
+			result = append(result, GradingResult{
+				AnswerID:   0,
+				QuestionID: remainingQuestions.QuestionID,
+				Score:      0.0,
+				MaxScore:   *remainingQuestions.Points,
+				IsCorrect:  false,
+				GradedAt:   time.Now(),
+				GradedBy:   nil,
+			})
+		}
 	}
 
 	// Batch update all answers within the provided transaction
