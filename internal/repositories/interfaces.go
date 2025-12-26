@@ -53,6 +53,7 @@ type AttemptFilters struct {
 	SortBy        string                `json:"sort_by"`    // "created_at", "title", "due_date"
 	SortOrder     string                `json:"sort_order"` // "asc", "desc"
 	IsTeacherView bool                  `json:"is_teacher_view"`
+	GroupId       *string               `json:"group_id"`
 }
 
 type AnswerFilters struct {
