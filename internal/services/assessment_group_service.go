@@ -112,7 +112,7 @@ func (s *assessmentGroupService) UnassignFromGroups(ctx context.Context, assessm
 	}
 
 	// 1. Validate assessment exists
-	assessment, err := s.repo.Assessment().GetByID(ctx, nil, assessmentID)
+	assessment, err := s.repo.Assessment().GetByID(ctx, s.db, assessmentID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return ErrAssessmentNotFound

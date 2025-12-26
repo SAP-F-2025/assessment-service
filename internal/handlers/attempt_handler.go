@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
@@ -781,6 +782,33 @@ func (h *AttemptHandler) parseAttemptFilters(c *gin.Context) repositories.Attemp
 	if studentIDStr := c.Query("student_id"); strings.TrimSpace(studentIDStr) != "" {
 		studentIDStr = strings.TrimSpace(studentIDStr)
 		filters.UserID = &studentIDStr
+	}
+
+	if groupId := c.Query("group_id"); strings.TrimSpace(groupId) != "" {
+		groupId = strings.TrimSpace(groupId)
+		filters.GroupId = &groupId
+	}
+
+	if dateFromStr := c.Query("date_from"); dateFromStr != "" {
+		dateFromTime, err := time.Parse(time.RFC3339, strings.TrimSpace(dateFromStr))
+		if err == nil {
+			filters.DateFrom = &dateFromTime
+		}
+	}
+
+	if dateToStr := c.Query("date_to"); dateToStr != "" {
+		dateToTime, err := time.Parse(time.RFC3339, strings.TrimSpace(dateToStr))
+		if err == nil {
+			filters.DateTo = &dateToTime
+		}
+	}
+
+	if sortByStr := c.Query("sort_by"); sortByStr != "" {
+		filters.SortBy = strings.TrimSpace(sortByStr)
+	}
+
+	if sortOrderStr := c.Query("sort_order"); sortOrderStr != "" {
+		filters.SortOrder = strings.TrimSpace(sortOrderStr)
 	}
 
 	return filters

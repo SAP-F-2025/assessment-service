@@ -47,13 +47,14 @@ func (a *AssessmentPostgreSQL) Create(ctx context.Context, tx *gorm.DB, assessme
 
 // GetByID retrieves an assessment by ID with caching
 func (a *AssessmentPostgreSQL) GetByID(ctx context.Context, tx *gorm.DB, id uint) (*models.Assessment, error) {
+	db := a.getDB(tx)
 	// Try cache first for fast performance (<200ms requirement)
 	cacheKey := fmt.Sprintf("id:%d", id)
 	var assessment models.Assessment
 
 	err := a.cacheManager.Assessment.CacheOrExecute(ctx, cacheKey, &assessment, cache.AssessmentCacheConfig.TTL, func() (interface{}, error) {
 		var dbAssessment models.Assessment
-		err := tx.WithContext(ctx).
+		err := db.WithContext(ctx).
 			Preload("Creator").
 			Preload("Settings").
 			First(&dbAssessment, id).Error

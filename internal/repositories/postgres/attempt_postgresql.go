@@ -81,11 +81,6 @@ func (a *AttemptPostgreSQL) List(ctx context.Context, tx *gorm.DB, filters repos
 	query := db.WithContext(ctx).Model(&models.AssessmentAttempt{})
 	query = a.applyFiltersAttempt(query, filters)
 
-	if filters.IsTeacherView {
-		query = query.Joins("JOIN assessments ON assessments.id = assessment_attempts.assessment_id AND assessments.deleted_at IS NULL").
-			Where("assessments.created_by = ?", filters.UserID)
-	}
-
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
