@@ -187,7 +187,7 @@ func (h *BaseHandler) RespondWithError(c *gin.Context, statusCode int, message s
 		errorResp.Details = details[0]
 	}
 
-	// Log the error with context
+	// Log the error
 	if err != nil {
 		h.LogError(c, err, message, "status_code", statusCode)
 	} else {

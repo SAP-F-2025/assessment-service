@@ -57,6 +57,14 @@ func (s *assessmentService) Create(ctx context.Context, req *CreateAssessmentReq
 	// Use transaction for complex operation
 	var assessment *models.Assessment
 	err = s.withTx(ctx, func(tx *gorm.DB) error {
+		// Determine assessment type based on creator's role
+		// Students create peer assessments, Teachers create formal assessments
+		assessmentType := models.AssessmentTypeTeacher
+		userRole, roleErr := s.getUserRole(ctx, creatorID)
+		if roleErr == nil && userRole == models.RoleStudent {
+			assessmentType = models.AssessmentTypeStudent
+		}
+
 		// Create assessment
 		assessment = &models.Assessment{
 			Title:        req.Title,
@@ -69,6 +77,7 @@ func (s *assessmentService) Create(ctx context.Context, req *CreateAssessmentReq
 			DueDate:      req.DueDate,
 			CreatedBy:    creatorID,
 			Version:      1,
+			Type:         assessmentType,
 		}
 
 		if req.TimeWarning != nil {
@@ -248,21 +257,21 @@ func (s *assessmentService) List(ctx context.Context, filters repositories.Asses
 	}
 
 	// Apply role-based filtering
+	// This is the CRUD management API - users see only their own assessments
 	switch userRole {
 	case models.RoleStudent:
-		// Students: only Active assessments that haven't expired
-		activeStatus := models.StatusActive
-		filters.Status = &activeStatus
+		// Students see only their own assessments (peer assessments they created)
+		filters.CreatedBy = &userID
 
 	case models.RoleTeacher:
-		// Teachers: only their own assessments
+		// Teachers see only their own assessments
 		filters.CreatedBy = &userID
 
 	case models.RoleAdmin:
-		// Admins: no additional filtering (can see all)
+		// Admins can see all assessments (for administration purposes)
 
 	default:
-		// Unknown role: no access
+		// Unknown role: return empty list
 		return &AssessmentListResponse{
 			Assessments: []*AssessmentResponse{},
 			Total:       0,
@@ -274,20 +283,6 @@ func (s *assessmentService) List(ctx context.Context, filters repositories.Asses
 	assessments, total, err := s.repo.Assessment().List(ctx, s.db, filters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list assessments: %w", err)
-	}
-
-	// For students, filter out expired assessments (where due_date has passed)
-	if userRole == models.RoleStudent {
-		now := time.Now()
-		filteredAssessments := make([]*models.Assessment, 0, len(assessments))
-		for _, assessment := range assessments {
-			// Include if no due_date or due_date is in the future
-			if assessment.DueDate == nil || assessment.DueDate.After(now) {
-				filteredAssessments = append(filteredAssessments, assessment)
-			}
-		}
-		assessments = filteredAssessments
-		total = int64(len(filteredAssessments))
 	}
 
 	// Build response
@@ -463,7 +458,7 @@ func (s *assessmentService) Archive(ctx context.Context, id uint, userID string)
 
 // ===== QUESTION MANAGEMENT =====
 
-func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points int, userID string) error {
+func (s *assessmentService) AddQuestion(ctx context.Context, assessmentID, questionID uint, order int, points float64, userID string) error {
 	s.logger.Info("Adding question to assessment",
 		"assessment_id", assessmentID,
 		"question_id", questionID,
@@ -574,12 +569,12 @@ func (s *assessmentService) AddQuestionsBatch(ctx context.Context, assessmentID 
 		}
 
 		// 2. Calculate new total points
-		newPointsTotal := 0
+		newPointsTotal := 0.0
 		questionIDs := make([]uint, len(questions))
 		for i, q := range questions {
 			// Validate points range
 			if q.Points < 1 || q.Points > 100 {
-				return fmt.Errorf("question %d has invalid points %d (must be 1-100)", q.QuestionID, q.Points)
+				return fmt.Errorf("question %d has invalid points %.1f (must be 1-100)", q.QuestionID, q.Points)
 			}
 			newPointsTotal += q.Points
 			questionIDs[i] = q.QuestionID
@@ -597,7 +592,7 @@ func (s *assessmentService) AddQuestionsBatch(ctx context.Context, assessmentID 
 		// 3. Validate total points would not exceed 100
 		finalTotal := currentTotal + newPointsTotal
 		if finalTotal > 100 {
-			return fmt.Errorf("total points (%d) would exceed maximum allowed (100). Current: %d, adding: %d",
+			return fmt.Errorf("total points (%.1f) would exceed maximum allowed (100). Current: %.1f, adding: %.1f",
 				finalTotal, currentTotal, newPointsTotal)
 		}
 
@@ -730,7 +725,7 @@ func (s *assessmentService) AutoAssignQuestions(ctx context.Context, assessmentI
 		totalQuestions := len(existingQuestions) + len(questionIDs)
 
 		for i, aq := range existingQuestions {
-			newPoints := basePoints
+			newPoints := float64(basePoints)
 			if i < remainder {
 				newPoints++ // First N questions get extra point
 			}
@@ -757,7 +752,7 @@ func (s *assessmentService) AutoAssignQuestions(ctx context.Context, assessmentI
 			// Index in total questions (for remainder calculation)
 			totalIndex := len(existingQuestions) + i
 
-			newPoints := basePoints
+			newPoints := float64(basePoints)
 			if totalIndex < remainder {
 				newPoints++ // Continue remainder distribution
 			}
@@ -909,7 +904,7 @@ func (s *assessmentService) UpdateAssessmentQuestionBatch(ctx context.Context, a
 		}
 
 		// Calculate new total by subtracting old points and adding new points for each question
-		updatedQuestionPoints := make(map[uint]int)
+		updatedQuestionPoints := make(map[uint]float64)
 		for _, req := range reqs {
 			// Get current points for this question
 			assessmentQuestion, err := s.repo.AssessmentQuestion().GetQuestionAssessmentByAssessmentIdAndQuestionId(ctx, tx, assessmentID, req.QuestionId)
@@ -918,7 +913,7 @@ func (s *assessmentService) UpdateAssessmentQuestionBatch(ctx context.Context, a
 			}
 
 			// Track old and new points
-			oldPoints := 0
+			oldPoints := 0.0
 			if assessmentQuestion.Points != nil {
 				oldPoints = *assessmentQuestion.Points
 			}
@@ -930,7 +925,7 @@ func (s *assessmentService) UpdateAssessmentQuestionBatch(ctx context.Context, a
 
 		// Validate new total
 		if currentTotal > 100 {
-			return fmt.Errorf("total points (%d) would exceed maximum allowed (100) after batch update", currentTotal)
+			return fmt.Errorf("total points (%.1f) would exceed maximum allowed (100) after batch update", currentTotal)
 		}
 
 		// Now perform the updates

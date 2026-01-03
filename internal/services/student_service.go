@@ -101,7 +101,7 @@ type StudentAttemptItem struct {
 	Assessment        models.Assessment    `json:"assessment"`
 	Status            models.AttemptStatus `json:"status"`
 	Score             float64              `json:"score"`
-	MaxScore          int                  `json:"max_score"`
+	MaxScore          float64              `json:"max_score"`
 	Passed            bool                 `json:"passed"`
 	StartedAt         *time.Time           `json:"started_at"`
 	CompletedAt       *time.Time           `json:"completed_at"`

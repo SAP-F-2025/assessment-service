@@ -49,9 +49,9 @@ type AssessmentSettingsRequest struct {
 
 // AssessmentQuestionRequest represents adding questions to assessments
 type AssessmentQuestionRequest struct {
-	QuestionID uint `json:"question_id" validate:"required"`
-	Order      int  `json:"order" validate:"required,min=1"`
-	Points     int  `json:"points" validate:"required,points_range"` // Required: User must specify points when adding to assessment
+	QuestionID uint    `json:"question_id" validate:"required"`
+	Order      int     `json:"order" validate:"required,min=1"`
+	Points     float64 `json:"points" validate:"required,points_range"` // Required: User must specify points when adding to assessment
 }
 
 // QuestionCreateRequest represents the request structure for creating questions
@@ -59,7 +59,7 @@ type QuestionCreateRequest struct {
 	Type        models.QuestionType    `json:"type" validate:"required,question_type"`
 	Text        string                 `json:"text" validate:"required,min=1,max=2000"`
 	Content     interface{}            `json:"content" validate:"required"`
-	Points      int                    `json:"points" validate:"required,points_range"`
+	Points      float64                `json:"points" validate:"required,points_range"`
 	TimeLimit   *int                   `json:"time_limit" validate:"omitempty,time_limit"` // DEPRECATED: Not used in timing logic
 	Difficulty  models.DifficultyLevel `json:"difficulty" validate:"required,difficulty_level"`
 	CategoryID  *uint                  `json:"category_id"`
@@ -72,7 +72,7 @@ type QuestionUpdateRequest struct {
 	Type        *models.QuestionType    `json:"type" validate:"omitempty,question_type"`
 	Text        *string                 `json:"text" validate:"omitempty,min=1,max=2000"`
 	Content     interface{}             `json:"content"`
-	Points      *int                    `json:"points" validate:"omitempty,points_range"`
+	Points      *float64                `json:"points" validate:"omitempty,points_range"`
 	TimeLimit   *int                    `json:"time_limit" validate:"omitempty,time_limit"` // DEPRECATED: Not used in timing logic
 	Difficulty  *models.DifficultyLevel `json:"difficulty" validate:"omitempty,difficulty_level"`
 	CategoryID  *uint                   `json:"category_id"`

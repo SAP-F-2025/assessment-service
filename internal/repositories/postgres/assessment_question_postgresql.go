@@ -102,7 +102,7 @@ func (aq *AssessmentQuestionPostgreSQL) Delete(ctx context.Context, tx *gorm.DB,
 // ===== RELATIONSHIP MANAGEMENT =====
 
 // AddQuestion adds a question to an assessment with specified order and points
-func (aq *AssessmentQuestionPostgreSQL) AddQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, order int, points *int) error {
+func (aq *AssessmentQuestionPostgreSQL) AddQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, order int, points *float64) error {
 	// Check if relationship already exists
 	exists, err := aq.Exists(ctx, tx, assessmentID, questionID)
 	if err != nil {
@@ -144,7 +144,6 @@ func (aq *AssessmentQuestionPostgreSQL) RemoveQuestion(ctx context.Context, tx *
 	err := db.WithContext(ctx).Transaction(func(txInner *gorm.DB) error {
 		result := db.WithContext(ctx).
 			Where("assessment_id = ? AND question_id = ?", assessmentID, questionID).
-			Unscoped().
 			Delete(&models.AssessmentQuestion{})
 
 		if result.Error != nil {
@@ -231,7 +230,6 @@ func (aq *AssessmentQuestionPostgreSQL) RemoveQuestions(ctx context.Context, tx 
 		// Delete questions
 		result := execDB.WithContext(ctx).
 			Where("assessment_id = ? AND question_id IN ?", assessmentID, questionIDs).
-			Unscoped().
 			Delete(&models.AssessmentQuestion{})
 
 		if result.Error != nil {
@@ -416,8 +414,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionsForAssessment(ctx context.Co
 	var questions []*models.Question
 	if err := db.WithContext(ctx).
 		Table("questions").
-		Joins("JOIN assessment_questions aq ON aq.question_id = questions.id").
-		Where("aq.assessment_id = ?", assessmentID).
+		Joins("JOIN assessment_questions aq ON aq.question_id = questions.id AND aq.deleted_at IS NULL").
+		Where("aq.assessment_id = ? AND questions.deleted_at IS NULL", assessmentID).
 		Order("aq.\"order\" ASC").
 		Find(&questions).Error; err != nil {
 		return nil, fmt.Errorf("failed to get questions for assessment: %w", err)
@@ -431,8 +429,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentsForQuestion(ctx context.Co
 	var assessments []*models.Assessment
 	if err := db.WithContext(ctx).
 		Table("assessments").
-		Joins("JOIN assessment_questions aq ON aq.assessment_id = assessments.id").
-		Where("aq.question_id = ?", questionID).
+		Joins("JOIN assessment_questions aq ON aq.assessment_id = assessments.id AND aq.deleted_at IS NULL").
+		Where("aq.question_id = ? AND assessments.deleted_at IS NULL", questionID).
 		Find(&assessments).Error; err != nil {
 		return nil, fmt.Errorf("failed to get assessments for question: %w", err)
 	}
@@ -568,7 +566,7 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentCount(ctx context.Context, 
 // ===== POINTS MANAGEMENT =====
 
 // UpdatePoints updates the points for a specific question in an assessment
-func (aq *AssessmentQuestionPostgreSQL) UpdatePoints(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, points int) error {
+func (aq *AssessmentQuestionPostgreSQL) UpdatePoints(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, points float64) error {
 	db := aq.getDB(tx)
 	result := db.WithContext(ctx).
 		Model(&models.AssessmentQuestion{}).
@@ -590,15 +588,15 @@ func (aq *AssessmentQuestionPostgreSQL) UpdatePoints(ctx context.Context, tx *go
 }
 
 // GetTotalPoints calculates the total points for all questions in an assessment
-func (aq *AssessmentQuestionPostgreSQL) GetTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint) (int, error) {
+func (aq *AssessmentQuestionPostgreSQL) GetTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint) (float64, error) {
 	db := aq.getDB(tx)
-	var totalPoints int
+	var totalPoints float64
 
 	// Use COALESCE to handle NULL points and wrap SUM to handle empty result set
 	err := db.WithContext(ctx).
 		Table("assessment_questions aq").
-		Joins("JOIN questions q ON q.id = aq.question_id").
-		Where("aq.assessment_id = ?", assessmentID).
+		Joins("JOIN questions q ON q.id = aq.question_id AND q.deleted_at IS NULL").
+		Where("aq.assessment_id = ? AND aq.deleted_at IS NULL", assessmentID).
 		Select("COALESCE(SUM(COALESCE(aq.points, 0)), 0)").
 		Scan(&totalPoints).Error
 
@@ -619,8 +617,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetPointsDistribution(ctx context.Contex
 
 	err := db.WithContext(ctx).
 		Table("assessment_questions aq").
-		Joins("JOIN questions q ON q.id = aq.question_id").
-		Where("aq.assessment_id = ?", assessmentID).
+		Joins("JOIN questions q ON q.id = aq.question_id AND q.deleted_at IS NULL").
+		Where("aq.assessment_id = ? AND aq.deleted_at IS NULL", assessmentID).
 		Select("aq.question_id, COALESCE(aq.points, q.points) as points").
 		Find(&results).Error
 
@@ -644,8 +642,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionsByType(ctx context.Context, 
 	var questions []*models.Question
 	if err := db.WithContext(ctx).
 		Table("questions").
-		Joins("JOIN assessment_questions aq ON aq.question_id = questions.id").
-		Where("aq.assessment_id = ? AND questions.type = ?", assessmentID, questionType).
+		Joins("JOIN assessment_questions aq ON aq.question_id = questions.id AND aq.deleted_at IS NULL").
+		Where("aq.assessment_id = ? AND questions.type = ? AND questions.deleted_at IS NULL", assessmentID, questionType).
 		Order("aq.\"order\" ASC").
 		Find(&questions).Error; err != nil {
 		return nil, fmt.Errorf("failed to get questions by type: %w", err)
@@ -659,8 +657,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionsByDifficulty(ctx context.Con
 	var questions []*models.Question
 	if err := db.WithContext(ctx).
 		Table("questions").
-		Joins("JOIN assessment_questions aq ON aq.question_id = questions.id").
-		Where("aq.assessment_id = ? AND questions.difficulty = ?", assessmentID, difficulty).
+		Joins("JOIN assessment_questions aq ON aq.question_id = questions.id AND aq.deleted_at IS NULL").
+		Where("aq.assessment_id = ? AND questions.difficulty = ? AND questions.deleted_at IS NULL", assessmentID, difficulty).
 		Order("aq.\"order\" ASC").
 		Find(&questions).Error; err != nil {
 		return nil, fmt.Errorf("failed to get questions by difficulty: %w", err)
@@ -720,8 +718,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.C
 	}
 	err = db.WithContext(ctx).
 		Table("questions q").
-		Joins("JOIN assessment_questions aq ON aq.question_id = q.id").
-		Where("aq.assessment_id = ?", assessmentID).
+		Joins("JOIN assessment_questions aq ON aq.question_id = q.id AND aq.deleted_at IS NULL").
+		Where("aq.assessment_id = ? AND q.deleted_at IS NULL", assessmentID).
 		Select("q.type, COUNT(*) as count").
 		Group("q.type").
 		Find(&typeResults).Error
@@ -739,8 +737,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.C
 	}
 	err = db.WithContext(ctx).
 		Table("questions q").
-		Joins("JOIN assessment_questions aq ON aq.question_id = q.id").
-		Where("aq.assessment_id = ?", assessmentID).
+		Joins("JOIN assessment_questions aq ON aq.question_id = q.id AND aq.deleted_at IS NULL").
+		Where("aq.assessment_id = ? AND q.deleted_at IS NULL", assessmentID).
 		Select("q.difficulty, COUNT(*) as count").
 		Group("q.difficulty").
 		Find(&diffResults).Error
@@ -758,8 +756,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetAssessmentQuestionStats(ctx context.C
 	}
 	err = db.WithContext(ctx).
 		Table("assessment_questions aq").
-		Joins("JOIN questions q ON q.id = aq.question_id").
-		Where("aq.assessment_id = ?", assessmentID).
+		Joins("JOIN questions q ON q.id = aq.question_id AND q.deleted_at IS NULL").
+		Where("aq.assessment_id = ? AND aq.deleted_at IS NULL", assessmentID).
 		Select("COALESCE(aq.points, q.points) as points, COUNT(*) as count").
 		Group("COALESCE(aq.points, q.points)").
 		Find(&pointsResults).Error
@@ -791,8 +789,8 @@ func (aq *AssessmentQuestionPostgreSQL) GetQuestionUsageInAssessments(ctx contex
 	var titles []string
 	err = db.WithContext(ctx).
 		Table("assessments a").
-		Joins("JOIN assessment_questions aq ON aq.assessment_id = a.id").
-		Where("aq.question_id = ?", questionID).
+		Joins("JOIN assessment_questions aq ON aq.assessment_id = a.id AND aq.deleted_at IS NULL").
+		Where("aq.question_id = ? AND a.deleted_at IS NULL", questionID).
 		Pluck("a.title", &titles).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get assessment titles: %w", err)

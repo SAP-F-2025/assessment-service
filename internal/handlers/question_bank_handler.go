@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
@@ -1112,6 +1113,49 @@ func (h *QuestionBankHandler) parseQuestionFilters(c *gin.Context) repositories.
 }
 
 func (h *QuestionBankHandler) handleServiceError(c *gin.Context, err error) {
+	// Check for PermissionError type first (most common for question bank operations)
+	var permErr *services.PermissionError
+	if errors.As(err, &permErr) {
+		c.JSON(http.StatusForbidden, ErrorResponse{
+			Message: "Access denied",
+			Details: permErr.Error(),
+		})
+		return
+	}
+
+	// Check for validation errors
+	var validationErrs services.ValidationErrors
+	if errors.As(err, &validationErrs) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Validation failed",
+			Details: validationErrs.Error(),
+		})
+		return
+	}
+
+	// Check for single validation error
+	var validationErr *services.ValidationError
+	if errors.As(err, &validationErr) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Validation failed",
+			Details: validationErr.Error(),
+		})
+		return
+	}
+
+	// Check for business rule errors
+	var businessRuleErr *services.BusinessRuleError
+	if errors.As(err, &businessRuleErr) {
+		c.JSON(http.StatusUnprocessableEntity, ErrorResponse{
+			Message: businessRuleErr.Message,
+			Details: map[string]interface{}{
+				"rule":    businessRuleErr.Rule,
+				"context": businessRuleErr.Context,
+			},
+		})
+		return
+	}
+
 	// Map service errors to HTTP status codes
 	switch {
 	case errors.Is(err, services.ErrQuestionBankNotFound):
@@ -1125,6 +1169,10 @@ func (h *QuestionBankHandler) handleServiceError(c *gin.Context, err error) {
 	case errors.Is(err, services.ErrQuestionBankDuplicateName):
 		c.JSON(http.StatusConflict, ErrorResponse{
 			Message: "Question bank name already exists",
+		})
+	case errors.Is(err, services.ErrQuestionBankNotDeletable):
+		c.JSON(http.StatusConflict, ErrorResponse{
+			Message: "Question bank cannot be deleted - has existing questions",
 		})
 	case errors.Is(err, services.ErrQuestionBankShareExists):
 		c.JSON(http.StatusConflict, ErrorResponse{
@@ -1147,10 +1195,53 @@ func (h *QuestionBankHandler) handleServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, ErrorResponse{
 			Message: "Forbidden",
 		})
-	default:
-		h.LogError(c, err, "Unexpected service error")
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Message: "Internal server error",
+	case errors.Is(err, services.ErrUserNotFound):
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Message: "User not found",
 		})
+	case errors.Is(err, services.ErrQuestionNotFound):
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Message: "Question not found",
+		})
+	default:
+		// Check for string-based errors that should return specific status codes
+		errStr := err.Error()
+		switch {
+		case contains(errStr, "already exists"):
+			c.JSON(http.StatusConflict, ErrorResponse{
+				Message: "Resource already exists",
+				Details: errStr,
+			})
+		case contains(errStr, "not found"):
+			c.JSON(http.StatusNotFound, ErrorResponse{
+				Message: "Resource not found",
+				Details: errStr,
+			})
+		case contains(errStr, "validation failed"):
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Message: "Validation failed",
+				Details: errStr,
+			})
+		case contains(errStr, "no access"):
+			c.JSON(http.StatusForbidden, ErrorResponse{
+				Message: "Access denied",
+				Details: errStr,
+			})
+		default:
+			h.LogError(c, err, "Unexpected service error")
+			c.JSON(http.StatusInternalServerError, ErrorResponse{
+				Message: "Internal server error",
+			})
+		}
 	}
+}
+
+// contains is a helper function to check if a string contains a substring (case-insensitive)
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsIgnoreCase(s, substr))
+}
+
+func containsIgnoreCase(s, substr string) bool {
+	s, substr = strings.ToLower(s), strings.ToLower(substr)
+	return strings.Contains(s, substr)
 }

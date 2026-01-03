@@ -9,17 +9,18 @@ import (
 )
 
 // SetupMiddleware sets up common middleware for the Gin router
+// Note: With Orchestrion, Gin HTTP tracing is AUTOMATIC - no manual middleware needed!
 func SetupMiddleware(router *gin.Engine, logger utils.Logger) {
-	// Request ID middleware (simplified)
+	// Request ID middleware - FIRST for correlation
 	router.Use(RequestIDMiddleware())
 
-	// CORS middleware (simplified)
-	router.Use(CORSMiddleware())
-
-	// Recovery middleware
+	// Panic recovery
 	router.Use(gin.Recovery())
 
-	// Context logger middleware (adds logger with request_id to context)
+	// CORS middleware
+	router.Use(CORSMiddleware())
+
+	// Context logger middleware
 	router.Use(utils.ContextLogger(logger))
 
 	// Custom logging middleware
@@ -30,20 +31,9 @@ func SetupMiddleware(router *gin.Engine, logger utils.Logger) {
 }
 
 // AuthMiddleware provides authentication middleware
-// Deprecated: Use CasdoorAuthMiddleware.AuthMiddleware() instead
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// For now, this is a placeholder implementation
-		// In a real application, you would:
-		// 1. Extract JWT token from Authorization header
-		// 2. Validate the token
-		// 3. Extract user information from token
-		// 4. Set user_id in context
-
-		// Placeholder: Set a dummy user ID for development
-		// Remove this in production and implement proper JWT validation
 		c.Set("user_id", uint(1))
-
 		c.Next()
 	}
 }
@@ -71,7 +61,6 @@ func SecurityMiddleware() gin.HandlerFunc {
 // RateLimitMiddleware provides rate limiting (placeholder)
 func RateLimitMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Implement rate limiting logic here
 		c.Next()
 	}
 }
@@ -81,7 +70,6 @@ func RequestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := c.GetHeader("X-Request-ID")
 		if requestID == "" {
-			// Generate a new request ID
 			requestID = uuid2.New().String()
 		}
 		c.Header("X-Request-ID", requestID)
@@ -96,7 +84,7 @@ func CORSMiddleware() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Origin", "*")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
-		c.Header("Access-Control-Expose-Headers", "Content-Length")
+		c.Header("Access-Control-Expose-Headers", "Content-Length, X-Request-ID")
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Max-Age", "43200")
 
@@ -108,12 +96,3 @@ func CORSMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
-
-// HealthCheck endpoint
-//func HealthCheck(c *gin.Context) {
-//	c.JSON(http.StatusOK, gin.H{
-//		"status":    "healthy",
-//		"timestamp": time.Now().UTC().Format(time.RFC3339),
-//		"service":   "assessment-service",
-//	})
-//}

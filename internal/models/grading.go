@@ -23,7 +23,7 @@ type GradingScheme struct {
 
 	// Grading configuration
 	PassingScore float64 `json:"passing_score" validate:"min=0,max=100"`
-	MaxScore     int     `json:"max_score"`
+	MaxScore     float64 `json:"max_score"`
 
 	// Grade ranges (for letter/custom grading)
 	GradeRanges datatypes.JSON `json:"grade_ranges" gorm:"type:jsonb"` // []GradeRange

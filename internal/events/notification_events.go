@@ -96,7 +96,7 @@ type AttemptGradedEvent struct {
 	StudentID       string    `json:"student_id"`
 	GradedAt        time.Time `json:"graded_at"`
 	Score           float64   `json:"score"`
-	MaxScore        int       `json:"max_score"`
+	MaxScore        float64   `json:"max_score"`
 	Percentage      float64   `json:"percentage"`
 	Passed          bool      `json:"passed"`
 	GraderID        string    `json:"grader_id"`

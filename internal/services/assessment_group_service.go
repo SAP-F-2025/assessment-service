@@ -112,7 +112,7 @@ func (s *assessmentGroupService) UnassignFromGroups(ctx context.Context, assessm
 	}
 
 	// 1. Validate assessment exists
-	assessment, err := s.repo.Assessment().GetByID(ctx, nil, assessmentID)
+	assessment, err := s.repo.Assessment().GetByID(ctx, s.db, assessmentID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
 			return ErrAssessmentNotFound
@@ -207,6 +207,13 @@ func (s *assessmentGroupService) GetAssignedGroups(ctx context.Context, assessme
 
 // GetGroupAssessments retrieves all assessments assigned to a group with detailed information
 func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupID uint, userID string) (*GroupAssessmentListResponse, error) {
+	// Check if user is Admin (Admin can view all groups' assessments)
+	isAdmin := false
+	user, err := s.repo.User().GetByID(ctx, userID)
+	if err == nil && user.Role == models.RoleAdmin {
+		isAdmin = true
+	}
+
 	// Check if user is member of the group
 	isMember, err := s.repo.Group().IsMember(ctx, nil, groupID, userID)
 	if err != nil {
@@ -224,7 +231,8 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 
 	isOwner := group.CreatedBy == userID
 
-	if !isMember && !isOwner {
+	// Admin bypass - can access any group's assessments
+	if !isAdmin && !isMember && !isOwner {
 		return nil, NewPermissionError(userID, groupID, "assessment-group", "view",
 			"must be group member or owner")
 	}
@@ -244,8 +252,8 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 		}
 	}
 
-	// Determine if user is a student (for populating student-specific fields)
-	isStudent := userRole != nil && *userRole == models.GroupMemberRoleStudent
+	// Determine if user is a regular member (not owner) for populating member-specific fields
+	isMemberRole := userRole != nil && *userRole == models.GroupMemberRoleMember
 
 	// Get assigned assessments
 	assessments, err := s.repo.AssessmentGroup().GetAssessmentsByGroup(ctx, nil, groupID)
@@ -292,7 +300,7 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 	var lastAttemptDateMap = make(map[uint]*time.Time)
 	var canStartMap = make(map[uint]bool)
 
-	if isStudent {
+	if isMemberRole {
 		// Batch load attempt counts
 		type AttemptCount struct {
 			AssessmentID uint
@@ -373,13 +381,13 @@ func (s *assessmentGroupService) GetGroupAssessments(ctx context.Context, groupI
 			TotalPoints:    stat.TotalPoints,
 			Settings:       setting,
 			IsExpired:      isExpired,
-			CanEdit:        assessment.CreatedBy == userID,
-			CanDelete:      assessment.CreatedBy == userID,
-			CanTake:        true, // Member can take assessments assigned to their group
+			CanEdit:        isAdmin || assessment.CreatedBy == userID,
+			CanDelete:      isAdmin || assessment.CreatedBy == userID,
+			CanTake:        !isAdmin && (isMember || isOwner), // Admin doesn't take assessments
 		}
 
-		// Populate student-specific fields if user is a student (from maps - no queries!)
-		if isStudent {
+		// Populate member-specific fields (from maps - no queries!)
+		if isMemberRole {
 			attemptCount := attemptCountMap[assessment.ID]
 			hasActive := hasActiveMap[assessment.ID]
 			bestScore := bestScoreMap[assessment.ID]
@@ -431,15 +439,18 @@ func (s *assessmentGroupService) CanAssignToGroup(ctx context.Context, assessmen
 		return true, nil
 	}
 
-	// Check 3: Is user a teacher member of the group?
+	// Check 3: Is user an owner or co-owner member of the group?
+	// Both owner and co-owner can assign assessments to the group
 	members, err := s.repo.Group().GetMembers(ctx, nil, groupID)
 	if err != nil {
 		return false, err
 	}
 
 	for _, member := range members {
-		if member.UserID == userID && member.Role == models.GroupMemberRoleTeacher {
-			return true, nil
+		if member.UserID == userID {
+			if member.Role == models.GroupMemberRoleOwner || member.Role == models.GroupMemberRoleCoOwner {
+				return true, nil
+			}
 		}
 	}
 

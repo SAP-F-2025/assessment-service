@@ -199,6 +199,11 @@ func (s *gradingService) gradeMultipleChoice(questionContent json.RawMessage, st
 		return 1.0, true, nil
 	}
 
+	// If PartialCredit is disabled, return 0 for any non-perfect match
+	if !content.PartialCredit {
+		return 0.0, false, nil
+	}
+
 	// Partial credit scoring for multiple correct answers
 	if len(correctAnswers) > 1 {
 		correct := 0
@@ -281,10 +286,19 @@ func (s *gradingService) gradeFillBlank(questionContent json.RawMessage, student
 			continue
 		}
 
+		// Apply TrimSpaces if enabled
+		if content.TrimSpaces {
+			studentAns = strings.TrimSpace(studentAns)
+		}
+
 		// Check against accepted answers
 		correct := false
 		for _, accepted := range blankDef.AcceptedAnswers {
-			if s.compareStrings(studentAns, accepted, content.CaseSensitive) {
+			acceptedTrimmed := accepted
+			if content.TrimSpaces {
+				acceptedTrimmed = strings.TrimSpace(accepted)
+			}
+			if s.compareStrings(studentAns, acceptedTrimmed, content.CaseSensitive) {
 				correct = true
 				break
 			}
@@ -316,14 +330,19 @@ func (s *gradingService) gradeShortAnswer(questionContent json.RawMessage, stude
 		return 0.0, false, fmt.Errorf("failed to unmarshal student answer: %w", err)
 	}
 
-	// Check against accepted answers
+	// Check against accepted answers (exact or case-insensitive based on settings)
 	for _, accepted := range content.AcceptedAnswers {
 		if s.compareStrings(answer, accepted, content.CaseSensitive) {
 			return 1.0, true, nil
 		}
 	}
 
-	// Fuzzy matching for partial credit
+	// If ExactMatch is required, don't use fuzzy matching
+	if content.ExactMatch {
+		return 0.0, false, nil
+	}
+
+	// Fuzzy matching for partial credit (only if FuzzyMatching is enabled)
 	if content.FuzzyMatching {
 		bestMatch := 0.0
 		for _, accepted := range content.AcceptedAnswers {
@@ -333,7 +352,7 @@ func (s *gradingService) gradeShortAnswer(questionContent json.RawMessage, stude
 			}
 		}
 
-		// Award partial credit if similarity is above threshold
+		// Award partial credit if similarity is above threshold (80%)
 		if bestMatch >= 0.8 {
 			return bestMatch, false, nil
 		}
@@ -372,8 +391,18 @@ func (s *gradingService) gradeMatching(questionContent json.RawMessage, studentA
 		return 0.0, false, nil
 	}
 
+	// Perfect match
+	if correct == total {
+		return 1.0, true, nil
+	}
+
+	// If PartialCredit is disabled, return 0 for any non-perfect match
+	if !content.PartialCredit {
+		return 0.0, false, nil
+	}
+
 	score := float64(correct) / float64(total)
-	return score, correct == total, nil
+	return score, false, nil
 }
 
 func (s *gradingService) gradeOrdering(questionContent json.RawMessage, studentAnswer json.RawMessage) (float64, bool, error) {
@@ -392,6 +421,11 @@ func (s *gradingService) gradeOrdering(questionContent json.RawMessage, studentA
 	// Perfect match
 	if reflect.DeepEqual(answer, expectedOrder) {
 		return 1.0, true, nil
+	}
+
+	// If PartialCredit is disabled, return 0 for any non-perfect match
+	if !content.PartialCredit {
+		return 0.0, false, nil
 	}
 
 	// Partial credit based on position accuracy
@@ -464,28 +498,65 @@ func (s *gradingService) generateOrderingFeedback(questionContent json.RawMessag
 // ===== HELPER FUNCTIONS =====
 
 func (s *gradingService) checkGradingPermission(ctx context.Context, answer *models.StudentAnswer, graderID string) error {
-	// Get user role
-	userRole, err := s.getUserRole(ctx, graderID)
+	assessmentID := answer.Attempt.AssessmentID
+
+	// Check 1: Is user admin?
+	userRole, _ := s.getUserRole(ctx, graderID)
+	if userRole == models.RoleAdmin {
+		return nil
+	}
+
+	// Check 2: Is user the assessment creator?
+	assessment, err := s.repo.Assessment().GetByID(ctx, nil, assessmentID)
+	if err != nil {
+		return fmt.Errorf("failed to get assessment: %w", err)
+	}
+	if assessment.CreatedBy == graderID {
+		return nil
+	}
+
+	// Check 3: Is user owner/co-owner of any group this assessment is assigned to?
+	canGrade, err := s.isGroupOwnerForAssessment(ctx, assessmentID, graderID)
 	if err != nil {
 		return err
 	}
-
-	// Only teachers and admins can grade
-	if userRole != models.RoleTeacher && userRole != models.RoleAdmin {
-		return NewPermissionError(graderID, answer.ID, "answer", "grade", "insufficient role permissions")
+	if canGrade {
+		return nil
 	}
 
-	// Check if grader has access to the assessment
-	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
-	canAccess, err := assessmentService.CanAccess(ctx, answer.Attempt.AssessmentID, graderID)
+	return NewPermissionError(graderID, assessmentID, "assessment", "grade", "not owner or group owner/co-owner")
+}
+
+// isGroupOwnerForAssessment checks if user is owner/co-owner of any group the assessment is assigned to
+func (s *gradingService) isGroupOwnerForAssessment(ctx context.Context, assessmentID uint, userID string) (bool, error) {
+	// Get all groups this assessment is assigned to
+	assignedGroups, err := s.repo.AssessmentGroup().GetGroupsByAssessment(ctx, nil, assessmentID)
 	if err != nil {
-		return err
-	}
-	if !canAccess {
-		return NewPermissionError(graderID, answer.Attempt.AssessmentID, "assessment", "grade", "not owner or insufficient permissions")
+		return false, err
 	}
 
-	return nil
+	for _, group := range assignedGroups {
+		// Check if user is group creator
+		if group.CreatedBy == userID {
+			return true, nil
+		}
+
+		// Check if user is owner/co-owner member
+		members, err := s.repo.Group().GetMembers(ctx, nil, group.ID)
+		if err != nil {
+			continue
+		}
+
+		for _, member := range members {
+			if member.UserID == userID {
+				if member.Role == models.GroupMemberRoleOwner || member.Role == models.GroupMemberRoleCoOwner {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
 }
 
 func (s *gradingService) getUserRole(ctx context.Context, userID string) (models.UserRole, error) {
@@ -568,9 +639,9 @@ func (s *gradingService) gradeAnswerInTransaction(ctx context.Context, tx *gorm.
 		AnswerID:      answerID,
 		QuestionID:    answer.QuestionID,
 		Score:         score,
-		MaxScore:      float64(maxScore),
-		IsCorrect:     score == float64(maxScore),
-		PartialCredit: score > 0 && score < float64(maxScore),
+		MaxScore:      maxScore,
+		IsCorrect:     score == maxScore,
+		PartialCredit: score > 0 && score < maxScore,
 		Feedback:      feedback,
 		GradedAt:      time.Now(),
 		GradedBy:      &graderID,
@@ -592,6 +663,22 @@ func (s *gradingService) updateAttemptGradeIfComplete(attemptID uint) {
 			s.logger.Error("Failed to update attempt grade", "attempt_id", attemptID, "error", err)
 		}
 	}
+}
+
+// updateAttemptGradeIfCompleteSync is a synchronous version that accepts context and returns error
+func (s *gradingService) updateAttemptGradeIfCompleteSync(ctx context.Context, attemptID uint) error {
+	// Check if all answers are graded
+	allGraded, err := s.repo.Answer().AreAllAnswersGraded(ctx, nil, attemptID)
+	if err != nil {
+		return fmt.Errorf("failed to check if all answers graded: %w", err)
+	}
+
+	if allGraded {
+		if _, err := s.AutoGradeAttempt(ctx, attemptID); err != nil {
+			return fmt.Errorf("failed to update attempt grade: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *gradingService) compareStrings(s1, s2 string, caseSensitive bool) bool {

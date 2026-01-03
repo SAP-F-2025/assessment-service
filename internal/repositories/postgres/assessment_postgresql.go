@@ -47,13 +47,14 @@ func (a *AssessmentPostgreSQL) Create(ctx context.Context, tx *gorm.DB, assessme
 
 // GetByID retrieves an assessment by ID with caching
 func (a *AssessmentPostgreSQL) GetByID(ctx context.Context, tx *gorm.DB, id uint) (*models.Assessment, error) {
+	db := a.getDB(tx)
 	// Try cache first for fast performance (<200ms requirement)
 	cacheKey := fmt.Sprintf("id:%d", id)
 	var assessment models.Assessment
 
 	err := a.cacheManager.Assessment.CacheOrExecute(ctx, cacheKey, &assessment, cache.AssessmentCacheConfig.TTL, func() (interface{}, error) {
 		var dbAssessment models.Assessment
-		err := tx.WithContext(ctx).
+		err := db.WithContext(ctx).
 			Preload("Creator").
 			Preload("Settings").
 			First(&dbAssessment, id).Error
@@ -178,7 +179,7 @@ func (a *AssessmentPostgreSQL) Delete(ctx context.Context, tx *gorm.DB, id uint)
 		return fmt.Errorf("cannot delete assessment with existing attempts")
 	}
 
-	if err := tx.WithContext(ctx).Unscoped().Delete(&models.Assessment{}, id).Error; err != nil {
+	if err := tx.WithContext(ctx).Delete(&models.Assessment{}, id).Error; err != nil {
 		return fmt.Errorf("failed to delete assessment: %w", err)
 	}
 
@@ -477,16 +478,16 @@ func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, tx *gorm.DB,
 	var totalQuestions int64
 	db.WithContext(ctx).
 		Table("assessment_questions aq").
-		Joins("JOIN assessments a ON aq.assessment_id = a.id").
-		Where("a.created_by = ?", creatorID).
+		Joins("JOIN assessments a ON aq.assessment_id = a.id AND a.deleted_at IS NULL").
+		Where("a.created_by = ? AND aq.deleted_at IS NULL", creatorID).
 		Count(&totalQuestions)
 
 	// Total attempts on creator's assessments
 	var totalAttempts int64
 	db.WithContext(ctx).
 		Table("assessment_attempts att").
-		Joins("JOIN assessments a ON att.assessment_id = a.id").
-		Where("a.created_by = ?", creatorID).
+		Joins("JOIN assessments a ON att.assessment_id = a.id AND a.deleted_at IS NULL").
+		Where("a.created_by = ? AND att.deleted_at IS NULL", creatorID).
 		Count(&totalAttempts)
 
 	stats.TotalAssessments = int(totalAssessments)
@@ -506,8 +507,8 @@ func (a *AssessmentPostgreSQL) GetPopularAssessments(ctx context.Context, tx *go
 	err := db.WithContext(ctx).
 		Table("assessments a").
 		Select("a.*, COUNT(att.id) as attempt_count").
-		Joins("LEFT JOIN assessment_attempts att ON a.id = att.assessment_id").
-		Where("a.status = ?", models.StatusActive).
+		Joins("LEFT JOIN assessment_attempts att ON a.id = att.assessment_id AND att.deleted_at IS NULL").
+		Where("a.status = ? AND a.deleted_at IS NULL", models.StatusActive).
 		Group("a.id").
 		Order("attempt_count DESC").
 		Limit(limit).
@@ -685,7 +686,7 @@ func (a *AssessmentPostgreSQL) calculateComputedFields(assessment *models.Assess
 	assessment.QuestionsCount = len(assessment.Questions)
 
 	// Calculate total points
-	totalPoints := 0
+	totalPoints := 0.0
 	for _, aq := range assessment.Questions {
 		if aq.Points != nil {
 			totalPoints += *aq.Points

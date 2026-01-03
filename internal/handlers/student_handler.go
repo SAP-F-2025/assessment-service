@@ -259,8 +259,63 @@ func (h *StudentHandler) parseIDParam(c *gin.Context, param string) uint {
 // ===== ERROR HANDLING =====
 
 func (h *StudentHandler) handleServiceError(c *gin.Context, err error) {
+	// Check for PermissionError type first
+	var permErr *services.PermissionError
+	if errors.As(err, &permErr) {
+		c.JSON(http.StatusForbidden, ErrorResponse{
+			Message: "Access denied",
+			Details: map[string]interface{}{
+				"resource": permErr.Resource,
+				"action":   permErr.Action,
+				"reason":   permErr.Reason,
+			},
+		})
+		return
+	}
+
+	// Check for validation errors
+	var validationErrs services.ValidationErrors
+	if errors.As(err, &validationErrs) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Validation failed",
+			Details: validationErrs,
+		})
+		return
+	}
+
+	// Check for single validation error
+	var validationErr *services.ValidationError
+	if errors.As(err, &validationErr) {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Message: "Validation failed",
+			Details: validationErr.Error(),
+		})
+		return
+	}
+
+	// Check for business rule errors
+	var businessRuleErr *services.BusinessRuleError
+	if errors.As(err, &businessRuleErr) {
+		c.JSON(http.StatusUnprocessableEntity, ErrorResponse{
+			Message: businessRuleErr.Message,
+			Details: map[string]interface{}{
+				"rule":    businessRuleErr.Rule,
+				"context": businessRuleErr.Context,
+			},
+		})
+		return
+	}
+
 	// Map service errors to HTTP status codes
 	switch {
+	case errors.Is(err, services.ErrAssessmentNotFound):
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Message: "Assessment not found",
+		})
+	case errors.Is(err, services.ErrAttemptNotFound):
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Message: "Attempt not found",
+		})
 	case errors.Is(err, services.ErrValidationFailed):
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Message: "Validation failed",
@@ -270,13 +325,17 @@ func (h *StudentHandler) handleServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnauthorized, ErrorResponse{
 			Message: "Unauthorized",
 		})
-	case errors.Is(err, services.ErrForbidden):
+	case errors.Is(err, services.ErrForbidden), errors.Is(err, services.ErrInsufficientPermissions):
 		c.JSON(http.StatusForbidden, ErrorResponse{
 			Message: "Forbidden",
 		})
 	case errors.Is(err, services.ErrNotFound):
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Message: "Resource not found",
+		})
+	case errors.Is(err, services.ErrUserNotFound):
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Message: "User not found",
 		})
 	default:
 		h.LogError(c, err, "Unexpected service error")

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/gin-gonic/gin"
 )
 
@@ -153,7 +154,7 @@ func LoggerMiddleware(logger Logger) func(*gin.Context) {
 	})
 }
 
-// ContextLogger adds logger to Gin context
+// ContextLogger adds logger to Gin context with Datadog trace correlation
 func ContextLogger(logger Logger) func(*gin.Context) {
 	return func(c *gin.Context) {
 		// Add logger with request context
@@ -162,6 +163,17 @@ func ContextLogger(logger Logger) func(*gin.Context) {
 			"method", c.Request.Method,
 			"path", c.Request.URL.Path,
 		)
+
+		// Add Datadog trace/span IDs for log correlation
+		// Orchestrion auto-injects these when DD_LOGS_INJECTION=true
+		// But we can also manually add them for structured logging
+		if span, ok := tracer.SpanFromContext(c.Request.Context()); ok {
+			spanCtx := span.Context()
+			requestLogger = requestLogger.With(
+				"dd.trace_id", spanCtx.TraceID(),
+				"dd.span_id", spanCtx.SpanID(),
+			)
+		}
 
 		// Store in context for handlers to use
 		c.Set("logger", requestLogger)

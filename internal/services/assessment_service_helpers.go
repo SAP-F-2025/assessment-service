@@ -12,8 +12,11 @@ import (
 
 // ===== PERMISSION CHECKS =====
 
+// CanAccess checks if a user can view an assessment in the CRUD management API.
+// Rules:
+// - Admins can access all assessments
+// - Owners can access their own assessments (any status)
 func (s *assessmentService) CanAccess(ctx context.Context, assessmentID uint, userID string) (bool, error) {
-	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
 		return false, err
@@ -24,7 +27,6 @@ func (s *assessmentService) CanAccess(ctx context.Context, assessmentID uint, us
 		return true, nil
 	}
 
-	// Get assessment to check ownership
 	assessment, err := s.repo.Assessment().GetByID(ctx, s.db, assessmentID)
 	if err != nil {
 		if repositories.IsNotFoundError(err) {
@@ -33,29 +35,20 @@ func (s *assessmentService) CanAccess(ctx context.Context, assessmentID uint, us
 		return false, err
 	}
 
-	// Teachers can access their own assessments
-	if userRole == models.RoleTeacher && assessment.CreatedBy == userID {
-		return true, nil
-	}
-
-	// Students can access active assessments they're enrolled in
-	if userRole == models.RoleStudent && assessment.Status == models.StatusActive {
-		// TODO: Check if student is enrolled in assessment/course
-		// For now, allow all students to access active assessments
-		return true, nil
-	}
-
-	return false, nil
+	// For CRUD management API: only owners can access their own assessments
+	return assessment.CreatedBy == userID, nil
 }
 
+// CanEdit checks if a user can edit an assessment.
+// Rules:
+// - Admins can edit any assessment
+// - Owners can edit their own assessments in Draft or Active status
 func (s *assessmentService) CanEdit(ctx context.Context, assessmentID uint, userID string) (bool, error) {
-	// Get user role
 	userRole, err := s.getUserRole(ctx, userID)
 	if err != nil {
 		return false, err
 	}
 
-	// Get assessment
 	assessment, err := s.repo.Assessment().GetByID(ctx, s.db, assessmentID)
 	if err != nil {
 		return false, err
@@ -66,19 +59,19 @@ func (s *assessmentService) CanEdit(ctx context.Context, assessmentID uint, user
 		return true, nil
 	}
 
-	// Only owners can edit their assessments
+	// Non-owners cannot edit
 	if assessment.CreatedBy != userID {
 		return false, nil
 	}
 
-	// Teachers can edit their own assessments in Draft status
-	if userRole == models.RoleTeacher && assessment.Status == models.StatusDraft {
+	// Owners can edit their assessments in Draft status
+	if assessment.Status == models.StatusDraft {
 		return true, nil
 	}
 
-	// Limited editing allowed for Active assessments (e.g., extend due date)
-	if userRole == models.RoleTeacher && assessment.Status == models.StatusActive {
-		return true, nil // Allow limited edits
+	// Owners can make limited edits to Active assessments (e.g., extend due date)
+	if assessment.Status == models.StatusActive {
+		return true, nil
 	}
 
 	return false, nil
@@ -170,13 +163,15 @@ func (s *assessmentService) getUserRole(ctx context.Context, userID string) (mod
 	return user.Role, nil
 }
 
+// canCreateAssessment checks if a user can create assessments.
+// All authenticated users (verified by having a valid userID) can create assessments.
+// The assessment type (teacher/student) is determined based on the creator's role.
 func (s *assessmentService) canCreateAssessment(ctx context.Context, userID string) (bool, error) {
-	userRole, err := s.getUserRole(ctx, userID)
-	if err != nil {
-		return false, err
+	// Verify user is authenticated (has valid userID)
+	if userID == "" {
+		return false, nil
 	}
-
-	return userRole == models.RoleTeacher || userRole == models.RoleAdmin, nil
+	return true, nil
 }
 
 func (s *assessmentService) buildAssessmentResponse(ctx context.Context, assessment *models.Assessment, userID string) *AssessmentResponse {
@@ -321,7 +316,7 @@ func (s *assessmentService) validateCreateRequest(ctx context.Context, req *Crea
 	// Validate questions if provided
 	if len(req.Questions) > 0 {
 		orderMap := make(map[int]bool)
-		totalPoints := 0
+		totalPoints := 0.0
 
 		for i, q := range req.Questions {
 			// Check for duplicate orders
@@ -516,7 +511,7 @@ func (s *assessmentService) listAssessments(ctx context.Context, filters reposit
 // validateTotalPoints validates that total points for assessment does not exceed 100
 // pointsToAdd: points for the new question being added (use 0 if not adding)
 // excludeQuestionID: question ID to exclude from total (use when updating existing question's points)
-func (s *assessmentService) validateTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint, pointsToAdd int, excludeQuestionID uint) error {
+func (s *assessmentService) validateTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint, pointsToAdd float64, excludeQuestionID uint) error {
 	db := s.db
 	if tx != nil {
 		db = tx

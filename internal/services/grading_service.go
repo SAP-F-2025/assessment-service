@@ -55,7 +55,7 @@ func (s *gradingService) GradeAnswer(ctx context.Context, answerID uint, score f
 	}
 
 	// Validate score
-	maxScore := float64(answer.Question.Points)
+	maxScore := answer.Question.Points
 	if score < 0 || score > maxScore {
 		return nil, NewValidationError("score", "score must be between 0 and max points", score)
 	}
@@ -66,6 +66,7 @@ func (s *gradingService) GradeAnswer(ctx context.Context, answerID uint, score f
 	answer.GradedBy = &graderID
 	answer.GradedAt = timePtr(time.Now())
 	answer.IsGraded = true
+	answer.MaxScore = maxScore
 
 	if err := s.repo.Answer().Update(ctx, nil, answer); err != nil {
 		return nil, fmt.Errorf("failed to update answer grade: %w", err)
@@ -88,8 +89,10 @@ func (s *gradingService) GradeAnswer(ctx context.Context, answerID uint, score f
 		"score", score,
 		"max_score", maxScore)
 
-	// Update attempt grade if all questions are graded
-	go s.updateAttemptGradeIfComplete(answer.AttemptID)
+	// Check and update attempt grade if all answers are graded (synchronous to avoid race condition)
+	if err := s.updateAttemptGradeIfCompleteSync(ctx, answer.AttemptID); err != nil {
+		s.logger.Warn("Failed to update attempt grade after grading answer", "attempt_id", answer.AttemptID, "error", err)
+	}
 
 	return result, nil
 }
@@ -252,7 +255,7 @@ func (s *gradingService) GradeMultipleAnswers(ctx context.Context, grades []repo
 				var maxScore float64
 				for _, ans := range answers {
 					finalScore += ans.Score
-					maxScore += float64(ans.MaxScore)
+					maxScore += ans.MaxScore
 				}
 
 				var assessmentId uint
@@ -273,8 +276,8 @@ func (s *gradingService) GradeMultipleAnswers(ctx context.Context, grades []repo
 					UpdateColumns(map[string]interface{}{
 						"score":      finalScore,
 						"is_graded":  true,
-						"max_score":  int(maxScore),
-						"passed":     finalScore >= float64(assessment.PassingScore),
+						"max_score":  maxScore,
+						"passed":     (finalScore / maxScore * 100) >= float64(assessment.PassingScore),
 						"percentage": (finalScore / maxScore) * 100,
 					}).Error
 				if err != nil {
@@ -317,9 +320,9 @@ func (s *gradingService) AutoGradeAnswer(ctx context.Context, answerID uint) (*G
 			AnswerID:      answerID,
 			QuestionID:    answer.QuestionID,
 			Score:         answer.Score,
-			MaxScore:      float64(answer.Question.Points),
-			IsCorrect:     answer.Score == float64(answer.Question.Points),
-			PartialCredit: answer.Score > 0 && answer.Score < float64(answer.Question.Points),
+			MaxScore:      answer.Question.Points,
+			IsCorrect:     answer.Score == answer.Question.Points,
+			PartialCredit: answer.Score > 0 && answer.Score < answer.Question.Points,
 			Feedback:      answer.Feedback,
 			GradedAt:      *answer.GradedAt,
 			GradedBy:      answer.GradedBy,
@@ -339,7 +342,7 @@ func (s *gradingService) AutoGradeAnswer(ctx context.Context, answerID uint) (*G
 	}
 
 	// Update answer with auto-grade
-	finalScore := score * float64(answer.Question.Points)
+	finalScore := score * answer.Question.Points
 	answer.Score = finalScore
 	answer.Feedback = feedback
 	answer.GradedAt = timePtr(time.Now())
@@ -356,7 +359,7 @@ func (s *gradingService) AutoGradeAnswer(ctx context.Context, answerID uint) (*G
 		AnswerID:      answerID,
 		QuestionID:    answer.QuestionID,
 		Score:         finalScore,
-		MaxScore:      float64(answer.Question.Points),
+		MaxScore:      answer.Question.Points,
 		IsCorrect:     isCorrect,
 		PartialCredit: score > 0 && score < 1.0,
 		Feedback:      feedback,
@@ -394,6 +397,7 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 	}
 
 	// Process each answer
+	answeredQuestions := make(map[uint]struct{})
 	for _, answer := range answers {
 		assessmentQuestion, exists := mapAssessmentQuestions[answer.QuestionID]
 		if !exists {
@@ -402,6 +406,7 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 				"assessment_id", assessmentId)
 			continue
 		}
+		answeredQuestions[answer.QuestionID] = struct{}{}
 
 		// If already graded, include in results but don't update
 		//if answer.IsGraded {
@@ -465,7 +470,7 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 		}
 
 		// Update answer with auto-grade
-		finalScore := score * float64(*assessmentQuestion.Points)
+		finalScore := score * (*assessmentQuestion.Points)
 		answer.Score = finalScore
 		answer.Feedback = feedback
 		answer.GradedAt = timePtr(time.Now())
@@ -484,13 +489,31 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 			AnswerID:      answer.ID,
 			QuestionID:    answer.QuestionID,
 			Score:         finalScore,
-			MaxScore:      float64(*assessmentQuestion.Points),
+			MaxScore:      *assessmentQuestion.Points,
 			IsCorrect:     isCorrect,
 			PartialCredit: score > 0 && score < 1.0,
 			Feedback:      feedback,
 			GradedAt:      time.Now(),
 			GradedBy:      nil, // Auto-graded
 		})
+	}
+
+	for _, remainingQuestions := range mapAssessmentQuestions {
+		if _, answered := answeredQuestions[remainingQuestions.QuestionID]; !answered {
+			s.logger.Warn("No answer found for question in auto-grading",
+				"question_id", remainingQuestions.QuestionID,
+				"assessment_id", assessmentId)
+
+			result = append(result, GradingResult{
+				AnswerID:   0,
+				QuestionID: remainingQuestions.QuestionID,
+				Score:      0.0,
+				MaxScore:   *remainingQuestions.Points,
+				IsCorrect:  false,
+				GradedAt:   time.Now(),
+				GradedBy:   nil,
+			})
+		}
 	}
 
 	// Batch update all answers within the provided transaction
@@ -584,7 +607,7 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 	attempt.Percentage = percentage
 	attempt.Passed = isPassing
 	attempt.IsGraded = true
-	attempt.MaxScore = int(maxTotalScore)
+	attempt.MaxScore = maxTotalScore
 
 	if hasManualGrading {
 		attempt.IsGraded = false

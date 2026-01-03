@@ -16,7 +16,7 @@ type AssessmentQuestionRepository interface {
 	Delete(ctx context.Context, tx *gorm.DB, id uint) error
 
 	// Relationship management
-	AddQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, order int, points *int) error
+	AddQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, order int, points *float64) error
 	RemoveQuestion(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint) error
 	AddQuestions(ctx context.Context, tx *gorm.DB, assessmentID uint, questionIDs []uint) error
 	RemoveQuestions(ctx context.Context, tx *gorm.DB, assessmentID uint, questionIDs []uint) error
@@ -47,8 +47,8 @@ type AssessmentQuestionRepository interface {
 	GetAssessmentCount(ctx context.Context, tx *gorm.DB, questionID uint) (int, error)
 
 	// Points management
-	UpdatePoints(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, points int) error
-	GetTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint) (int, error)
+	UpdatePoints(ctx context.Context, tx *gorm.DB, assessmentID, questionID uint, points float64) error
+	GetTotalPoints(ctx context.Context, tx *gorm.DB, assessmentID uint) (float64, error)
 	GetPointsDistribution(ctx context.Context, tx *gorm.DB, assessmentID uint) (map[uint]int, error)
 
 	// Advanced queries
@@ -66,7 +66,7 @@ type AssessmentQuestionRepository interface {
 type AssessmentQuestionStats struct {
 	AssessmentID       uint                           `json:"assessment_id"`
 	TotalQuestions     int                            `json:"total_questions"`
-	TotalPoints        int                            `json:"total_points"`
+	TotalPoints        float64                        `json:"total_points"`
 	QuestionsByType    map[models.QuestionType]int    `json:"questions_by_type"`
 	QuestionsByDiff    map[models.DifficultyLevel]int `json:"questions_by_difficulty"`
 	AvgPointsPerQ      float64                        `json:"avg_points_per_question"`

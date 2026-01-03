@@ -376,10 +376,8 @@ func (s *attemptService) List(ctx context.Context, filters repositories.AttemptF
 		return nil, 0, err
 	}
 
-	// Filter based on user role
-	if userRole == models.RoleStudent {
-		filters.UserID = &userID
-	} else if userRole == models.RoleTeacher {
+	// Remove teacher role
+	if userRole != models.RoleAdmin {
 		filters.IsTeacherView = true
 	}
 

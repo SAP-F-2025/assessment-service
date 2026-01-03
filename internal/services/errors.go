@@ -68,6 +68,14 @@ var (
 	ErrGroupMemberExists      = errors.New("user is already a member of this group")
 	ErrGroupMemberNotFound    = errors.New("user is not a member of this group")
 	ErrGroupCannotRemoveOwner = errors.New("cannot remove group owner")
+	ErrGroupInvalidRole       = errors.New("invalid group member role")
+	ErrGroupOwnerCannotLeave  = errors.New("group owner cannot leave their own group")
+
+	// Group invite specific errors
+	ErrGroupInviteNotFound  = errors.New("group invite not found")
+	ErrGroupInviteExpired   = errors.New("group invite has expired")
+	ErrGroupInviteExhausted = errors.New("group invite has reached maximum uses")
+	ErrGroupInviteInvalid   = errors.New("group invite is invalid")
 
 	// Assessment-Group assignment errors
 	ErrAssessmentGroupNotFound        = errors.New("assessment-group assignment not found")

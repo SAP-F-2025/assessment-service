@@ -72,6 +72,9 @@ func (h *SharedHelpers) ApplyAssessmentFilters(query *gorm.DB, filters repositor
 	if filters.DateTo != nil {
 		query = query.Where("created_at <= ?", *filters.DateTo)
 	}
+	if filters.Search != nil {
+		query = query.Where("title ILIKE ?", "%"+*filters.Search+"%")
+	}
 	return query
 }
 
@@ -88,6 +91,17 @@ func (h *SharedHelpers) ApplyAttemptFilters(query *gorm.DB, filters repositories
 	}
 	if filters.DateTo != nil {
 		query = query.Where("created_at <= ?", *filters.DateTo)
+	}
+	if filters.IsTeacherView {
+		query = query.Joins("JOIN assessments ON assessments.id = assessment_attempts.assessment_id AND "+
+			"assessments.deleted_at IS NULL").
+			Where("assessments.created_by = ?", filters.UserID)
+	}
+	if filters.GroupId != nil {
+		query = query.Joins("JOIN assessment_groups ON "+
+			"assessment_groups.assessment_id = assessment_attempts.assessment_id AND "+
+			"assessment_groups.deleted_at IS NULL").
+			Where("assessment_groups.group_id = ?", *filters.GroupId)
 	}
 
 	return query

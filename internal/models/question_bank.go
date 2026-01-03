@@ -2,6 +2,8 @@ package models
 
 import (
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type QuestionBank struct {
@@ -14,9 +16,10 @@ type QuestionBank struct {
 	IsShared bool `json:"is_shared" gorm:"default:false"`
 
 	// Metadata
-	CreatedBy string    `json:"created_by" gorm:"not null;index;size:255"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedBy string         `json:"created_by" gorm:"not null;index;size:255"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
 	// Relations
 	Questions  []Question          `json:"questions" gorm:"many2many:question_bank_questions"`
@@ -41,8 +44,9 @@ type QuestionBankShare struct {
 	SharedAt time.Time `json:"shared_at"`
 	SharedBy string    `json:"shared_by" gorm:"not null;size:255"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
 	// Relations
 	Bank   QuestionBank `json:"bank" gorm:"foreignKey:BankID"`

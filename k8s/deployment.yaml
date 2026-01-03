@@ -5,6 +5,9 @@ metadata:
   namespace: default
   labels:
     app: assessment-service
+    tags.datadoghq.com/env: "production"
+    tags.datadoghq.com/service: "assessment-service"
+    tags.datadoghq.com/version: "1.0.0"
 spec:
   replicas: 2
   strategy:
@@ -19,6 +22,12 @@ spec:
     metadata:
       labels:
         app: assessment-service
+        tags.datadoghq.com/env: "production"
+        tags.datadoghq.com/service: "assessment-service"
+        tags.datadoghq.com/version: "1.0.0"
+      annotations:
+        # Datadog Unified Service Tagging
+        ad.datadoghq.com/assessment-service.logs: '[{"source":"go","service":"assessment-service"}]'
     spec:
       containers:
         - name: assessment-service
@@ -28,7 +37,17 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
-            # ConfigMap values
+            # ===== DATADOG APM CONFIG =====
+            - name: DD_SERVICE
+              value: "assessment-service"
+            - name: DD_ENV
+              value: "production"
+            - name: DD_VERSION
+              value: "1.0.0"
+            # Profiling and metrics
+            - name: DD_PROFILING_ENABLED
+              value: "true"
+            # ===== APP CONFIG =====
             - name: PORT
               valueFrom:
                 configMapKeyRef:
@@ -75,7 +94,7 @@ spec:
                   name: assessment-service-config
                   key: CASDOOR_APPLICATION
 
-            # Secret values
+            # ===== SECRETS =====
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -101,6 +120,12 @@ spec:
                 secretKeyRef:
                   name: assessment-service-secret
                   key: CASDOOR_CERT
+
+          # Unix socket volume mount for Datadog APM
+          volumeMounts:
+            - name: apmsocket
+              mountPath: /var/run/datadog
+              readOnly: true
 
           # Health checks
           livenessProbe:
@@ -129,3 +154,10 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+
+      # Unix socket volume for Datadog APM
+      volumes:
+        - name: apmsocket
+          hostPath:
+            path: /var/run/datadog/
+            type: Directory

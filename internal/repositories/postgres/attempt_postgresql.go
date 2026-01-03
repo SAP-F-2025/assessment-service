@@ -81,11 +81,6 @@ func (a *AttemptPostgreSQL) List(ctx context.Context, tx *gorm.DB, filters repos
 	query := db.WithContext(ctx).Model(&models.AssessmentAttempt{})
 	query = a.applyFiltersAttempt(query, filters)
 
-	if filters.IsTeacherView {
-		query = query.Joins("JOIN assessments ON assessments.id = assessment_attempts.assessment_id").
-			Where("assessments.created_by = ?", filters.UserID)
-	}
-
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -851,7 +846,7 @@ func (ar *AnswerPostgreSQL) GetByQuestion(ctx context.Context, tx *gorm.DB, ques
 func (ar *AnswerPostgreSQL) GetByStudent(ctx context.Context, tx *gorm.DB, studentID string, filters repositories.AnswerFilters) ([]*models.StudentAnswer, error) {
 	db := ar.getDB(tx)
 	query := db.WithContext(ctx).
-		Joins("JOIN assessment_attempts aa ON aa.id = student_answers.attempt_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = student_answers.attempt_id AND aa.deleted_at IS NULL").
 		Where("aa.student_id = ?", studentID)
 	query = ar.applyAnswerFilters(query, filters)
 
@@ -935,8 +930,8 @@ func (ar *AnswerPostgreSQL) GetPendingGrading(ctx context.Context, tx *gorm.DB, 
 	db := ar.getDB(tx)
 	var answers []*models.StudentAnswer
 	if err := db.WithContext(ctx).
-		Joins("JOIN assessment_attempts aa ON aa.id = student_answers.attempt_id").
-		Joins("JOIN assessments a ON a.id = aa.assessment_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = student_answers.attempt_id AND aa.deleted_at IS NULL").
+		Joins("JOIN assessments a ON a.id = aa.assessment_id AND a.deleted_at IS NULL").
 		Where("a.created_by = ? AND student_answers.graded_at IS NULL", teacherID).
 		Preload("Attempt").
 		Preload("Question").
@@ -1139,7 +1134,7 @@ func (ar *AnswerPostgreSQL) GetStudentAnswerStats(ctx context.Context, tx *gorm.
 	var totalAnswers int64
 	if err := db.WithContext(ctx).
 		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
 		Where("aa.student_id = ?", studentID).
 		Count(&totalAnswers).Error; err != nil {
 		return nil, fmt.Errorf("failed to count student answers: %w", err)
@@ -1150,7 +1145,7 @@ func (ar *AnswerPostgreSQL) GetStudentAnswerStats(ctx context.Context, tx *gorm.
 	var correctAnswers int64
 	if err := ar.db.WithContext(ctx).
 		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
 		Where("aa.student_id = ? AND sa.is_correct = true", studentID).
 		Count(&correctAnswers).Error; err != nil {
 		return nil, fmt.Errorf("failed to count correct answers: %w", err)
@@ -1168,7 +1163,7 @@ func (ar *AnswerPostgreSQL) GetStudentAnswerStats(ctx context.Context, tx *gorm.
 	}
 	if err := ar.db.WithContext(ctx).
 		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
 		Select("AVG(sa.score) as avg_score, AVG(sa.time_spent) as avg_time").
 		Where("aa.student_id = ?", studentID).
 		Scan(&avgResult).Error; err != nil {
@@ -1182,7 +1177,7 @@ func (ar *AnswerPostgreSQL) GetStudentAnswerStats(ctx context.Context, tx *gorm.
 	var flaggedCount int64
 	if err := ar.db.WithContext(ctx).
 		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
 		Where("aa.student_id = ? AND sa.is_flagged = true", studentID).
 		Count(&flaggedCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count flagged answers: %w", err)
@@ -1232,7 +1227,7 @@ func (ar *AnswerPostgreSQL) GetGradingStats(ctx context.Context, tx *gorm.DB, as
 	var totalAnswers int64
 	if err := db.WithContext(ctx).
 		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
 		Where("aa.assessment_id = ?", assessmentID).
 		Count(&totalAnswers).Error; err != nil {
 		return nil, fmt.Errorf("failed to count total answers: %w", err)
@@ -1243,7 +1238,7 @@ func (ar *AnswerPostgreSQL) GetGradingStats(ctx context.Context, tx *gorm.DB, as
 	var gradedAnswers int64
 	if err := db.WithContext(ctx).
 		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
 		Where("aa.assessment_id = ? AND sa.graded_at IS NOT NULL", assessmentID).
 		Count(&gradedAnswers).Error; err != nil {
 		return nil, fmt.Errorf("failed to count graded answers: %w", err)
@@ -1255,7 +1250,7 @@ func (ar *AnswerPostgreSQL) GetGradingStats(ctx context.Context, tx *gorm.DB, as
 	var autoGraded int64
 	if err := db.WithContext(ctx).
 		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
 		Where("aa.assessment_id = ? AND sa.graded_at IS NOT NULL AND sa.graded_by IS NULL", assessmentID).
 		Count(&autoGraded).Error; err != nil {
 		return nil, fmt.Errorf("failed to count auto-graded answers: %w", err)
@@ -1267,7 +1262,7 @@ func (ar *AnswerPostgreSQL) GetGradingStats(ctx context.Context, tx *gorm.DB, as
 	var avgScore float64
 	if err := db.WithContext(ctx).
 		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id").
+		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
 		Where("aa.assessment_id = ? AND sa.graded_at IS NOT NULL", assessmentID).
 		Select("AVG(sa.score)").
 		Scan(&avgScore).Error; err != nil {
@@ -1320,7 +1315,7 @@ func (ar *AnswerPostgreSQL) GetUnansweredQuestions(ctx context.Context, tx *gorm
 	var allQuestionIDs []uint
 	if err := db.WithContext(ctx).
 		Table("assessment_questions aq").
-		Joins("JOIN assessment_attempts aa ON aa.assessment_id = aq.assessment_id").
+		Joins("JOIN assessment_attempts aa ON aa.assessment_id = aq.assessment_id AND aa.deleted_at IS NULL AND aq.deleted_at IS NULL").
 		Where("aa.id = ?", attemptID).
 		Pluck("aq.question_id", &allQuestionIDs).Error; err != nil {
 		return nil, fmt.Errorf("failed to get assessment questions: %w", err)

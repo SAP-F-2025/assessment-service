@@ -31,7 +31,7 @@ type Question struct {
 	ID        uint         `json:"id" gorm:"primaryKey"`
 	Type      QuestionType `json:"type" gorm:"not null;index"`
 	Text      string       `json:"text" gorm:"type:text;not null" validate:"required"`
-	Points    int          `json:"points" gorm:"default:10" validate:"min=1,max=100"` // Suggested/default points. Actual points determined by AssessmentQuestion.Points when added to assessment.
+	Points    float64      `json:"points" gorm:"default:10" validate:"min=1,max=100"` // Suggested/default points. Actual points determined by AssessmentQuestion.Points when added to assessment.
 	TimeLimit *int         `json:"time_limit"`                                        // DEPRECATED: Not used in timing logic. Use Assessment.Duration instead. Kept for backward compatibility.
 	Order     int          `json:"order" gorm:"default:0"`
 
@@ -45,10 +45,11 @@ type Question struct {
 	Tags       datatypes.JSON  `json:"tags" gorm:"type:jsonb"` // []string
 
 	// Metadata
-	Explanation *string   `json:"explanation" gorm:"type:text"`
-	CreatedBy   string    `json:"created_by" gorm:"not null;index;size:255"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Explanation *string        `json:"explanation" gorm:"type:text"`
+	CreatedBy   string         `json:"created_by" gorm:"not null;index;size:255"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
 	// Relations
 	Category    *QuestionCategory    `json:"category" gorm:"foreignKey:CategoryID"`
@@ -68,13 +69,14 @@ type AssessmentQuestion struct {
 	QuestionID   uint `json:"question_id" gorm:"not null;index"`
 
 	// Override settings
-	Order     int  `json:"order" gorm:"not null"`
-	Points    *int `json:"points"`     // REQUIRED when adding to assessment. Overrides Question.Points. Total points across all questions must not exceed 100.
-	TimeLimit *int `json:"time_limit"` // DEPRECATED: Not used in timing logic. Use Assessment.Duration instead. Kept for backward compatibility.
-	Required  bool `json:"required" gorm:"default:true"`
+	Order     int      `json:"order" gorm:"not null"`
+	Points    *float64 `json:"points"`     // REQUIRED when adding to assessment. Overrides Question.Points. Total points across all questions must not exceed 100.
+	TimeLimit *int     `json:"time_limit"` // DEPRECATED: Not used in timing logic. Use Assessment.Duration instead. Kept for backward compatibility.
+	Required  bool     `json:"required" gorm:"default:true"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `json:"deleted_at,omitempty" gorm:"index"`
 
 	// Relations
 	Assessment Assessment `json:"assessment" gorm:"foreignKey:AssessmentID"`

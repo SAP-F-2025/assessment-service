@@ -492,9 +492,9 @@ func (h *AssessmentHandler) AddQuestionToAssessment(c *gin.Context) {
 	h.LogRequest(c, "Adding question to assessment", "assessment_id", assessmentID, "question_id", questionID)
 
 	order := h.parseIntQuery(c, "order", 0)
-	points := h.parseIntQueryPtr(c, "points")
+	points := h.parseFloatQueryPtr(c, "points")
 	if points == nil {
-		points = new(int)
+		points = new(float64)
 	}
 
 	userID, exists := c.Get("user_id")
@@ -744,6 +744,18 @@ func (h *AssessmentHandler) parseIntQueryPtr(c *gin.Context, param string) *int 
 	return &value
 }
 
+func (h *AssessmentHandler) parseFloatQueryPtr(c *gin.Context, param string) *float64 {
+	valueStr := c.Query(param)
+	if valueStr == "" {
+		return nil
+	}
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return nil
+	}
+	return &value
+}
+
 func (h *AssessmentHandler) parseAssessmentFilters(c *gin.Context) repositories.AssessmentFilters {
 	page := h.parseIntQuery(c, "page", 1)
 	size := h.parseIntQuery(c, "size", 10)
@@ -751,6 +763,10 @@ func (h *AssessmentHandler) parseAssessmentFilters(c *gin.Context) repositories.
 	filters := repositories.AssessmentFilters{
 		Limit:  size,
 		Offset: (page - 1) * size,
+	}
+
+	if search := c.Query("search"); search != "" {
+		filters.Search = &search
 	}
 
 	if status := c.Query("status"); status != "" {
@@ -788,9 +804,9 @@ func (h *AssessmentHandler) AddQuestionsToAssessment(c *gin.Context) {
 
 	var req struct {
 		Questions []struct {
-			QuestionID uint `json:"question_id" binding:"required"`
-			Order      int  `json:"order" binding:"required,min=1"`
-			Points     int  `json:"points" binding:"required,min=1,max=100"`
+			QuestionID uint    `json:"question_id" binding:"required"`
+			Order      int     `json:"order" binding:"required,min=1"`
+			Points     float64 `json:"points" binding:"required,min=1,max=100"`
 		} `json:"questions" binding:"required,min=1,dive"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {

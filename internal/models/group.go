@@ -23,12 +23,20 @@ type Group struct {
 	AssignedAssessments []AssessmentGroup `json:"assigned_assessments,omitempty" gorm:"foreignKey:GroupID"`
 }
 
-// GroupMemberRole represents the role of a member in a group (class)
+// GroupMemberRole represents the role of a member in a group
 type GroupMemberRole string
 
 const (
-	GroupMemberRoleTeacher GroupMemberRole = "teacher" // Teacher in the class
-	GroupMemberRoleStudent GroupMemberRole = "student" // Student in the class
+	// GroupMemberRoleOwner is the creator of the group with full management permissions
+	// Only one owner per group (the original creator)
+	GroupMemberRoleOwner GroupMemberRole = "owner"
+	// GroupMemberRoleCoOwner is a promoted member who can help manage the group
+	// Can: add/remove members, promote to co-owner, assign assessments
+	// Cannot: delete group, demote/remove owner
+	GroupMemberRoleCoOwner GroupMemberRole = "co-owner"
+	// GroupMemberRoleMember is a regular member of the group
+	// Can: view content, take assessments
+	GroupMemberRoleMember GroupMemberRole = "member"
 )
 
 // GroupMember represents a user's membership in a group (class)
@@ -44,6 +52,7 @@ type GroupMember struct {
 
 	// Relations
 	Group *Group `json:"group,omitempty" gorm:"foreignKey:GroupID"`
+	User  *User  `json:"user,omitempty" gorm:"foreignKey:UserID"`
 }
 
 func (Group) TableName() string {

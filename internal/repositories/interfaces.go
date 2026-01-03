@@ -17,6 +17,7 @@ type AssessmentFilters struct {
 	Offset    int                      `json:"offset"`
 	SortBy    string                   `json:"sort_by"`    // "created_at", "title", "due_date"
 	SortOrder string                   `json:"sort_order"` // "asc", "desc"
+	Search    *string                  `json:"search"`
 }
 
 type QuestionFilters struct {
@@ -25,10 +26,13 @@ type QuestionFilters struct {
 	CategoryID *uint                   `json:"category_id"`
 	CreatedBy  *string                 `json:"created_by"`
 	Tags       []string                `json:"tags"`
+	Search     *string                 `json:"search"`
 	Limit      int                     `json:"limit"`
 	Offset     int                     `json:"offset"`
 	SortBy     string                  `json:"sort_by"`
 	SortOrder  string                  `json:"sort_order"`
+	ExcludeIDs []uint                  `json:"exclude_ids"`
+	BankId     *uint                   `json:"bank_id"`
 }
 
 type RandomQuestionFilters struct {
@@ -49,6 +53,7 @@ type AttemptFilters struct {
 	SortBy        string                `json:"sort_by"`    // "created_at", "title", "due_date"
 	SortOrder     string                `json:"sort_order"` // "asc", "desc"
 	IsTeacherView bool                  `json:"is_teacher_view"`
+	GroupId       *string               `json:"group_id"`
 }
 
 type AnswerFilters struct {

@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 
+	ddslog "github.com/DataDog/dd-trace-go/contrib/log/slog/v2"
 	"github.com/SAP-F-2025/assessment-service/internal/config"
 	"github.com/SAP-F-2025/assessment-service/internal/handlers"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories/casdoor"
@@ -31,10 +32,12 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Initialize logger
-	slogLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	// Initialize logger with official Datadog slog handler
+	// This automatically injects dd.trace_id and dd.span_id into all logs
+	ddHandler := ddslog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: cfg.LogLevel,
-	}))
+	})
+	slogLogger := slog.New(ddHandler)
 	logger := utils.NewSlogLogger(slogLogger)
 
 	// Initialize database

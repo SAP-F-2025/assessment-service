@@ -9,11 +9,12 @@ import (
 
 // GroupFilters defines filters for listing groups
 type GroupFilters struct {
-	Query     string // Search query for name or display name
-	Type      string // Filter by group type
-	CreatedBy string // Filter by creator
-	Limit     int    // Results per page
-	Offset    int    // Offset for pagination
+	Query        string // Search query for name or display name
+	Type         string // Filter by group type
+	CreatedBy    string // Filter by creator
+	MemberUserID string // Filter groups where user is a member (for access control)
+	Limit        int    // Results per page
+	Offset       int    // Offset for pagination
 }
 
 type GroupRepository interface {
