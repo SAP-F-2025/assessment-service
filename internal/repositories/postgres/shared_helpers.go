@@ -98,6 +98,17 @@ func (h *SharedHelpers) ApplyAttemptFilters(query *gorm.DB, filters repositories
 			"assessment_groups.deleted_at IS NULL").
 			Where("assessment_groups.group_id = ?", *filters.GroupId)
 	}
+	if filters.IsTeacherView {
+		query = query.Joins("JOIN assessments ON assessments.id = assessment_attempts.assessment_id AND "+
+			"assessments.deleted_at IS NULL").
+			Where("assessments.created_by = ?", filters.UserID)
+	}
+	if filters.GroupId != nil {
+		query = query.Joins("JOIN assessment_groups ON "+
+			"assessment_groups.assessment_id = assessment_attempts.assessment_id AND "+
+			"assessment_groups.deleted_at IS NULL").
+			Where("assessment_groups.group_id = ?", *filters.GroupId)
+	}
 
 	return query
 }
