@@ -81,16 +81,22 @@ func (h *SharedHelpers) ApplyAssessmentFilters(query *gorm.DB, filters repositor
 // ApplyAttemptFilters applies common filters to attempt queries
 func (h *SharedHelpers) ApplyAttemptFilters(query *gorm.DB, filters repositories.AttemptFilters) *gorm.DB {
 	if filters.Status != nil {
-		query = query.Where("status = ?", *filters.Status)
+		query = query.Where("assessment_attempts.status = ?", *filters.Status)
 	}
 	if filters.UserID != nil {
 		query = query.Where("student_id = ?", *filters.UserID)
 	}
 	if filters.DateFrom != nil {
-		query = query.Where("created_at >= ?", *filters.DateFrom)
+		query = query.Where("assessment_attempts.created_at >= ?", *filters.DateFrom)
 	}
 	if filters.DateTo != nil {
-		query = query.Where("created_at <= ?", *filters.DateTo)
+		query = query.Where("assessment_attempts.created_at <= ?", *filters.DateTo)
+	}
+	if filters.GroupId != nil {
+		query = query.Joins("JOIN assessment_groups ON "+
+			"assessment_groups.assessment_id = assessment_attempts.assessment_id AND "+
+			"assessment_groups.deleted_at IS NULL").
+			Where("assessment_groups.group_id = ?", *filters.GroupId)
 	}
 	if filters.IsTeacherView {
 		query = query.Joins("JOIN assessments ON assessments.id = assessment_attempts.assessment_id AND "+

@@ -63,9 +63,9 @@ func (s *attemptService) ExtendTime(ctx context.Context, attemptID uint, minutes
 	}
 
 	// Only teachers/admins can extend time
-	if userRole != models.RoleTeacher && userRole != models.RoleAdmin {
-		return NewPermissionError(userID, attemptID, "attempt", "extend_time", "insufficient permissions")
-	}
+	//if userRole != models.RoleTeacher && userRole != models.RoleAdmin {
+	//	return NewPermissionError(userID, attemptID, "attempt", "extend_time", "insufficient permissions")
+	//}
 
 	// Get attempt
 	attempt, err := s.repo.Attempt().GetByID(ctx, nil, attemptID)
@@ -82,7 +82,7 @@ func (s *attemptService) ExtendTime(ctx context.Context, attemptID uint, minutes
 	if err != nil {
 		return err
 	}
-	if !canAccess {
+	if !canAccess && userRole != models.RoleAdmin {
 		return NewPermissionError(userID, attempt.AssessmentID, "assessment", "extend_attempt_time", "not owner or insufficient permissions")
 	}
 
@@ -260,22 +260,16 @@ func (s *attemptService) canAccessAttempt(ctx context.Context, attempt *models.A
 		return false, err
 	}
 
-	// Students can only access their own attempts
-	if userRole == models.RoleStudent {
-		return attempt.StudentID == userID, nil
-	}
-
 	if userRole == models.RoleAdmin {
 		return true, nil
 	}
 
-	// Teachers/Admins can access attempts for their assessments
-	if userRole == models.RoleTeacher {
-		assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
-		return assessmentService.CanAccess(ctx, attempt.AssessmentID, userID)
+	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
+	canAccess, err := assessmentService.CanAccess(ctx, attempt.AssessmentID, userID)
+	if err != nil {
+		return false, err
 	}
-
-	return false, nil
+	return canAccess || attempt.StudentID == userID, nil
 }
 
 func (s *attemptService) buildAttemptResponse(ctx context.Context, attempt *models.AssessmentAttempt, userID string, includeQuestions bool) *AttemptResponse {

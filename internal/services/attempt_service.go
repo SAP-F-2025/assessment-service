@@ -379,6 +379,7 @@ func (s *attemptService) List(ctx context.Context, filters repositories.AttemptF
 	// Remove teacher role
 	if userRole != models.RoleAdmin {
 		filters.IsTeacherView = true
+		filters.TeacherId = &userID
 	}
 
 	attempts, total, err := s.repo.Attempt().List(ctx, s.db, filters)
