@@ -336,161 +336,129 @@ func (a *AttemptPostgreSQL) GetAttemptCount(ctx context.Context, tx *gorm.DB, st
 	return int(count), err
 }
 
+// GetAssessmentAttemptStats retrieves statistics for assessment attempts
+// Optimized: consolidated 6 queries into 2
 func (a *AttemptPostgreSQL) GetAssessmentAttemptStats(ctx context.Context, tx *gorm.DB, assessmentID uint) (*repositories.AttemptStats, error) {
-	var stats repositories.AttemptStats
+	db := a.getDB(tx) // Fixed: use getDB(tx) instead of a.db
 
-	totalAttempts, err := a.helpers.CountAttempts(ctx, assessmentID)
-	if err != nil {
-		return nil, err
+	// Query 1: All counts and aggregates in single query
+	var result struct {
+		TotalAttempts   int64   `gorm:"column:total_attempts"`
+		InProgressCount int64   `gorm:"column:in_progress_count"`
+		CompletedCount  int64   `gorm:"column:completed_count"`
+		AbandonedCount  int64   `gorm:"column:abandoned_count"`
+		TimeOutCount    int64   `gorm:"column:time_out_count"`
+		PassedCount     int64   `gorm:"column:passed_count"`
+		AvgScore        float64 `gorm:"column:avg_score"`
+		AvgTimeSpent    float64 `gorm:"column:avg_time_spent"`
 	}
 
-	// Status Breakdown using helper
-	statusBreakdown := make(map[models.AttemptStatus]int)
-	statuses := []models.AttemptStatus{models.AttemptInProgress, models.AttemptCompleted, models.AttemptAbandoned, models.AttemptTimeOut}
-	for _, status := range statuses {
-		count, err := a.helpers.CountAttemptsByStatus(ctx, assessmentID, status)
-		if err != nil {
-			return nil, err
-		}
-		statusBreakdown[status] = int(count)
-	}
-
-	// Aggregate stats in single query
-	var avgScore, avgTimeSpent float64
-	var completedCount, passedCount int64
-
-	a.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Model(&models.AssessmentAttempt{}).
-		Where("assessment_id = ? AND status = ?", assessmentID, models.AttemptCompleted).
-		Select("AVG(score), AVG(time_spent), COUNT(*), SUM(CASE WHEN passed = true THEN 1 ELSE 0 END)").
-		Row().Scan(&avgScore, &avgTimeSpent, &completedCount, &passedCount)
+		Select(`
+			COUNT(*) as total_attempts,
+			COUNT(CASE WHEN status = ? THEN 1 END) as in_progress_count,
+			COUNT(CASE WHEN status = ? THEN 1 END) as completed_count,
+			COUNT(CASE WHEN status = ? THEN 1 END) as abandoned_count,
+			COUNT(CASE WHEN status = ? THEN 1 END) as time_out_count,
+			SUM(CASE WHEN status = ? AND passed = true THEN 1 ELSE 0 END) as passed_count,
+			AVG(CASE WHEN status = ? THEN score END) as avg_score,
+			AVG(CASE WHEN status = ? THEN time_spent END) as avg_time_spent
+		`, models.AttemptInProgress, models.AttemptCompleted, models.AttemptAbandoned, models.AttemptTimeOut,
+			models.AttemptCompleted, models.AttemptCompleted, models.AttemptCompleted).
+		Where("assessment_id = ?", assessmentID).
+		Scan(&result).Error; err != nil {
+		return nil, fmt.Errorf("failed to get assessment attempt stats: %w", err)
+	}
 
 	passRate := float64(0)
-	if completedCount > 0 {
-		passRate = float64(passedCount) / float64(completedCount)
+	if result.CompletedCount > 0 {
+		passRate = float64(result.PassedCount) / float64(result.CompletedCount)
 	}
 
 	completionRate := float64(0)
-	if totalAttempts > 0 {
-		completionRate = float64(completedCount) / float64(totalAttempts)
+	if result.TotalAttempts > 0 {
+		completionRate = float64(result.CompletedCount) / float64(result.TotalAttempts)
 	}
 
-	stats = repositories.AttemptStats{
-		TotalAttempts:    int(totalAttempts),
-		StatusBreakdown:  statusBreakdown,
-		AverageScore:     avgScore,
-		AverageTimeSpent: int(avgTimeSpent),
+	return &repositories.AttemptStats{
+		TotalAttempts: int(result.TotalAttempts),
+		StatusBreakdown: map[models.AttemptStatus]int{
+			models.AttemptInProgress: int(result.InProgressCount),
+			models.AttemptCompleted:  int(result.CompletedCount),
+			models.AttemptAbandoned:  int(result.AbandonedCount),
+			models.AttemptTimeOut:    int(result.TimeOutCount),
+		},
+		AverageScore:     result.AvgScore,
+		AverageTimeSpent: int(result.AvgTimeSpent),
 		PassRate:         passRate,
 		CompletionRate:   completionRate,
-	}
-
-	return &stats, nil
+	}, nil
 }
 
+// GetStudentAttemptStats retrieves statistics for a student's attempts
+// Optimized: consolidated 11 queries into 2
 func (a *AttemptPostgreSQL) GetStudentAttemptStats(ctx context.Context, tx *gorm.DB, studentID string) (*repositories.StudentAttemptStats, error) {
-	var stats repositories.StudentAttemptStats
+	db := a.getDB(tx) // Fixed: use getDB(tx) instead of a.db
 
-	var totalAttempts int64
-	var completedAttempts int64
-	var inProgressAttempts int64
-	var avgScore float64
-	var bestScore float64
-	var totalTimeSpent int64
-	var assessmentCount int64
-	var passedCount int64
-	var statusBreakdown = make(map[models.AttemptStatus]int)
+	// Query 1: All counts and aggregates in single query
+	var result struct {
+		TotalAttempts     int64   `gorm:"column:total_attempts"`
+		CompletedAttempts int64   `gorm:"column:completed_attempts"`
+		InProgressCount   int64   `gorm:"column:in_progress_count"`
+		AbandonedCount    int64   `gorm:"column:abandoned_count"`
+		TimeOutCount      int64   `gorm:"column:time_out_count"`
+		PassedCount       int64   `gorm:"column:passed_count"`
+		AvgScore          float64 `gorm:"column:avg_score"`
+		BestScore         float64 `gorm:"column:best_score"`
+		TotalTimeSpent    int64   `gorm:"column:total_time_spent"`
+	}
 
-	// Total Attempts
-	if err := a.db.WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Model(&models.AssessmentAttempt{}).
+		Select(`
+			COUNT(*) as total_attempts,
+			COUNT(CASE WHEN status = ? THEN 1 END) as completed_attempts,
+			COUNT(CASE WHEN status = ? THEN 1 END) as in_progress_count,
+			COUNT(CASE WHEN status = ? THEN 1 END) as abandoned_count,
+			COUNT(CASE WHEN status = ? THEN 1 END) as time_out_count,
+			SUM(CASE WHEN status = ? AND passed = true THEN 1 ELSE 0 END) as passed_count,
+			COALESCE(AVG(CASE WHEN status = ? AND is_graded = true THEN score END), 0) as avg_score,
+			COALESCE(MAX(CASE WHEN status = ? AND is_graded = true THEN score END), 0) as best_score,
+			COALESCE(SUM(CASE WHEN status = ? THEN time_spent END), 0) as total_time_spent
+		`, models.AttemptCompleted, models.AttemptInProgress, models.AttemptAbandoned, models.AttemptTimeOut,
+			models.AttemptCompleted, models.AttemptCompleted, models.AttemptCompleted, models.AttemptCompleted).
 		Where("student_id = ?", studentID).
-		Count(&totalAttempts).Error; err != nil {
-		return nil, err
+		Scan(&result).Error; err != nil {
+		return nil, fmt.Errorf("failed to get student attempt stats: %w", err)
 	}
 
-	// Completed Attempts
-	if err := a.db.WithContext(ctx).
-		Model(&models.AssessmentAttempt{}).
-		Where("student_id = ? AND status = ?", studentID, models.AttemptCompleted).
-		Count(&completedAttempts).Error; err != nil {
-		return nil, err
-	}
-
-	// In-Progress Attempts
-	if err := a.db.WithContext(ctx).
-		Model(&models.AssessmentAttempt{}).
-		Where("student_id = ? AND status = ?", studentID, models.AttemptInProgress).
-		Count(&inProgressAttempts).Error; err != nil {
-		return nil, err
-	}
-
-	// Average Score - Use COALESCE to handle NULL when no completed attempts
-	if err := a.db.WithContext(ctx).
-		Model(&models.AssessmentAttempt{}).
-		Where("student_id = ? AND status = ? AND is_graded = true", studentID, models.AttemptCompleted).
-		Select("COALESCE(AVG(score), 0)").Scan(&avgScore).Error; err != nil {
-		return nil, err
-	}
-
-	// Best Score - Use COALESCE to handle NULL when no completed attempts
-	if err := a.db.WithContext(ctx).
-		Model(&models.AssessmentAttempt{}).
-		Where("student_id = ? AND status = ? AND is_graded = true", studentID, models.AttemptCompleted).
-		Select("COALESCE(MAX(score), 0)").Scan(&bestScore).Error; err != nil {
-		return nil, err
-	}
-
-	// Total Time Spent - Use COALESCE to handle NULL when no completed attempts
-	if err := a.db.WithContext(ctx).
-		Model(&models.AssessmentAttempt{}).
-		Where("student_id = ? AND status = ?", studentID, models.AttemptCompleted).
-		Select("COALESCE(SUM(time_spent), 0)").Scan(&totalTimeSpent).Error; err != nil {
-		return nil, err
-	}
-
-	// Distinct Assessments Attempted
-	if err := a.db.WithContext(ctx).
+	// Query 2: Distinct assessments count
+	var assessmentCount int64
+	if err := db.WithContext(ctx).
 		Model(&models.AssessmentAttempt{}).
 		Where("student_id = ?", studentID).
 		Distinct("assessment_id").
 		Count(&assessmentCount).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to count distinct assessments: %w", err)
 	}
 
-	// Passed Attempts
-	if err := a.db.WithContext(ctx).
-		Model(&models.AssessmentAttempt{}).
-		Where("student_id = ? AND status = ? AND passed = true", studentID, models.AttemptCompleted).
-		Count(&passedCount).Error; err != nil {
-		return nil, err
-	}
-
-	// Status Breakdown
-	var statuses = []models.AttemptStatus{models.AttemptInProgress, models.AttemptCompleted, models.AttemptAbandoned, models.AttemptTimeOut}
-	for _, status := range statuses {
-		var count int64
-		if err := a.db.WithContext(ctx).
-			Model(&models.AssessmentAttempt{}).
-			Where("student_id = ? AND status = ?", studentID, status).
-			Count(&count).Error; err != nil {
-			return nil, err
-		}
-		statusBreakdown[status] = int(count)
-	}
-
-	stats = repositories.StudentAttemptStats{
-		TotalAttempts:      int(totalAttempts),
-		CompletedAttempts:  int(completedAttempts),
-		InProgressAttempts: int(inProgressAttempts),
-		AverageScore:       avgScore,
-		BestScore:          bestScore,
-		TotalTimeSpent:     int(totalTimeSpent),
+	return &repositories.StudentAttemptStats{
+		TotalAttempts:      int(result.TotalAttempts),
+		CompletedAttempts:  int(result.CompletedAttempts),
+		InProgressAttempts: int(result.InProgressCount),
+		AverageScore:       result.AvgScore,
+		BestScore:          result.BestScore,
+		TotalTimeSpent:     int(result.TotalTimeSpent),
 		AssessmentsCount:   int(assessmentCount),
-		PassedCount:        int(passedCount),
-		StatusBreakdown:    statusBreakdown,
-	}
-
-	return &stats, nil
+		PassedCount:        int(result.PassedCount),
+		StatusBreakdown: map[models.AttemptStatus]int{
+			models.AttemptInProgress: int(result.InProgressCount),
+			models.AttemptCompleted:  int(result.CompletedAttempts),
+			models.AttemptAbandoned:  int(result.AbandonedCount),
+			models.AttemptTimeOut:    int(result.TimeOutCount),
+		},
+	}, nil
 }
 
 func (a *AttemptPostgreSQL) GetAttemptsByDateRange(ctx context.Context, tx *gorm.DB, from, to time.Time) ([]*models.AssessmentAttempt, error) {
@@ -1077,120 +1045,90 @@ func (ar *AnswerPostgreSQL) GetTimeSpentByQuestion(ctx context.Context, tx *gorm
 // ===== STATISTICS AND ANALYTICS =====
 
 // GetAnswerStats retrieves statistics for a question
+// Optimized: uses single query with conditional aggregates instead of 3 separate queries
 func (ar *AnswerPostgreSQL) GetAnswerStats(ctx context.Context, tx *gorm.DB, questionID uint) (*repositories.AnswerStats, error) {
 	db := ar.getDB(tx)
-	stats := &repositories.AnswerStats{
-		QuestionID:         questionID,
-		AnswerDistribution: make(map[string]int),
+
+	var result struct {
+		TotalAnswers   int64   `gorm:"column:total_answers"`
+		CorrectAnswers int64   `gorm:"column:correct_answers"`
+		AvgScore       float64 `gorm:"column:avg_score"`
+		AvgTime        int     `gorm:"column:avg_time"`
 	}
 
-	// Get total answers
-	var totalAnswers int64
 	if err := db.WithContext(ctx).
 		Model(&models.StudentAnswer{}).
+		Select(`
+			COUNT(*) as total_answers,
+			COUNT(CASE WHEN is_correct = true THEN 1 END) as correct_answers,
+			AVG(score) as avg_score,
+			AVG(time_spent) as avg_time
+		`).
 		Where("question_id = ?", questionID).
-		Count(&totalAnswers).Error; err != nil {
-		return nil, fmt.Errorf("failed to count answers: %w", err)
-	}
-	stats.TotalAnswers = int(totalAnswers)
-
-	// Get correct answers
-	var correctAnswers int64
-	if err := ar.db.WithContext(ctx).
-		Model(&models.StudentAnswer{}).
-		Where("question_id = ? AND is_correct = true", questionID).
-		Count(&correctAnswers).Error; err != nil {
-		return nil, fmt.Errorf("failed to count correct answers: %w", err)
-	}
-	stats.CorrectAnswers = int(correctAnswers)
-
-	if totalAnswers > 0 {
-		stats.CorrectRate = float64(correctAnswers) / float64(totalAnswers)
+		Scan(&result).Error; err != nil {
+		return nil, fmt.Errorf("failed to get answer stats: %w", err)
 	}
 
-	// Get average score and time
-	var avgResult struct {
-		AvgScore float64
-		AvgTime  int
-	}
-	if err := ar.db.WithContext(ctx).
-		Model(&models.StudentAnswer{}).
-		Select("AVG(score) as avg_score, AVG(time_spent) as avg_time").
-		Where("question_id = ?", questionID).
-		Scan(&avgResult).Error; err != nil {
-		return nil, fmt.Errorf("failed to get averages: %w", err)
+	correctRate := 0.0
+	if result.TotalAnswers > 0 {
+		correctRate = float64(result.CorrectAnswers) / float64(result.TotalAnswers)
 	}
 
-	stats.AverageScore = avgResult.AvgScore
-	stats.AverageTimeSpent = avgResult.AvgTime
-
-	return stats, nil
+	return &repositories.AnswerStats{
+		QuestionID:         questionID,
+		TotalAnswers:       int(result.TotalAnswers),
+		CorrectAnswers:     int(result.CorrectAnswers),
+		CorrectRate:        correctRate,
+		AverageScore:       result.AvgScore,
+		AverageTimeSpent:   result.AvgTime,
+		AnswerDistribution: make(map[string]int),
+	}, nil
 }
 
 // GetStudentAnswerStats retrieves answer statistics for a student
+// Optimized: uses single query with conditional aggregates instead of 4 separate queries
 func (ar *AnswerPostgreSQL) GetStudentAnswerStats(ctx context.Context, tx *gorm.DB, studentID string) (*repositories.StudentAnswerStats, error) {
 	db := ar.getDB(tx)
-	stats := &repositories.StudentAnswerStats{
-		StudentID:         studentID,
-		AnswersByType:     make(map[models.QuestionType]int),
-		PerformanceByDiff: make(map[models.DifficultyLevel]float64),
+
+	var result struct {
+		TotalAnswers   int64   `gorm:"column:total_answers"`
+		CorrectAnswers int64   `gorm:"column:correct_answers"`
+		AvgScore       float64 `gorm:"column:avg_score"`
+		AvgTime        int     `gorm:"column:avg_time"`
+		FlaggedCount   int64   `gorm:"column:flagged_count"`
 	}
 
-	// Get total answers through attempts
-	var totalAnswers int64
 	if err := db.WithContext(ctx).
 		Table("student_answers sa").
+		Select(`
+			COUNT(*) as total_answers,
+			COUNT(CASE WHEN sa.is_correct = true THEN 1 END) as correct_answers,
+			AVG(sa.score) as avg_score,
+			AVG(sa.time_spent) as avg_time,
+			COUNT(CASE WHEN sa.is_flagged = true THEN 1 END) as flagged_count
+		`).
 		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
 		Where("aa.student_id = ?", studentID).
-		Count(&totalAnswers).Error; err != nil {
-		return nil, fmt.Errorf("failed to count student answers: %w", err)
-	}
-	stats.TotalAnswers = int(totalAnswers)
-
-	// Get correct answers
-	var correctAnswers int64
-	if err := ar.db.WithContext(ctx).
-		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
-		Where("aa.student_id = ? AND sa.is_correct = true", studentID).
-		Count(&correctAnswers).Error; err != nil {
-		return nil, fmt.Errorf("failed to count correct answers: %w", err)
-	}
-	stats.CorrectAnswers = int(correctAnswers)
-
-	if totalAnswers > 0 {
-		stats.CorrectRate = float64(correctAnswers) / float64(totalAnswers)
+		Scan(&result).Error; err != nil {
+		return nil, fmt.Errorf("failed to get student answer stats: %w", err)
 	}
 
-	// Get averages
-	var avgResult struct {
-		AvgScore float64
-		AvgTime  int
-	}
-	if err := ar.db.WithContext(ctx).
-		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
-		Select("AVG(sa.score) as avg_score, AVG(sa.time_spent) as avg_time").
-		Where("aa.student_id = ?", studentID).
-		Scan(&avgResult).Error; err != nil {
-		return nil, fmt.Errorf("failed to get student averages: %w", err)
+	correctRate := 0.0
+	if result.TotalAnswers > 0 {
+		correctRate = float64(result.CorrectAnswers) / float64(result.TotalAnswers)
 	}
 
-	stats.AverageScore = avgResult.AvgScore
-	stats.TotalTimeSpent = avgResult.AvgTime
-
-	// Get flagged count
-	var flaggedCount int64
-	if err := ar.db.WithContext(ctx).
-		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
-		Where("aa.student_id = ? AND sa.is_flagged = true", studentID).
-		Count(&flaggedCount).Error; err != nil {
-		return nil, fmt.Errorf("failed to count flagged answers: %w", err)
-	}
-	stats.FlaggedCount = int(flaggedCount)
-
-	return stats, nil
+	return &repositories.StudentAnswerStats{
+		StudentID:         studentID,
+		TotalAnswers:      int(result.TotalAnswers),
+		CorrectAnswers:    int(result.CorrectAnswers),
+		CorrectRate:       correctRate,
+		AverageScore:      result.AvgScore,
+		TotalTimeSpent:    result.AvgTime,
+		FlaggedCount:      int(result.FlaggedCount),
+		AnswersByType:     make(map[models.QuestionType]int),
+		PerformanceByDiff: make(map[models.DifficultyLevel]float64),
+	}, nil
 }
 
 // GetAnswerDistribution retrieves the distribution of answers for a question
@@ -1224,59 +1162,91 @@ func (ar *AnswerPostgreSQL) GetAnswerDistribution(ctx context.Context, tx *gorm.
 	return distribution, nil
 }
 
-// GetGradingStats retrieves grading statistics for an assessment
-func (ar *AnswerPostgreSQL) GetGradingStats(ctx context.Context, tx *gorm.DB, assessmentID uint) (*repositories.GradingStats, error) {
+// GetGradingStats retrieves grading statistics for a specific assessment
+// Uses attempt-based metrics: is_graded = true means attempt is graded
+// Supports optional filtering by groupID (only count attempts from students in the group)
+func (ar *AnswerPostgreSQL) GetGradingStats(ctx context.Context, tx *gorm.DB, assessmentID uint, groupID *uint) (*repositories.GradingStats, error) {
 	db := ar.getDB(tx)
-	stats := &repositories.GradingStats{}
 
-	// Get total answers for the assessment
-	var totalAnswers int64
-	if err := db.WithContext(ctx).
-		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
-		Where("aa.assessment_id = ?", assessmentID).
-		Count(&totalAnswers).Error; err != nil {
-		return nil, fmt.Errorf("failed to count total answers: %w", err)
+	var result struct {
+		TotalAttempts  int64   `gorm:"column:total_attempts"`
+		GradedAttempts int64   `gorm:"column:graded_attempts"`
+		AvgScore       float64 `gorm:"column:avg_score"`
 	}
-	stats.TotalAnswers = int(totalAnswers)
 
-	// Get graded answers
-	var gradedAnswers int64
-	if err := db.WithContext(ctx).
-		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
-		Where("aa.assessment_id = ? AND sa.graded_at IS NOT NULL", assessmentID).
-		Count(&gradedAnswers).Error; err != nil {
-		return nil, fmt.Errorf("failed to count graded answers: %w", err)
+	query := db.WithContext(ctx).
+		Table("assessment_attempts aa").
+		Select(`
+			COUNT(aa.id) as total_attempts,
+			COUNT(CASE WHEN aa.is_graded = true THEN 1 END) as graded_attempts,
+			COALESCE(AVG(CASE WHEN aa.is_graded = true THEN aa.score END), 0) as avg_score
+		`).
+		Where("aa.assessment_id = ? AND aa.deleted_at IS NULL", assessmentID)
+
+	// Filter by group - only count attempts from students who are members of the group
+	if groupID != nil {
+		query = query.Joins("JOIN group_members gm ON gm.user_id = aa.student_id").
+			Where("gm.group_id = ?", *groupID)
 	}
-	stats.GradedAnswers = int(gradedAnswers)
-	stats.PendingAnswers = int(totalAnswers - gradedAnswers)
 
-	// Get auto-graded answers (where graded_by is NULL)
-	var autoGraded int64
-	if err := db.WithContext(ctx).
-		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
-		Where("aa.assessment_id = ? AND sa.graded_at IS NOT NULL AND sa.graded_by IS NULL", assessmentID).
-		Count(&autoGraded).Error; err != nil {
-		return nil, fmt.Errorf("failed to count auto-graded answers: %w", err)
+	if err := query.Scan(&result).Error; err != nil {
+		return nil, fmt.Errorf("failed to get grading stats: %w", err)
 	}
-	stats.AutoGraded = int(autoGraded)
-	stats.ManualGraded = int(gradedAnswers - autoGraded)
 
-	// Get average score
-	var avgScore float64
-	if err := db.WithContext(ctx).
-		Table("student_answers sa").
-		Joins("JOIN assessment_attempts aa ON aa.id = sa.attempt_id AND aa.deleted_at IS NULL").
-		Where("aa.assessment_id = ? AND sa.graded_at IS NOT NULL", assessmentID).
-		Select("AVG(sa.score)").
-		Scan(&avgScore).Error; err != nil {
-		return nil, fmt.Errorf("failed to get average score: %w", err)
+	return &repositories.GradingStats{
+		TotalAttempts:   int(result.TotalAttempts),
+		GradedAttempts:  int(result.GradedAttempts),
+		PendingAttempts: int(result.TotalAttempts - result.GradedAttempts),
+		AverageScore:    result.AvgScore,
+	}, nil
+}
+
+// GetGradingStatsOverview retrieves overall grading statistics across all assessments
+// Uses attempt-based metrics: is_graded = true means attempt is graded
+// Supports filtering by teacherID and/or groupID
+func (ar *AnswerPostgreSQL) GetGradingStatsOverview(ctx context.Context, tx *gorm.DB, teacherID *string, groupID *uint) (*repositories.GradingStatsOverview, error) {
+	db := ar.getDB(tx)
+
+	var result struct {
+		TotalAssessments int64   `gorm:"column:total_assessments"`
+		TotalAttempts    int64   `gorm:"column:total_attempts"`
+		GradedAttempts   int64   `gorm:"column:graded_attempts"`
+		AvgScore         float64 `gorm:"column:avg_score"`
 	}
-	stats.AverageScore = avgScore
 
-	return stats, nil
+	query := db.WithContext(ctx).
+		Table("assessment_attempts aa").
+		Select(`
+			COUNT(DISTINCT a.id) as total_assessments,
+			COUNT(aa.id) as total_attempts,
+			COUNT(CASE WHEN aa.is_graded = true THEN 1 END) as graded_attempts,
+			COALESCE(AVG(CASE WHEN aa.is_graded = true THEN aa.score END), 0) as avg_score
+		`).
+		Joins("JOIN assessments a ON a.id = aa.assessment_id AND a.deleted_at IS NULL").
+		Where("aa.deleted_at IS NULL")
+
+	// Filter by group if provided
+	if groupID != nil {
+		query = query.Joins("JOIN assessment_groups ag ON ag.assessment_id = a.id AND ag.deleted_at IS NULL").
+			Where("ag.group_id = ?", *groupID)
+	}
+
+	// Filter by teacher if provided
+	if teacherID != nil {
+		query = query.Where("a.created_by = ?", *teacherID)
+	}
+
+	if err := query.Scan(&result).Error; err != nil {
+		return nil, fmt.Errorf("failed to get grading stats overview: %w", err)
+	}
+
+	return &repositories.GradingStatsOverview{
+		TotalAssessments: int(result.TotalAssessments),
+		TotalAttempts:    int(result.TotalAttempts),
+		GradedAttempts:   int(result.GradedAttempts),
+		PendingAttempts:  int(result.TotalAttempts - result.GradedAttempts),
+		AverageScore:     result.AvgScore,
+	}, nil
 }
 
 // ===== VALIDATION =====

@@ -102,7 +102,8 @@ type AnswerRepository interface {
 	GetAnswerStats(ctx context.Context, tx *gorm.DB, questionID uint) (*AnswerStats, error)
 	GetStudentAnswerStats(ctx context.Context, tx *gorm.DB, studentID string) (*StudentAnswerStats, error)
 	GetAnswerDistribution(ctx context.Context, tx *gorm.DB, questionID uint) (*AnswerDistribution, error)
-	GetGradingStats(ctx context.Context, tx *gorm.DB, assessmentID uint) (*GradingStats, error)
+	GetGradingStats(ctx context.Context, tx *gorm.DB, assessmentID uint, groupID *uint) (*GradingStats, error)
+	GetGradingStatsOverview(ctx context.Context, tx *gorm.DB, teacherID *string, groupID *uint) (*GradingStatsOverview, error)
 	GetByIDWithDetails(ctx context.Context, tx *gorm.DB, id uint) (*models.StudentAnswer, error)
 
 	// Validation

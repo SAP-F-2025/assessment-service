@@ -163,11 +163,16 @@ func (s *studentService) GetStudentStats(ctx context.Context, studentID string) 
 		return nil, fmt.Errorf("failed to get student attempt stats: %w", err)
 	}
 
-	// Count active assessments (Active status and not expired)
+	// Count active assessments (Active status and not expired) - FILTERED BY GROUP MEMBERSHIP
 	var activeAssessmentsCount int64
 	err = s.db.WithContext(ctx).
-		Model(&models.Assessment{}).
-		Where("status = ? AND (due_date IS NULL OR due_date > ?)", models.StatusActive, time.Now()).
+		Table("assessments").
+		Joins("INNER JOIN assessment_groups ON assessment_groups.assessment_id = assessments.id AND assessment_groups.deleted_at IS NULL").
+		Joins("INNER JOIN group_members ON group_members.group_id = assessment_groups.group_id AND group_members.deleted_at IS NULL").
+		Where("group_members.user_id = ?", studentID).
+		Where("assessments.status = ? AND (assessments.due_date IS NULL OR assessments.due_date > ?)", models.StatusActive, time.Now()).
+		Where("assessments.deleted_at IS NULL").
+		Distinct("assessments.id").
 		Count(&activeAssessmentsCount).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to count active assessments: %w", err)
@@ -208,13 +213,18 @@ func (s *studentService) GetStudentStats(ctx context.Context, studentID string) 
 		return nil, fmt.Errorf("failed to get recent attempts: %w", err)
 	}
 
-	// Get upcoming 5 assessments (ordered by due_date)
+	// Get upcoming 5 assessments (ordered by due_date) - FILTERED BY GROUP MEMBERSHIP
 	var upcomingExams []StudentUpcomingExam
 	var upcomingAssessments []*models.Assessment
 	err = s.db.WithContext(ctx).
-		Model(&models.Assessment{}).
-		Where("status = ? AND due_date IS NOT NULL AND due_date > ?", models.StatusActive, time.Now()).
-		Order("due_date ASC").
+		Table("assessments").
+		Select("DISTINCT assessments.*").
+		Joins("INNER JOIN assessment_groups ON assessment_groups.assessment_id = assessments.id AND assessment_groups.deleted_at IS NULL").
+		Joins("INNER JOIN group_members ON group_members.group_id = assessment_groups.group_id AND group_members.deleted_at IS NULL").
+		Where("group_members.user_id = ?", studentID).
+		Where("assessments.status = ? AND assessments.due_date IS NOT NULL AND assessments.due_date > ?", models.StatusActive, time.Now()).
+		Where("assessments.deleted_at IS NULL").
+		Order("assessments.due_date ASC").
 		Limit(5).
 		Find(&upcomingAssessments).Error
 	if err != nil {

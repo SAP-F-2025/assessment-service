@@ -45,7 +45,9 @@ type RandomQuestionFilters struct {
 
 type AttemptFilters struct {
 	Status        *models.AttemptStatus `json:"status"`
+	AssessmentID  *uint                 `json:"assessment_id"`
 	UserID        *string               `json:"user_id"`
+	StudentName   *string               `json:"student_name"`
 	DateFrom      *time.Time            `json:"date_from"`
 	DateTo        *time.Time            `json:"date_to"`
 	Limit         int                   `json:"limit"`
@@ -131,13 +133,23 @@ type AttemptStats struct {
 	CompletionRate   float64                      `json:"completion_rate"`
 }
 
+// GradingStats represents grading statistics for a specific assessment
+// Uses attempt-based metrics: is_graded = true means attempt is graded
 type GradingStats struct {
-	TotalAnswers   int     `json:"total_answers"`
-	GradedAnswers  int     `json:"graded_answers"`
-	PendingAnswers int     `json:"pending_answers"`
-	AutoGraded     int     `json:"auto_graded"`
-	ManualGraded   int     `json:"manual_graded"`
-	AverageScore   float64 `json:"average_score"`
+	TotalAttempts   int     `json:"total_attempts"`
+	GradedAttempts  int     `json:"graded_attempts"`
+	PendingAttempts int     `json:"pending_attempts"`
+	AverageScore    float64 `json:"average_score"`
+}
+
+// GradingStatsOverview represents overall grading statistics across all assessments
+// Uses attempt-based metrics: is_graded = true means attempt is graded
+type GradingStatsOverview struct {
+	TotalAssessments int     `json:"total_assessments"`
+	TotalAttempts    int     `json:"total_attempts"`
+	GradedAttempts   int     `json:"graded_attempts"`
+	PendingAttempts  int     `json:"pending_attempts"`
+	AverageScore     float64 `json:"average_score"`
 }
 
 type QuestionBankFilters struct {

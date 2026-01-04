@@ -471,16 +471,17 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 
 		// Update answer with auto-grade
 		finalScore := score * (*assessmentQuestion.Points)
-		answer.Score = finalScore
-		answer.Feedback = feedback
-		answer.GradedAt = timePtr(time.Now())
-		answer.IsGraded = true
-		answer.IsCorrect = &isCorrect
-		answer.UpdatedAt = time.Now()
 		answer.MaxScore = *assessmentQuestion.Points
+		answer.Feedback = feedback
+		answer.UpdatedAt = time.Now()
 		// Note: GradedBy is nil for auto-graded answers
 		if !s.isAutoGradeable(answer.Question.Type) {
 			answer.IsGraded = false
+		} else {
+			answer.Score = finalScore
+			answer.GradedAt = timePtr(time.Now())
+			answer.IsGraded = true
+			answer.IsCorrect = &isCorrect
 		}
 
 		answersToUpdate = append(answersToUpdate, answer)
@@ -495,6 +496,7 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 			Feedback:      feedback,
 			GradedAt:      time.Now(),
 			GradedBy:      nil, // Auto-graded
+			IsGraded:      answer.IsGraded,
 		})
 	}
 
@@ -576,8 +578,8 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 		return nil, fmt.Errorf("failed to auto-grade answers: %w", err)
 	}
 
-	for _, answer := range answers {
-		if !s.isAutoGradeable(answer.Question.Type) {
+	for _, answer := range questionResults {
+		if !answer.IsGraded {
 			hasManualGrading = true
 		}
 	}

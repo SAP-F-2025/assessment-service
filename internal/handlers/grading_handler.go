@@ -479,11 +479,12 @@ func (h *GradingHandler) ReGradeAssessment(c *gin.Context) {
 
 // GetGradingOverview gets grading overview for an assessment
 // @Summary Get grading overview
-// @Description Gets grading statistics and overview for an assessment
+// @Description Gets grading statistics and overview for an assessment (optionally filtered by group)
 // @Tags grading
 // @Accept json
 // @Produce json
 // @Param assessment_id path uint true "Assessment ID"
+// @Param group_id query uint false "Optional group ID to filter by (only count attempts from students in this group)"
 // @Success 200 {object} SuccessResponse{data=repositories.GradingStats}
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -504,13 +505,78 @@ func (h *GradingHandler) GetGradingOverview(c *gin.Context) {
 		})
 		return
 	}
-	overview, err := h.gradingService.GetGradingOverview(c.Request.Context(), assessmentID, userID.(string))
+
+	// Parse optional group_id query parameter
+	var groupID *uint
+	if groupIDStr := c.Query("group_id"); groupIDStr != "" {
+		id, err := strconv.ParseUint(groupIDStr, 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Message: "Invalid group_id",
+				Details: err.Error(),
+			})
+			return
+		}
+		groupIDVal := uint(id)
+		groupID = &groupIDVal
+	}
+
+	overview, err := h.gradingService.GetGradingOverview(c.Request.Context(), assessmentID, userID.(string), groupID)
 	if err != nil {
 		h.handleServiceError(c, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, overview)
+}
+
+// GetGradingStatsOverview gets overall grading statistics
+// @Summary Get grading statistics overview
+// @Description Gets overall grading statistics for all assessments (filtered by teacher if not admin, optionally filtered by group)
+// @Tags grading
+// @Accept json
+// @Produce json
+// @Param group_id query uint false "Optional group ID to filter by"
+// @Success 200 {object} SuccessResponse{data=repositories.GradingStatsOverview}
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /grading/overview [get]
+func (h *GradingHandler) GetGradingStatsOverview(c *gin.Context) {
+	h.LogRequest(c, "Getting grading stats overview")
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Message: "User not authenticated",
+		})
+		return
+	}
+
+	// Parse optional group_id query parameter
+	var groupID *uint
+	if groupIDStr := c.Query("group_id"); groupIDStr != "" {
+		id, err := strconv.ParseUint(groupIDStr, 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{
+				Message: "Invalid group_id",
+				Details: err.Error(),
+			})
+			return
+		}
+		groupIDVal := uint(id)
+		groupID = &groupIDVal
+	}
+
+	overview, err := h.gradingService.GetGradingStatsOverview(c.Request.Context(), userID.(string), groupID)
+	if err != nil {
+		h.handleServiceError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, SuccessResponse{
+		Message: "Grading stats overview retrieved successfully",
+		Data:    overview,
+	})
 }
 
 // Helper methods

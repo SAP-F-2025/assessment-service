@@ -28,6 +28,9 @@ type ServiceManagerConfig struct {
 	Attempt      ServiceConfig
 	Grading      ServiceConfig
 
+	// Status Worker configuration
+	StatusWorker StatusWorkerConfig
+
 	// Global settings
 	DefaultTimeout    time.Duration
 	MaxRetries        int
@@ -65,6 +68,7 @@ type serviceManager struct {
 	logger       *slog.Logger
 	validator    *validator.Validator
 	cacheManager *cache.CacheManager
+	redisClient  *redis.Client
 	config       ServiceManagerConfig
 
 	// Service instances
@@ -80,6 +84,9 @@ type serviceManager struct {
 	importExportService    ImportExportService
 	// notificationService NotificationService
 	//analyticsService    AnalyticsService
+
+	// Background workers
+	statusWorker *StatusWorker
 
 	// Utilities
 	//validationService *ValidationService
@@ -153,13 +160,26 @@ func NewDefaultServiceManager(db *gorm.DB, repo repositories.Repository, logger 
 			MetricsEnabled:  true,
 		},
 
+		// Status Worker - enabled by default
+		StatusWorker: DefaultStatusWorkerConfig(),
+
 		DefaultTimeout:    30 * time.Second,
 		MaxRetries:        3,
 		CircuitBreaker:    true,
 		RateLimitingRules: make(map[string]RateLimit),
 	}
 
-	return NewServiceManager(db, repo, logger, validator, cacheManager, config)
+	sm := &serviceManager{
+		db:           db,
+		repo:         repo,
+		logger:       logger,
+		validator:    validator,
+		cacheManager: cacheManager,
+		redisClient:  redisClient,
+		config:       config,
+	}
+
+	return sm
 }
 
 // Initialize sets up all services and their dependencies
@@ -245,6 +265,27 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 	// Initialize NotificationService
 	//sm.notificationService = NewNotificationService(sm.repo, sm.logger, sm.validator)
 	// sm.logger.Info("Notification service initialized")
+
+	// Initialize and start StatusWorker
+	if sm.config.StatusWorker.Enabled {
+		sm.statusWorker = NewStatusWorker(
+			sm.db,
+			sm.repo,
+			sm.logger,
+			sm.redisClient,
+			sm.attemptService,
+			sm.config.StatusWorker,
+		)
+		if err := sm.statusWorker.Start(ctx); err != nil {
+			sm.logger.Error("Failed to start status worker", "error", err)
+			// Don't fail initialization, just log the error
+		} else {
+			sm.logger.Info("Status worker started",
+				"interval", sm.config.StatusWorker.Interval,
+				"grace_period", sm.config.StatusWorker.GracePeriod,
+			)
+		}
+	}
 
 	if len(initErrors) > 0 {
 		return fmt.Errorf("service initialization failed with %d errors", len(initErrors))
@@ -466,6 +507,13 @@ func (sm *serviceManager) Shutdown(ctx context.Context) error {
 	}
 
 	sm.logger.Info("Shutting down service manager")
+
+	// Stop status worker first
+	if sm.statusWorker != nil {
+		if err := sm.statusWorker.Stop(); err != nil {
+			sm.logger.Error("Failed to stop status worker", "error", err)
+		}
+	}
 
 	// Graceful shutdown of services
 	// Services don't currently have explicit shutdown methods,

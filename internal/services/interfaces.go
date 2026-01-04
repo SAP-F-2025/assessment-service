@@ -125,6 +125,7 @@ type GradingResult struct {
 	Feedback      *string   `json:"feedback"`
 	GradedAt      time.Time `json:"graded_at"`
 	GradedBy      *string   `json:"graded_by"`
+	IsGraded      bool      `json:"is_graded"`
 }
 
 type AttemptGradingResult struct {
@@ -448,7 +449,8 @@ type GradingService interface {
 	ReGradeAssessment(ctx context.Context, assessmentID uint, userID string) (map[uint]*AttemptGradingResult, error)
 
 	// Statistics
-	GetGradingOverview(ctx context.Context, assessmentID uint, userID string) (*repositories.GradingStats, error)
+	GetGradingOverview(ctx context.Context, assessmentID uint, userID string, groupID *uint) (*repositories.GradingStats, error)
+	GetGradingStatsOverview(ctx context.Context, userID string, groupID *uint) (*repositories.GradingStatsOverview, error)
 }
 
 type GroupService interface {

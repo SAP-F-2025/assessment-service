@@ -331,7 +331,14 @@ func (h *AttemptHandler) GetCurrentAttempt(c *gin.Context) {
 // @Param page query int false "Page number" default(1)
 // @Param size query int false "Page size" default(10)
 // @Param status query string false "Attempt status"
-// @Param assessment_id query uint false "Assessment ID"
+// @Param assessment_id query uint false "Filter by Assessment ID"
+// @Param student_id query string false "Filter by Student ID"
+// @Param student_name query string false "Search by Student Name (case-insensitive)"
+// @Param group_id query string false "Filter by Group ID"
+// @Param date_from query string false "Filter by start date (RFC3339)"
+// @Param date_to query string false "Filter by end date (RFC3339)"
+// @Param sort_by query string false "Sort by field"
+// @Param sort_order query string false "Sort order (asc/desc)"
 // @Success 200 {object} SuccessResponse{data=[]services.AttemptResponse}
 // @Failure 500 {object} ErrorResponse
 // @Router /attempts [get]
@@ -782,6 +789,18 @@ func (h *AttemptHandler) parseAttemptFilters(c *gin.Context) repositories.Attemp
 	if studentIDStr := c.Query("student_id"); strings.TrimSpace(studentIDStr) != "" {
 		studentIDStr = strings.TrimSpace(studentIDStr)
 		filters.UserID = &studentIDStr
+	}
+
+	if assessmentIDStr := c.Query("assessment_id"); assessmentIDStr != "" {
+		if assessmentID, err := strconv.ParseUint(assessmentIDStr, 10, 32); err == nil {
+			id := uint(assessmentID)
+			filters.AssessmentID = &id
+		}
+	}
+
+	if studentName := c.Query("student_name"); strings.TrimSpace(studentName) != "" {
+		studentName = strings.TrimSpace(studentName)
+		filters.StudentName = &studentName
 	}
 
 	if groupId := c.Query("group_id"); strings.TrimSpace(groupId) != "" {
