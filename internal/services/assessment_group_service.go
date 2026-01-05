@@ -13,10 +13,11 @@ import (
 )
 
 type assessmentGroupService struct {
-	repo      repositories.Repository
-	db        *gorm.DB
-	logger    *slog.Logger
-	validator *validator.Validator
+	repo                repositories.Repository
+	db                  *gorm.DB
+	logger              *slog.Logger
+	validator           *validator.Validator
+	notificationService NotificationEventService
 }
 
 func NewAssessmentGroupService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *validator.Validator) AssessmentGroupService {
@@ -25,6 +26,17 @@ func NewAssessmentGroupService(repo repositories.Repository, db *gorm.DB, logger
 		db:        db,
 		logger:    logger,
 		validator: validator,
+	}
+}
+
+// NewAssessmentGroupServiceWithNotification creates the service with notification support
+func NewAssessmentGroupServiceWithNotification(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *validator.Validator, notificationService NotificationEventService) AssessmentGroupService {
+	return &assessmentGroupService{
+		repo:                repo,
+		db:                  db,
+		logger:              logger,
+		validator:           validator,
+		notificationService: notificationService,
 	}
 }
 
@@ -95,6 +107,20 @@ func (s *assessmentGroupService) AssignToGroups(ctx context.Context, assessmentI
 	s.logger.Info("Assessment assigned to groups successfully",
 		"assessment_id", assessmentID,
 		"group_count", len(req.GroupIDs))
+
+	// Notify students in each group about the new assessment
+	if s.notificationService != nil {
+		for _, groupID := range req.GroupIDs {
+			go func(gID uint) {
+				if err := s.notificationService.NotifyAssessmentPublished(context.Background(), assessmentID, gID); err != nil {
+					s.logger.Error("Failed to send assessment published notification",
+						"assessment_id", assessmentID,
+						"group_id", gID,
+						"error", err)
+				}
+			}(groupID)
+		}
+	}
 
 	return nil
 }

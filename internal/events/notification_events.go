@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/SAP-F-2025/assessment-service/internal/models"
+	"github.com/google/uuid"
 )
 
 // EventType represents different types of notification events
@@ -13,17 +14,11 @@ const (
 	// Assessment events
 	EventAssessmentPublished EventType = "assessment.published"
 	EventAssessmentExpiring  EventType = "assessment.expiring"
-	EventAssessmentExpired   EventType = "assessment.expired"
 
 	// Attempt events
-	EventAttemptStarted     EventType = "attempt.started"
-	EventAttemptSubmitted   EventType = "attempt.submitted"
-	EventAttemptGraded      EventType = "attempt.graded"
-	EventAttemptTimeWarning EventType = "attempt.time_warning"
-
-	// Grading events
-	EventGradingCompleted      EventType = "grading.completed"
-	EventManualGradingRequired EventType = "grading.manual_required"
+	EventAttemptStarted   EventType = "attempt.started"
+	EventAttemptSubmitted EventType = "attempt.submitted"
+	EventAttemptGraded    EventType = "attempt.graded"
 
 	// System events
 	EventBulkNotification EventType = "system.bulk_notification"
@@ -40,101 +35,78 @@ type NotificationEvent struct {
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// Assessment notification event payloads
+// ===== ASSESSMENT EVENT PAYLOADS =====
 
+// AssessmentPublishedEvent - sent when an assessment is published to a group
 type AssessmentPublishedEvent struct {
 	AssessmentID    uint       `json:"assessment_id"`
 	AssessmentTitle string     `json:"assessment_title"`
+	GroupID         uint       `json:"group_id"`
+	GroupName       string     `json:"group_name"`
 	DueDate         *time.Time `json:"due_date,omitempty"`
-	Duration        int        `json:"duration"` // minutes
-	StudentIDs      []string   `json:"student_ids"`
-	CreatorID       string     `json:"creator_id"`
+	Duration        int        `json:"duration"`    // minutes
+	StudentIDs      []string   `json:"student_ids"` // recipients
+	CreatorID       string     `json:"creator_id"`  // teacher who created
 }
 
+// AssessmentExpiringEvent - reminder sent before assessment due date
 type AssessmentExpiringEvent struct {
 	AssessmentID    uint      `json:"assessment_id"`
 	AssessmentTitle string    `json:"assessment_title"`
+	GroupID         uint      `json:"group_id"`
+	GroupName       string    `json:"group_name"`
 	HoursRemaining  int       `json:"hours_remaining"`
-	StudentIDs      []string  `json:"student_ids"`
+	StudentIDs      []string  `json:"student_ids"` // students who haven't completed
 	DueDate         time.Time `json:"due_date"`
 }
 
-type AssessmentExpiredEvent struct {
-	AssessmentID    uint      `json:"assessment_id"`
-	AssessmentTitle string    `json:"assessment_title"`
-	ExpiredAt       time.Time `json:"expired_at"`
-	StudentIDs      []string  `json:"student_ids"`
-	CreatorID       string    `json:"creator_id"`
-}
+// ===== ATTEMPT EVENT PAYLOADS =====
 
-// Attempt notification event payloads
-
+// AttemptStartedEvent - sent when student starts an attempt
 type AttemptStartedEvent struct {
 	AttemptID       uint      `json:"attempt_id"`
 	AssessmentID    uint      `json:"assessment_id"`
 	AssessmentTitle string    `json:"assessment_title"`
+	GroupID         uint      `json:"group_id,omitempty"`
 	StudentID       string    `json:"student_id"`
 	StartedAt       time.Time `json:"started_at"`
 	TimeLimit       *int      `json:"time_limit,omitempty"` // minutes
+	CreatorID       string    `json:"creator_id"`           // teacher who created the assessment
 }
 
+// AttemptSubmittedEvent - sent when student submits an attempt
 type AttemptSubmittedEvent struct {
 	AttemptID       uint      `json:"attempt_id"`
 	AssessmentID    uint      `json:"assessment_id"`
 	AssessmentTitle string    `json:"assessment_title"`
+	GroupID         uint      `json:"group_id,omitempty"`
 	StudentID       string    `json:"student_id"`
 	SubmittedAt     time.Time `json:"submitted_at"`
 	Score           *float64  `json:"score,omitempty"`
+	MaxScore        *float64  `json:"max_score,omitempty"`
 	Passed          *bool     `json:"passed,omitempty"`
-	GradingRequired bool      `json:"grading_required"`
+	IsPendingGrade  bool      `json:"is_pending_grade"` // requires manual grading
+	CreatorID       string    `json:"creator_id"`       // teacher who created the assessment
 }
 
+// AttemptGradedEvent - sent when an attempt is fully graded (for student)
 type AttemptGradedEvent struct {
 	AttemptID       uint      `json:"attempt_id"`
 	AssessmentID    uint      `json:"assessment_id"`
 	AssessmentTitle string    `json:"assessment_title"`
-	StudentID       string    `json:"student_id"`
+	GroupID         uint      `json:"group_id,omitempty"`
+	StudentID       string    `json:"student_id"` // recipient
 	GradedAt        time.Time `json:"graded_at"`
 	Score           float64   `json:"score"`
 	MaxScore        float64   `json:"max_score"`
 	Percentage      float64   `json:"percentage"`
 	Passed          bool      `json:"passed"`
-	GraderID        string    `json:"grader_id"`
+	GraderID        string    `json:"grader_id,omitempty"` // teacher who graded
 }
 
-type AttemptTimeWarningEvent struct {
-	AttemptID        uint      `json:"attempt_id"`
-	AssessmentID     uint      `json:"assessment_id"`
-	AssessmentTitle  string    `json:"assessment_title"`
-	StudentID        string    `json:"student_id"`
-	MinutesRemaining int       `json:"minutes_remaining"`
-	WarningTime      time.Time `json:"warning_time"`
-}
+// ===== SYSTEM EVENT PAYLOADS =====
 
-// Grading notification event payloads
-
-type GradingCompletedEvent struct {
-	AssessmentID      uint      `json:"assessment_id"`
-	AssessmentTitle   string    `json:"assessment_title"`
-	CompletedAt       time.Time `json:"completed_at"`
-	TotalAttempts     int       `json:"total_attempts"`
-	AutoGradedCount   int       `json:"auto_graded_count"`
-	ManualGradedCount int       `json:"manual_graded_count"`
-	CreatorID         string    `json:"creator_id"`
-}
-
-type ManualGradingRequiredEvent struct {
-	AssessmentID      uint      `json:"assessment_id"`
-	AssessmentTitle   string    `json:"assessment_title"`
-	RequiredAt        time.Time `json:"required_at"`
-	QuestionCount     int       `json:"question_count"`
-	PendingAttemptIDs []uint    `json:"pending_attempt_ids"`
-	CreatorID         string    `json:"creator_id"`
-	GraderIDs         []string  `json:"grader_ids"`
-}
-
-// System notification event payload
-
+// BulkNotificationEvent - for sending bulk notifications
 type BulkNotificationEvent struct {
 	RecipientIDs []uint                      `json:"recipient_ids"`
 	Type         models.NotificationType     `json:"type"`
@@ -147,9 +119,10 @@ type BulkNotificationEvent struct {
 	SenderID     string                      `json:"sender_id"`
 }
 
-// Event factory functions
+// ===== EVENT FACTORY FUNCTIONS =====
 
-func NewAssessmentPublishedEvent(assessmentID uint, title string, dueDate *time.Time, duration int, studentIDs []string, creatorID string) *NotificationEvent {
+// NewAssessmentPublishedEvent creates an assessment published event
+func NewAssessmentPublishedEvent(assessmentID uint, title string, groupID uint, groupName string, dueDate *time.Time, duration int, studentIDs []string, creatorID string) *NotificationEvent {
 	return &NotificationEvent{
 		ID:        generateEventID(),
 		Type:      EventAssessmentPublished,
@@ -159,6 +132,8 @@ func NewAssessmentPublishedEvent(assessmentID uint, title string, dueDate *time.
 		Data: AssessmentPublishedEvent{
 			AssessmentID:    assessmentID,
 			AssessmentTitle: title,
+			GroupID:         groupID,
+			GroupName:       groupName,
 			DueDate:         dueDate,
 			Duration:        duration,
 			StudentIDs:      studentIDs,
@@ -167,7 +142,8 @@ func NewAssessmentPublishedEvent(assessmentID uint, title string, dueDate *time.
 	}
 }
 
-func NewAttemptStartedEvent(attemptID, assessmentID uint, title string, studentID string, startedAt time.Time, timeLimit *int) *NotificationEvent {
+// NewAttemptStartedEvent creates an attempt started event
+func NewAttemptStartedEvent(attemptID, assessmentID uint, title string, groupID uint, studentID string, startedAt time.Time, timeLimit *int, creatorID string) *NotificationEvent {
 	return &NotificationEvent{
 		ID:        generateEventID(),
 		Type:      EventAttemptStarted,
@@ -178,13 +154,16 @@ func NewAttemptStartedEvent(attemptID, assessmentID uint, title string, studentI
 			AttemptID:       attemptID,
 			AssessmentID:    assessmentID,
 			AssessmentTitle: title,
+			GroupID:         groupID,
 			StudentID:       studentID,
 			StartedAt:       startedAt,
 			TimeLimit:       timeLimit,
+			CreatorID:       creatorID,
 		},
 	}
 }
 
+// NewBulkNotificationEvent creates a bulk notification event
 func NewBulkNotificationEvent(recipientIDs []uint, notificationType models.NotificationType, title, message string, priority models.NotificationPriority, actionURL *string, metadata map[string]interface{}, scheduledAt *time.Time, senderID string) *NotificationEvent {
 	return &NotificationEvent{
 		ID:        generateEventID(),
@@ -208,8 +187,7 @@ func NewBulkNotificationEvent(recipientIDs []uint, notificationType models.Notif
 
 // Helper function to generate unique event IDs
 func generateEventID() string {
-	// You can use UUID library here
-	return time.Now().Format("20060102150405") + "-" + "uuid-placeholder"
+	return uuid.NewString()
 }
 
 // GenerateEventID is the exported version for external use

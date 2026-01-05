@@ -26,28 +26,31 @@ const (
 
 // StatusWorkerConfig holds configuration for the status worker
 type StatusWorkerConfig struct {
-	Enabled     bool
-	Interval    time.Duration
-	GracePeriod time.Duration
+	Enabled                   bool
+	Interval                  time.Duration
+	GracePeriod               time.Duration
+	ExpiringNotificationHours []int // Hours before due_date to send reminders (e.g., [24, 1])
 }
 
 // DefaultStatusWorkerConfig returns the default configuration
 func DefaultStatusWorkerConfig() StatusWorkerConfig {
 	return StatusWorkerConfig{
-		Enabled:     true,
-		Interval:    DefaultWorkerInterval,
-		GracePeriod: DefaultGracePeriod,
+		Enabled:                   true,
+		Interval:                  DefaultWorkerInterval,
+		GracePeriod:               DefaultGracePeriod,
+		ExpiringNotificationHours: []int{24, 1}, // Default: 24h and 1h before due_date
 	}
 }
 
 // StatusWorker handles automatic status updates for assessments and attempts
 type StatusWorker struct {
-	db             *gorm.DB
-	repo           repositories.Repository
-	logger         *slog.Logger
-	redisClient    *redis.Client
-	attemptService AttemptService
-	config         StatusWorkerConfig
+	db                  *gorm.DB
+	repo                repositories.Repository
+	logger              *slog.Logger
+	redisClient         *redis.Client
+	attemptService      AttemptService
+	notificationService NotificationEventService
+	config              StatusWorkerConfig
 
 	stopCh  chan struct{}
 	wg      sync.WaitGroup
@@ -72,6 +75,28 @@ func NewStatusWorker(
 		attemptService: attemptService,
 		config:         config,
 		stopCh:         make(chan struct{}),
+	}
+}
+
+// NewStatusWorkerWithNotification creates a status worker with notification support
+func NewStatusWorkerWithNotification(
+	db *gorm.DB,
+	repo repositories.Repository,
+	logger *slog.Logger,
+	redisClient *redis.Client,
+	attemptService AttemptService,
+	notificationService NotificationEventService,
+	config StatusWorkerConfig,
+) *StatusWorker {
+	return &StatusWorker{
+		db:                  db,
+		repo:                repo,
+		logger:              logger,
+		redisClient:         redisClient,
+		attemptService:      attemptService,
+		notificationService: notificationService,
+		config:              config,
+		stopCh:              make(chan struct{}),
 	}
 }
 
@@ -168,6 +193,13 @@ func (w *StatusWorker) processTick(ctx context.Context) {
 	// Process expired assessments
 	if err := w.processExpiredAssessments(ctx); err != nil {
 		w.logger.Error("Failed to process expired assessments", "error", err)
+	}
+
+	// Process expiring assessment notifications
+	if w.notificationService != nil && len(w.config.ExpiringNotificationHours) > 0 {
+		if err := w.processExpiringAssessments(ctx); err != nil {
+			w.logger.Error("Failed to process expiring assessment notifications", "error", err)
+		}
 	}
 }
 
@@ -328,4 +360,85 @@ func (w *StatusWorker) IsRunning() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.running
+}
+
+// processExpiringAssessments sends reminder notifications for assessments approaching their due_date
+// Uses Redis keys for idempotency to prevent duplicate notifications across multiple instances
+func (w *StatusWorker) processExpiringAssessments(ctx context.Context) error {
+	if w.notificationService == nil {
+		return nil
+	}
+
+	now := time.Now()
+
+	for _, hours := range w.config.ExpiringNotificationHours {
+		// Calculate time window: assessments with due_date between now and now + hours
+		// We use a small window (worker interval) to avoid re-checking same assessments
+		windowStart := now.Add(time.Duration(hours)*time.Hour - w.config.Interval)
+		windowEnd := now.Add(time.Duration(hours) * time.Hour)
+
+		// Find active assessments with due_date in this window
+		var assessments []*models.Assessment
+		err := w.db.WithContext(ctx).
+			Where("status = ? AND due_date IS NOT NULL AND due_date > ? AND due_date <= ?",
+				models.StatusActive, windowStart, windowEnd).
+			Find(&assessments).Error
+
+		if err != nil {
+			w.logger.Error("Failed to query expiring assessments", "hours", hours, "error", err)
+			continue
+		}
+
+		for _, assessment := range assessments {
+			// Get groups assigned to this assessment
+			groups, err := w.repo.AssessmentGroup().GetGroupsByAssessment(ctx, nil, assessment.ID)
+			if err != nil {
+				w.logger.Error("Failed to get groups for assessment",
+					"assessment_id", assessment.ID, "error", err)
+				continue
+			}
+
+			for _, group := range groups {
+				// Check idempotency key in Redis to prevent duplicate notifications
+				idempotencyKey := fmt.Sprintf("expiring_notification:%d:%d:%dh", assessment.ID, group.ID, hours)
+
+				if w.redisClient != nil {
+					// Use SetNX with 25h TTL (longer than max reminder interval)
+					wasSet, err := w.redisClient.SetNX(ctx, idempotencyKey, "sent", 25*time.Hour).Result()
+					if err != nil {
+						w.logger.Warn("Failed to check idempotency key", "key", idempotencyKey, "error", err)
+						// Continue anyway, may result in duplicate but better than missing
+					} else if !wasSet {
+						// Already sent this notification
+						w.logger.Debug("Skipping duplicate expiring notification",
+							"assessment_id", assessment.ID, "group_id", group.ID, "hours", hours)
+						continue
+					}
+				}
+
+				// Send notification
+				if err := w.notificationService.NotifyAssessmentExpiring(ctx, assessment.ID, group.ID, hours); err != nil {
+					w.logger.Error("Failed to send expiring notification",
+						"assessment_id", assessment.ID,
+						"group_id", group.ID,
+						"hours", hours,
+						"error", err)
+					// Delete the idempotency key so we can retry
+					if w.redisClient != nil {
+						w.redisClient.Del(ctx, idempotencyKey)
+					}
+					continue
+				}
+
+				w.logger.Info("Sent assessment expiring notification",
+					"assessment_id", assessment.ID,
+					"assessment_title", assessment.Title,
+					"group_id", group.ID,
+					"hours_remaining", hours,
+					"due_date", assessment.DueDate)
+			}
+		}
+	}
+
+	return nil
 }
