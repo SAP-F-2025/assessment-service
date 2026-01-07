@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/SAP-F-2025/assessment-service/internal/cache"
+	"github.com/SAP-F-2025/assessment-service/internal/events"
 	"github.com/SAP-F-2025/assessment-service/internal/repositories"
 	"github.com/SAP-F-2025/assessment-service/internal/validator"
 	"github.com/redis/go-redis/v9"
@@ -82,14 +83,10 @@ type serviceManager struct {
 	groupService           GroupService
 	assessmentGroupService AssessmentGroupService
 	importExportService    ImportExportService
-	// notificationService NotificationService
-	//analyticsService    AnalyticsService
+	notificationService    NotificationEventService
 
 	// Background workers
 	statusWorker *StatusWorker
-
-	// Utilities
-	//validationService *ValidationService
 
 	// Lifecycle management
 	initialized bool
@@ -230,16 +227,25 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 		sm.logger.Info("QuestionBank service initialized")
 	}
 
-	// Initialize AttemptService
+	// Initialize NotificationEventService FIRST (needed by other services)
+	eventPublisher := events.NewRedisStreamEventPublisher(events.RedisStreamConfig{
+		Client:     sm.redisClient,
+		StreamName: "notifications",
+		Logger:     sm.logger,
+	})
+	sm.notificationService = NewNotificationEventService(sm.repo, eventPublisher, sm.logger, sm.validator)
+	sm.logger.Info("Notification event service initialized")
+
+	// Initialize AttemptService with notification support
 	if sm.config.Attempt.Enabled {
-		sm.attemptService = NewAttemptService(sm.repo, sm.db, sm.logger, sm.validator, sm.cacheManager)
-		sm.logger.Info("Attempt service initialized")
+		sm.attemptService = NewAttemptServiceWithNotification(sm.repo, sm.db, sm.logger, sm.validator, sm.cacheManager, sm.notificationService)
+		sm.logger.Info("Attempt service initialized with notification support")
 	}
 
-	// Initialize GradingService
+	// Initialize GradingService with notification support
 	if sm.config.Grading.Enabled {
-		sm.gradingService = NewGradingService(sm.db, sm.repo, sm.logger, sm.validator)
-		sm.logger.Info("Grading service initialized")
+		sm.gradingService = NewGradingServiceWithNotification(sm.db, sm.repo, sm.logger, sm.validator, sm.notificationService)
+		sm.logger.Info("Grading service initialized with notification support")
 	}
 
 	// Initialize DashboardService
@@ -254,35 +260,33 @@ func (sm *serviceManager) initializeServices(ctx context.Context) error {
 	sm.groupService = NewGroupService(sm.repo, sm.db, sm.logger, sm.validator)
 	sm.logger.Info("Group service initialized")
 
-	// Initialize AssessmentGroupService
-	sm.assessmentGroupService = NewAssessmentGroupService(sm.repo, sm.db, sm.logger, sm.validator)
-	sm.logger.Info("AssessmentGroup service initialized")
+	// Initialize AssessmentGroupService with notification support
+	sm.assessmentGroupService = NewAssessmentGroupServiceWithNotification(sm.repo, sm.db, sm.logger, sm.validator, sm.notificationService)
+	sm.logger.Info("AssessmentGroup service initialized with notification support")
 
 	// Initialize ImportExportService with injected dependencies
 	sm.importExportService = NewImportExportServiceWithDeps(sm.repo, sm.logger, sm.validator, sm.assessmentService)
 	sm.logger.Info("ImportExport service initialized")
 
-	// Initialize NotificationService
-	//sm.notificationService = NewNotificationService(sm.repo, sm.logger, sm.validator)
-	// sm.logger.Info("Notification service initialized")
-
-	// Initialize and start StatusWorker
+	// Initialize and start StatusWorker with notification support
 	if sm.config.StatusWorker.Enabled {
-		sm.statusWorker = NewStatusWorker(
+		sm.statusWorker = NewStatusWorkerWithNotification(
 			sm.db,
 			sm.repo,
 			sm.logger,
 			sm.redisClient,
 			sm.attemptService,
+			sm.notificationService,
 			sm.config.StatusWorker,
 		)
 		if err := sm.statusWorker.Start(ctx); err != nil {
 			sm.logger.Error("Failed to start status worker", "error", err)
 			// Don't fail initialization, just log the error
 		} else {
-			sm.logger.Info("Status worker started",
+			sm.logger.Info("Status worker started with notification support",
 				"interval", sm.config.StatusWorker.Interval,
 				"grace_period", sm.config.StatusWorker.GracePeriod,
+				"expiring_notification_hours", sm.config.StatusWorker.ExpiringNotificationHours,
 			)
 		}
 	}
@@ -457,20 +461,20 @@ func (sm *serviceManager) ImportExport() ImportExportService {
 	panic("import/export service not initialized")
 }
 
-//func (sm *serviceManager) Notification() NotificationService {
-//	sm.mu.RLock()
-//	defer sm.mu.RUnlock()
-//
-//	if !sm.initialized {
-//		panic("service manager not initialized")
-//	}
-//
-//	if sm.notificationService != nil {
-//		return sm.notificationService
-//	}
-//
-//	panic("notification service not initialized")
-//}
+func (sm *serviceManager) Notification() NotificationEventService {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if !sm.initialized {
+		panic("service manager not initialized")
+	}
+
+	if sm.notificationService != nil {
+		return sm.notificationService
+	}
+
+	panic("notification service not initialized")
+}
 
 // Health and lifecycle
 func (sm *serviceManager) HealthCheck(ctx context.Context) error {

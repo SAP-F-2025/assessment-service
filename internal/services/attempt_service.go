@@ -15,11 +15,12 @@ import (
 )
 
 type attemptService struct {
-	repo         repositories.Repository
-	db           *gorm.DB
-	logger       *slog.Logger
-	validator    *validator.Validator
-	cacheManager *cache.CacheManager
+	repo                repositories.Repository
+	db                  *gorm.DB
+	logger              *slog.Logger
+	validator           *validator.Validator
+	cacheManager        *cache.CacheManager
+	notificationService NotificationEventService
 }
 
 func NewAttemptService(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *validator.Validator, cacheManager *cache.CacheManager) AttemptService {
@@ -29,6 +30,18 @@ func NewAttemptService(repo repositories.Repository, db *gorm.DB, logger *slog.L
 		logger:       logger,
 		validator:    validator,
 		cacheManager: cacheManager,
+	}
+}
+
+// NewAttemptServiceWithNotification creates the service with notification support
+func NewAttemptServiceWithNotification(repo repositories.Repository, db *gorm.DB, logger *slog.Logger, validator *validator.Validator, cacheManager *cache.CacheManager, notificationService NotificationEventService) AttemptService {
+	return &attemptService{
+		repo:                repo,
+		db:                  db,
+		logger:              logger,
+		validator:           validator,
+		cacheManager:        cacheManager,
+		notificationService: notificationService,
 	}
 }
 
@@ -130,6 +143,15 @@ func (s *attemptService) Start(ctx context.Context, req *StartAttemptRequest, st
 		"attempt_id", attempt.ID,
 		"assessment_id", req.AssessmentID,
 		"student_id", studentID)
+
+	// Send notification asynchronously
+	if s.notificationService != nil {
+		go func() {
+			if err := s.notificationService.NotifyAttemptStarted(context.Background(), attempt.ID); err != nil {
+				s.logger.Error("Failed to send attempt started notification", "attempt_id", attempt.ID, "error", err)
+			}
+		}()
+	}
 
 	// Return attempt with questions
 	return s.GetByIDWithDetails(ctx, attempt.ID, studentID)
@@ -250,6 +272,15 @@ func (s *attemptService) Submit(ctx context.Context, req *SubmitAttemptRequest, 
 	gradingService := NewGradingService(s.db, s.repo, s.logger, s.validator)
 	if _, err := gradingService.AutoGradeAttempt(context.Background(), req.AttemptID); err != nil {
 		s.logger.Error("Failed to auto-grade attempt", "attempt_id", req.AttemptID, "error", err)
+	}
+
+	// Send notification asynchronously
+	if s.notificationService != nil {
+		go func() {
+			if err := s.notificationService.NotifyAttemptSubmitted(context.Background(), req.AttemptID); err != nil {
+				s.logger.Error("Failed to send attempt submitted notification", "attempt_id", req.AttemptID, "error", err)
+			}
+		}()
 	}
 
 	// Return updated attempt

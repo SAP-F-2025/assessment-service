@@ -15,20 +15,14 @@ import (
 // NotificationEventService handles sending notifications through event publishing
 // This replaces the direct notification service with an event-driven approach
 type NotificationEventService interface {
-	// Assessment notifications
-	NotifyAssessmentPublished(ctx context.Context, assessmentID uint) error
-	NotifyAssessmentExpiring(ctx context.Context, assessmentID uint, hoursRemaining int) error
-	NotifyAssessmentExpired(ctx context.Context, assessmentID uint) error
+	// Assessment notifications (with group scope)
+	NotifyAssessmentPublished(ctx context.Context, assessmentID uint, groupID uint) error
+	NotifyAssessmentExpiring(ctx context.Context, assessmentID uint, groupID uint, hoursRemaining int) error
 
 	// Attempt notifications
 	NotifyAttemptStarted(ctx context.Context, attemptID uint) error
 	NotifyAttemptSubmitted(ctx context.Context, attemptID uint) error
 	NotifyAttemptGraded(ctx context.Context, attemptID uint) error
-	NotifyAttemptTimeWarning(ctx context.Context, attemptID uint, minutesRemaining int) error
-
-	// Grading notifications
-	NotifyGradingCompleted(ctx context.Context, assessmentID uint) error
-	NotifyManualGradingRequired(ctx context.Context, assessmentID uint, questionCount int) error
 
 	// System notifications
 	SendBulkNotification(ctx context.Context, userIDs []uint, notification *NotificationRequest) error
@@ -43,6 +37,7 @@ type NotificationRequest struct {
 	Metadata    map[string]interface{}      `json:"metadata,omitempty"`
 	ScheduledAt *time.Time                  `json:"scheduled_at,omitempty"`
 }
+
 type notificationEventService struct {
 	repo           repositories.Repository
 	eventPublisher events.EventPublisher
@@ -66,8 +61,10 @@ func NewNotificationEventService(
 
 // ===== ASSESSMENT NOTIFICATIONS =====
 
-func (s *notificationEventService) NotifyAssessmentPublished(ctx context.Context, assessmentID uint) error {
-	s.logger.Info("Publishing assessment published event", "assessment_id", assessmentID)
+func (s *notificationEventService) NotifyAssessmentPublished(ctx context.Context, assessmentID uint, groupID uint) error {
+	s.logger.Info("Publishing assessment published event",
+		"assessment_id", assessmentID,
+		"group_id", groupID)
 
 	// Get assessment details
 	assessment, err := s.repo.Assessment().GetByIDWithDetails(ctx, nil, assessmentID)
@@ -75,13 +72,24 @@ func (s *notificationEventService) NotifyAssessmentPublished(ctx context.Context
 		return fmt.Errorf("failed to get assessment: %w", err)
 	}
 
-	// Get enrolled students (placeholder - implement based on your enrollment system)
-	studentIDs := s.getEnrolledStudentIDs(ctx, assessmentID)
+	// Get group info
+	groupName := ""
+	if groupID > 0 {
+		group, err := s.getGroupInfo(ctx, groupID)
+		if err == nil && group != nil {
+			groupName = group.DisplayName
+		}
+	}
+
+	// Get enrolled students from the group
+	studentIDs := s.getEnrolledStudentIDsFromGroup(ctx, groupID)
 
 	// Create and publish event
 	event := events.NewAssessmentPublishedEvent(
 		assessmentID,
 		assessment.Title,
+		groupID,
+		groupName,
 		assessment.DueDate,
 		assessment.Duration,
 		studentIDs,
@@ -91,9 +99,10 @@ func (s *notificationEventService) NotifyAssessmentPublished(ctx context.Context
 	return s.eventPublisher.PublishNotificationEvent(ctx, event)
 }
 
-func (s *notificationEventService) NotifyAssessmentExpiring(ctx context.Context, assessmentID uint, hoursRemaining int) error {
+func (s *notificationEventService) NotifyAssessmentExpiring(ctx context.Context, assessmentID uint, groupID uint, hoursRemaining int) error {
 	s.logger.Info("Publishing assessment expiring event",
 		"assessment_id", assessmentID,
+		"group_id", groupID,
 		"hours_remaining", hoursRemaining)
 
 	// Get assessment details
@@ -102,8 +111,17 @@ func (s *notificationEventService) NotifyAssessmentExpiring(ctx context.Context,
 		return fmt.Errorf("failed to get assessment: %w", err)
 	}
 
+	// Get group info
+	groupName := ""
+	if groupID > 0 {
+		group, err := s.getGroupInfo(ctx, groupID)
+		if err == nil && group != nil {
+			groupName = group.DisplayName
+		}
+	}
+
 	// Get enrolled students who haven't completed the assessment
-	studentIDs := s.getStudentsWithIncompleteAssessment(ctx, assessmentID)
+	studentIDs := s.getStudentsWithIncompleteAssessment(ctx, assessmentID, groupID)
 
 	// Create and publish event
 	event := &events.NotificationEvent{
@@ -115,40 +133,11 @@ func (s *notificationEventService) NotifyAssessmentExpiring(ctx context.Context,
 		Data: events.AssessmentExpiringEvent{
 			AssessmentID:    assessmentID,
 			AssessmentTitle: assessment.Title,
+			GroupID:         groupID,
+			GroupName:       groupName,
 			HoursRemaining:  hoursRemaining,
 			StudentIDs:      studentIDs,
 			DueDate:         *assessment.DueDate,
-		},
-	}
-
-	return s.eventPublisher.PublishNotificationEvent(ctx, event)
-}
-
-func (s *notificationEventService) NotifyAssessmentExpired(ctx context.Context, assessmentID uint) error {
-	s.logger.Info("Publishing assessment expired event", "assessment_id", assessmentID)
-
-	// Get assessment details
-	assessment, err := s.repo.Assessment().GetByIDWithDetails(ctx, nil, assessmentID)
-	if err != nil {
-		return fmt.Errorf("failed to get assessment: %w", err)
-	}
-
-	// Get all enrolled students
-	studentIDs := s.getEnrolledStudentIDs(ctx, assessmentID)
-
-	// Create and publish event
-	event := &events.NotificationEvent{
-		ID:        events.GenerateEventID(),
-		Type:      events.EventAssessmentExpired,
-		Timestamp: time.Now(),
-		Source:    "assessment-service",
-		Version:   "1.0",
-		Data: events.AssessmentExpiredEvent{
-			AssessmentID:    assessmentID,
-			AssessmentTitle: assessment.Title,
-			ExpiredAt:       time.Now(),
-			StudentIDs:      studentIDs,
-			CreatorID:       assessment.CreatedBy,
 		},
 	}
 
@@ -166,14 +155,19 @@ func (s *notificationEventService) NotifyAttemptStarted(ctx context.Context, att
 		return fmt.Errorf("failed to get attempt: %w", err)
 	}
 
+	// Get groupID from assessment_groups if available
+	groupID := s.getGroupIDForAssessment(ctx, attempt.AssessmentID)
+
 	// Create and publish event
 	event := events.NewAttemptStartedEvent(
 		attemptID,
 		attempt.AssessmentID,
 		attempt.Assessment.Title,
+		groupID,
 		attempt.StudentID,
 		*attempt.StartedAt,
 		&attempt.Assessment.Duration,
+		attempt.Assessment.CreatedBy, // teacher who created the assessment
 	)
 
 	return s.eventPublisher.PublishNotificationEvent(ctx, event)
@@ -188,6 +182,12 @@ func (s *notificationEventService) NotifyAttemptSubmitted(ctx context.Context, a
 		return fmt.Errorf("failed to get attempt: %w", err)
 	}
 
+	// Get groupID from assessment_groups if available
+	groupID := s.getGroupIDForAssessment(ctx, attempt.AssessmentID)
+
+	// Check if pending grade from attempt answers
+	isPendingGrade := s.checkIsPendingGrade(ctx, attemptID)
+
 	// Create and publish event
 	event := &events.NotificationEvent{
 		ID:        events.GenerateEventID(),
@@ -199,11 +199,14 @@ func (s *notificationEventService) NotifyAttemptSubmitted(ctx context.Context, a
 			AttemptID:       attemptID,
 			AssessmentID:    attempt.AssessmentID,
 			AssessmentTitle: attempt.Assessment.Title,
+			GroupID:         groupID,
 			StudentID:       attempt.StudentID,
 			SubmittedAt:     *attempt.CompletedAt,
 			Score:           &attempt.Score,
+			MaxScore:        &attempt.MaxScore,
 			Passed:          &attempt.Passed,
-			GradingRequired: s.requiresManualGrading(ctx, attemptID),
+			IsPendingGrade:  isPendingGrade,
+			CreatorID:       attempt.Assessment.CreatedBy, // teacher who created the assessment
 		},
 	}
 
@@ -219,6 +222,9 @@ func (s *notificationEventService) NotifyAttemptGraded(ctx context.Context, atte
 		return fmt.Errorf("failed to get attempt: %w", err)
 	}
 
+	// Get groupID from assessment_groups if available
+	groupID := s.getGroupIDForAssessment(ctx, attempt.AssessmentID)
+
 	// Create and publish event
 	event := &events.NotificationEvent{
 		ID:        events.GenerateEventID(),
@@ -230,117 +236,14 @@ func (s *notificationEventService) NotifyAttemptGraded(ctx context.Context, atte
 			AttemptID:       attemptID,
 			AssessmentID:    attempt.AssessmentID,
 			AssessmentTitle: attempt.Assessment.Title,
+			GroupID:         groupID,
 			StudentID:       attempt.StudentID,
 			GradedAt:        time.Now(),
 			Score:           attempt.Score,
 			MaxScore:        attempt.MaxScore,
 			Percentage:      attempt.Percentage,
 			Passed:          attempt.Passed,
-			GraderID:        attempt.Assessment.CreatedBy, // or actual grader ID
-		},
-	}
-
-	return s.eventPublisher.PublishNotificationEvent(ctx, event)
-}
-
-func (s *notificationEventService) NotifyAttemptTimeWarning(ctx context.Context, attemptID uint, minutesRemaining int) error {
-	s.logger.Info("Publishing attempt time warning event",
-		"attempt_id", attemptID,
-		"minutes_remaining", minutesRemaining)
-
-	// Get attempt with assessment details
-	attempt, err := s.repo.Attempt().GetByIDWithDetails(ctx, nil, attemptID)
-	if err != nil {
-		return fmt.Errorf("failed to get attempt: %w", err)
-	}
-
-	// Create and publish event
-	event := &events.NotificationEvent{
-		ID:        events.GenerateEventID(),
-		Type:      events.EventAttemptTimeWarning,
-		Timestamp: time.Now(),
-		Source:    "assessment-service",
-		Version:   "1.0",
-		Data: events.AttemptTimeWarningEvent{
-			AttemptID:        attemptID,
-			AssessmentID:     attempt.AssessmentID,
-			AssessmentTitle:  attempt.Assessment.Title,
-			StudentID:        attempt.StudentID,
-			MinutesRemaining: minutesRemaining,
-			WarningTime:      time.Now(),
-		},
-	}
-
-	return s.eventPublisher.PublishNotificationEvent(ctx, event)
-}
-
-// ===== GRADING NOTIFICATIONS =====
-
-func (s *notificationEventService) NotifyGradingCompleted(ctx context.Context, assessmentID uint) error {
-	s.logger.Info("Publishing grading completed event", "assessment_id", assessmentID)
-
-	// Get assessment details
-	assessment, err := s.repo.Assessment().GetByIDWithDetails(ctx, nil, assessmentID)
-	if err != nil {
-		return fmt.Errorf("failed to get assessment: %w", err)
-	}
-
-	// Get grading statistics
-	stats := s.getGradingStats(ctx, assessmentID)
-
-	// Create and publish event
-	event := &events.NotificationEvent{
-		ID:        events.GenerateEventID(),
-		Type:      events.EventGradingCompleted,
-		Timestamp: time.Now(),
-		Source:    "assessment-service",
-		Version:   "1.0",
-		Data: events.GradingCompletedEvent{
-			AssessmentID:      assessmentID,
-			AssessmentTitle:   assessment.Title,
-			CompletedAt:       time.Now(),
-			TotalAttempts:     stats.TotalAttempts,
-			AutoGradedCount:   stats.AutoGradedCount,
-			ManualGradedCount: stats.ManualGradedCount,
-			CreatorID:         assessment.CreatedBy,
-		},
-	}
-
-	return s.eventPublisher.PublishNotificationEvent(ctx, event)
-}
-
-func (s *notificationEventService) NotifyManualGradingRequired(ctx context.Context, assessmentID uint, questionCount int) error {
-	s.logger.Info("Publishing manual grading required event",
-		"assessment_id", assessmentID,
-		"question_count", questionCount)
-
-	// Get assessment details
-	assessment, err := s.repo.Assessment().GetByIDWithDetails(ctx, nil, assessmentID)
-	if err != nil {
-		return fmt.Errorf("failed to get assessment: %w", err)
-	}
-
-	// Get pending attempt IDs that require manual grading
-	pendingAttemptIDs := s.getPendingManualGradingAttempts(ctx, assessmentID)
-
-	// Get potential grader IDs (teachers, admins)
-	graderIDs := s.getAvailableGraderIDs(ctx, assessmentID)
-
-	// Create and publish event
-	event := &events.NotificationEvent{
-		ID:        events.GenerateEventID(),
-		Type:      events.EventManualGradingRequired,
-		Timestamp: time.Now(),
-		Source:    "assessment-service",
-		Version:   "1.0",
-		Data: events.ManualGradingRequiredEvent{
-			AssessmentID:      assessmentID,
-			AssessmentTitle:   assessment.Title,
-			RequiredAt:        time.Now(),
-			QuestionCount:     questionCount,
-			PendingAttemptIDs: pendingAttemptIDs,
-			CreatorID:         assessment.CreatedBy,
-			GraderIDs:         graderIDs,
+			GraderID:        attempt.Assessment.CreatedBy,
 		},
 	}
 
@@ -372,26 +275,102 @@ func (s *notificationEventService) SendBulkNotification(ctx context.Context, use
 
 // ===== HELPER METHODS =====
 
-// These methods should be implemented based on your specific business logic
-// For now, they return placeholder data
+// getGroupInfo retrieves group information by ID
+func (s *notificationEventService) getGroupInfo(ctx context.Context, groupID uint) (*models.Group, error) {
+	if groupID == 0 {
+		return nil, nil
+	}
 
-func (s *notificationEventService) getEnrolledStudentIDs(ctx context.Context, assessmentID uint) []string {
-	// TODO: Implement based on your enrollment/class management system
-	// This might involve querying a separate enrollment service or database table
-	s.logger.Debug("Getting enrolled student IDs", "assessment_id", assessmentID)
-	return []string{} // Placeholder
+	group, err := s.repo.Group().GetByID(ctx, nil, groupID)
+	if err != nil {
+		s.logger.Debug("Failed to get group info", "group_id", groupID, "error", err)
+		return nil, err
+	}
+
+	return group, nil
 }
 
-func (s *notificationEventService) getStudentsWithIncompleteAssessment(ctx context.Context, assessmentID uint) []string {
-	// TODO: Query students who are enrolled but haven't completed the assessment
-	s.logger.Debug("Getting students with incomplete assessment", "assessment_id", assessmentID)
-	return []string{} // Placeholder
+// getGroupIDForAssessment returns the first group ID associated with an assessment
+func (s *notificationEventService) getGroupIDForAssessment(ctx context.Context, assessmentID uint) uint {
+	groups, err := s.repo.AssessmentGroup().GetGroupsByAssessment(ctx, nil, assessmentID)
+	if err != nil || len(groups) == 0 {
+		s.logger.Debug("No groups found for assessment", "assessment_id", assessmentID)
+		return 0
+	}
+
+	// Return the first group ID
+	return groups[0].ID
 }
 
-func (s *notificationEventService) requiresManualGrading(ctx context.Context, attemptID uint) bool {
-	// TODO: Check if the attempt has essay questions or other manually graded components
-	s.logger.Debug("Checking if attempt requires manual grading", "attempt_id", attemptID)
-	return false // Placeholder
+// getEnrolledStudentIDsFromGroup returns student IDs from a specific group
+func (s *notificationEventService) getEnrolledStudentIDsFromGroup(ctx context.Context, groupID uint) []string {
+	if groupID == 0 {
+		return []string{}
+	}
+
+	members, err := s.repo.Group().GetMembers(ctx, nil, groupID)
+	if err != nil {
+		s.logger.Debug("Failed to get group members", "group_id", groupID, "error", err)
+		return []string{}
+	}
+
+	// Filter for members with role "member" (students)
+	studentIDs := make([]string, 0, len(members))
+	for _, member := range members {
+		if member.Role == models.GroupMemberRoleMember {
+			studentIDs = append(studentIDs, member.UserID)
+		}
+	}
+
+	return studentIDs
+}
+
+// getStudentsWithIncompleteAssessment returns students who haven't completed the assessment
+func (s *notificationEventService) getStudentsWithIncompleteAssessment(ctx context.Context, assessmentID uint, groupID uint) []string {
+	// Get all students in the group
+	allStudents := s.getEnrolledStudentIDsFromGroup(ctx, groupID)
+	if len(allStudents) == 0 {
+		return []string{}
+	}
+
+	// Get all attempts for this assessment (completed or not)
+	completedStatus := models.AttemptCompleted
+	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, nil, assessmentID, repositories.AttemptFilters{
+		Status: &completedStatus,
+	})
+	if err != nil {
+		s.logger.Debug("Failed to get attempts", "assessment_id", assessmentID, "error", err)
+		return allStudents // Return all if can't check
+	}
+
+	// Create a set of students who have completed
+	completedStudents := make(map[string]bool)
+	for _, attempt := range attempts {
+		completedStudents[attempt.StudentID] = true
+	}
+
+	// Filter out students who have completed
+	incompleteStudents := make([]string, 0)
+	for _, studentID := range allStudents {
+		if !completedStudents[studentID] {
+			incompleteStudents = append(incompleteStudents, studentID)
+		}
+	}
+
+	return incompleteStudents
+}
+
+// checkIsPendingGrade checks if an attempt has answers requiring manual grading
+func (s *notificationEventService) checkIsPendingGrade(ctx context.Context, attemptID uint) bool {
+	// Use AreAllAnswersGraded to check if any answer still needs grading
+	allGraded, err := s.repo.Answer().AreAllAnswersGraded(ctx, nil, attemptID)
+	if err != nil {
+		s.logger.Debug("Failed to check grading status", "attempt_id", attemptID, "error", err)
+		return false
+	}
+
+	// If not all graded, there are pending grades
+	return !allGraded
 }
 
 type GradingStats struct {
@@ -401,19 +380,28 @@ type GradingStats struct {
 }
 
 func (s *notificationEventService) getGradingStats(ctx context.Context, assessmentID uint) GradingStats {
-	// TODO: Get actual grading statistics from the database
-	s.logger.Debug("Getting grading statistics", "assessment_id", assessmentID)
-	return GradingStats{} // Placeholder
-}
+	completedStatus := models.AttemptCompleted
+	attempts, _, err := s.repo.Attempt().GetByAssessment(ctx, nil, assessmentID, repositories.AttemptFilters{
+		Status: &completedStatus,
+	})
+	if err != nil {
+		s.logger.Debug("Failed to get attempts for grading stats", "assessment_id", assessmentID, "error", err)
+		return GradingStats{}
+	}
 
-func (s *notificationEventService) getPendingManualGradingAttempts(ctx context.Context, assessmentID uint) []uint {
-	// TODO: Query attempts that need manual grading
-	s.logger.Debug("Getting pending manual grading attempts", "assessment_id", assessmentID)
-	return []uint{} // Placeholder
-}
+	stats := GradingStats{
+		TotalAttempts: len(attempts),
+	}
 
-func (s *notificationEventService) getAvailableGraderIDs(ctx context.Context, assessmentID uint) []string {
-	// TODO: Get teachers/admins who can grade this assessment
-	s.logger.Debug("Getting available grader IDs", "assessment_id", assessmentID)
-	return []string{} // Placeholder
+	for _, attempt := range attempts {
+		// Check if attempt has pending grades
+		isPending := s.checkIsPendingGrade(ctx, attempt.ID)
+		if isPending {
+			stats.ManualGradedCount++
+		} else {
+			stats.AutoGradedCount++
+		}
+	}
+
+	return stats
 }
