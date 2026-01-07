@@ -140,7 +140,13 @@ func (h *SharedHelpers) ApplyPaginationAndSort(query *gorm.DB, sortBy, sortOrder
 		sortOrder = "ASC"
 	}
 
-	query = query.Order(sortBy + " " + sortOrder)
+	// Always add id as secondary sort to ensure stable pagination
+	// This prevents duplicate records across pages when multiple records have the same sort value
+	if sortBy != "id" {
+		query = query.Order(sortBy + " " + sortOrder + ", id " + sortOrder)
+	} else {
+		query = query.Order(sortBy + " " + sortOrder)
+	}
 
 	if limit > 0 {
 		query = query.Limit(limit)

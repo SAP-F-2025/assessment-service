@@ -679,7 +679,7 @@ func (q *QuestionPostgreSQL) GetByBank(ctx context.Context, bankID uint, filters
 		sortOrder = "ASC"
 	}
 
-	query = query.Order(sortBy + " " + sortOrder)
+	query = query.Order(sortBy + " " + sortOrder + ", q.id " + sortOrder)
 
 	if filters.Limit > 0 {
 		query = query.Limit(filters.Limit)
