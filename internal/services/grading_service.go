@@ -442,6 +442,7 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 				IsCorrect:  false,
 				GradedAt:   time.Now(),
 				GradedBy:   nil,
+				IsGraded:   true,
 			})
 			continue
 		}
