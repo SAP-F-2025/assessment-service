@@ -14,11 +14,7 @@ const (
 	NotificationAssessmentPublished NotificationType = "assessment_published"
 	NotificationAssessmentDue       NotificationType = "assessment_due"
 	NotificationResultAvailable     NotificationType = "result_available"
-	NotificationProctoringViolation NotificationType = "proctoring_violation"
 	NotificationAssessmentExpired   NotificationType = "assessment_expired"
-	NotificationQuestionBankShared  NotificationType = "question_bank_shared"
-	NotificationImportCompleted     NotificationType = "import_completed"
-	NotificationSystemMaintenance   NotificationType = "system_maintenance"
 
 	// Priority levels
 	PriorityLow      NotificationPriority = 1

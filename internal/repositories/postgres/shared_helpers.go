@@ -83,8 +83,15 @@ func (h *SharedHelpers) ApplyAttemptFilters(query *gorm.DB, filters repositories
 	if filters.Status != nil {
 		query = query.Where("assessment_attempts.status = ?", *filters.Status)
 	}
+	if filters.AssessmentID != nil {
+		query = query.Where("assessment_attempts.assessment_id = ?", *filters.AssessmentID)
+	}
 	if filters.UserID != nil {
 		query = query.Where("student_id = ?", *filters.UserID)
+	}
+	if filters.StudentName != nil {
+		query = query.Joins("JOIN users ON users.id = assessment_attempts.student_id").
+			Where("users.full_name ILIKE ?", "%"+*filters.StudentName+"%")
 	}
 	if filters.DateFrom != nil {
 		query = query.Where("assessment_attempts.created_at >= ?", *filters.DateFrom)
@@ -92,23 +99,17 @@ func (h *SharedHelpers) ApplyAttemptFilters(query *gorm.DB, filters repositories
 	if filters.DateTo != nil {
 		query = query.Where("assessment_attempts.created_at <= ?", *filters.DateTo)
 	}
+	// Filter by group - get attempts from students who are members of the group
+	// AND assessments that are assigned to the group
 	if filters.GroupId != nil {
-		query = query.Joins("JOIN assessment_groups ON "+
-			"assessment_groups.assessment_id = assessment_attempts.assessment_id AND "+
-			"assessment_groups.deleted_at IS NULL").
-			Where("assessment_groups.group_id = ?", *filters.GroupId)
+		// Filter by students who are members of the group
+		query = query.Joins("JOIN group_members gm ON gm.user_id = assessment_attempts.student_id").
+			Where("gm.group_id = ?", *filters.GroupId)
+		// AND filter by assessments assigned to the group
+		query = query.Joins("JOIN assessment_groups ag ON ag.assessment_id = assessment_attempts.assessment_id").
+			Where("ag.group_id = ?", *filters.GroupId)
 	}
-	if filters.IsTeacherView {
-		query = query.Joins("JOIN assessments ON assessments.id = assessment_attempts.assessment_id AND "+
-			"assessments.deleted_at IS NULL").
-			Where("assessments.created_by = ?", filters.UserID)
-	}
-	if filters.GroupId != nil {
-		query = query.Joins("JOIN assessment_groups ON "+
-			"assessment_groups.assessment_id = assessment_attempts.assessment_id AND "+
-			"assessment_groups.deleted_at IS NULL").
-			Where("assessment_groups.group_id = ?", *filters.GroupId)
-	}
+	// Note: IsTeacherView is handled separately in List() to avoid duplicate JOINs
 
 	return query
 }
@@ -139,7 +140,13 @@ func (h *SharedHelpers) ApplyPaginationAndSort(query *gorm.DB, sortBy, sortOrder
 		sortOrder = "ASC"
 	}
 
-	query = query.Order(sortBy + " " + sortOrder)
+	// Always add id as secondary sort to ensure stable pagination
+	// This prevents duplicate records across pages when multiple records have the same sort value
+	if sortBy != "id" {
+		query = query.Order(sortBy + " " + sortOrder + ", id " + sortOrder)
+	} else {
+		query = query.Order(sortBy + " " + sortOrder)
+	}
 
 	if limit > 0 {
 		query = query.Limit(limit)

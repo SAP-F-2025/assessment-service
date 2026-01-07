@@ -149,7 +149,6 @@ func (s *assessmentService) CanTake(ctx context.Context, assessmentID uint, user
 
 	// TODO: Check enrollment/assignment status
 	// For now, allow all students to take active assessments
-
 	return true, nil
 }
 

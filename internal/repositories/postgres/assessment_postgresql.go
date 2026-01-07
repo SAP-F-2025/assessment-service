@@ -389,92 +389,90 @@ func (a *AssessmentPostgreSQL) CanAccess(ctx context.Context, tx *gorm.DB, asses
 }
 
 // GetAssessmentStats retrieves statistics for an assessment
+// Optimized: consolidates multiple helper calls into single aggregate query
 func (a *AssessmentPostgreSQL) GetAssessmentStats(ctx context.Context, tx *gorm.DB, id uint) (*repositories.AssessmentStats, error) {
 	db := a.getDB(tx)
-	stats := &repositories.AssessmentStats{}
 
-	// Use helper for total attempts
-	totalAttempts, err := a.helpers.CountAttempts(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
-	// Use helper for completed attempts
-	completedAttempts, err := a.helpers.CountAttemptsByStatus(ctx, id, models.AttemptCompleted)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get assessment passing score
+	// Query 1: Get assessment passing score
 	assessment, err := a.helpers.GetAssessmentBasicInfo(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	// Aggregate stats in fewer queries
-	var avgScore, avgTimeSpent float64
-	var passedAttempts int64
-	if completedAttempts > 0 {
-		db.WithContext(ctx).
-			Model(&models.AssessmentAttempt{}).
-			Select("AVG(score), AVG(time_spent), SUM(CASE WHEN score >= ? THEN 1 ELSE 0 END)", assessment.PassingScore).
-			Where("assessment_id = ? AND status = ?", id, models.AttemptCompleted).
-			Row().
-			Scan(&avgScore, &avgTimeSpent, &passedAttempts)
+	// Query 2: All attempt stats in single query (replaces 3 helper calls + 1 aggregate query)
+	var attemptResult struct {
+		TotalAttempts     int64   `gorm:"column:total_attempts"`
+		CompletedAttempts int64   `gorm:"column:completed_attempts"`
+		PassedAttempts    int64   `gorm:"column:passed_attempts"`
+		AvgScore          float64 `gorm:"column:avg_score"`
+		AvgTimeSpent      float64 `gorm:"column:avg_time_spent"`
+	}
+	if err := db.WithContext(ctx).
+		Model(&models.AssessmentAttempt{}).
+		Select(`
+			COUNT(*) as total_attempts,
+			COUNT(CASE WHEN status = ? THEN 1 END) as completed_attempts,
+			SUM(CASE WHEN status = ? AND score >= ? THEN 1 ELSE 0 END) as passed_attempts,
+			AVG(CASE WHEN status = ? THEN score END) as avg_score,
+			AVG(CASE WHEN status = ? THEN time_spent END) as avg_time_spent
+		`, models.AttemptCompleted, models.AttemptCompleted, assessment.PassingScore,
+			models.AttemptCompleted, models.AttemptCompleted).
+		Where("assessment_id = ?", id).
+		Scan(&attemptResult).Error; err != nil {
+		return nil, fmt.Errorf("failed to get attempt stats: %w", err)
 	}
 
 	passRate := float64(0)
-	if completedAttempts > 0 {
-		passRate = float64(passedAttempts) / float64(completedAttempts) * 100
+	if attemptResult.CompletedAttempts > 0 {
+		passRate = float64(attemptResult.PassedAttempts) / float64(attemptResult.CompletedAttempts) * 100
 	}
 
-	// Get question stats in single query
-	var questionCount, totalPoints int64
+	// Query 3: Get question stats in single query
+	var questionResult struct {
+		QuestionCount int64 `gorm:"column:question_count"`
+		TotalPoints   int64 `gorm:"column:total_points"`
+	}
 	db.WithContext(ctx).
 		Model(&models.AssessmentQuestion{}).
-		Select("COUNT(*), COALESCE(SUM(points), 0)").
+		Select("COUNT(*) as question_count, COALESCE(SUM(points), 0) as total_points").
 		Where("assessment_id = ?", id).
-		Row().
-		Scan(&questionCount, &totalPoints)
+		Scan(&questionResult)
 
-	stats.TotalAttempts = int(totalAttempts)
-	stats.CompletedAttempts = int(completedAttempts)
-	stats.AverageScore = avgScore
-	stats.PassRate = passRate
-	stats.AverageTimeSpent = int(avgTimeSpent)
-	stats.QuestionCount = int(questionCount)
-	stats.TotalPoints = int(totalPoints)
-
-	return stats, nil
+	return &repositories.AssessmentStats{
+		TotalAttempts:     int(attemptResult.TotalAttempts),
+		CompletedAttempts: int(attemptResult.CompletedAttempts),
+		AverageScore:      attemptResult.AvgScore,
+		PassRate:          passRate,
+		AverageTimeSpent:  int(attemptResult.AvgTimeSpent),
+		QuestionCount:     int(questionResult.QuestionCount),
+		TotalPoints:       int(questionResult.TotalPoints),
+	}, nil
 }
 
 // GetCreatorStats retrieves statistics for a creator
+// Optimized: uses conditional aggregates to reduce 5 queries to 3
 func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, tx *gorm.DB, creatorID string) (*repositories.CreatorStats, error) {
 	db := a.getDB(tx)
-	stats := &repositories.CreatorStats{}
 
-	// Total assessments
-	var totalAssessments int64
-	db.WithContext(ctx).
+	// Query 1: All assessment counts in single query (replaces 3 separate queries)
+	var assessmentResult struct {
+		TotalAssessments  int64 `gorm:"column:total_assessments"`
+		ActiveAssessments int64 `gorm:"column:active_assessments"`
+		DraftAssessments  int64 `gorm:"column:draft_assessments"`
+	}
+	if err := db.WithContext(ctx).
 		Model(&models.Assessment{}).
+		Select(`
+			COUNT(*) as total_assessments,
+			COUNT(CASE WHEN status = ? THEN 1 END) as active_assessments,
+			COUNT(CASE WHEN status = ? THEN 1 END) as draft_assessments
+		`, models.StatusActive, models.StatusDraft).
 		Where("created_by = ?", creatorID).
-		Count(&totalAssessments)
+		Scan(&assessmentResult).Error; err != nil {
+		return nil, fmt.Errorf("failed to get assessment counts: %w", err)
+	}
 
-	// Active assessments
-	var activeAssessments int64
-	db.WithContext(ctx).
-		Model(&models.Assessment{}).
-		Where("created_by = ? AND status = ?", creatorID, models.StatusActive).
-		Count(&activeAssessments)
-
-	// Draft assessments
-	var draftAssessments int64
-	db.WithContext(ctx).
-		Model(&models.Assessment{}).
-		Where("created_by = ? AND status = ?", creatorID, models.StatusDraft).
-		Count(&draftAssessments)
-
-	// Total questions (from assessments created by this user)
+	// Query 2: Total questions (from assessments created by this user)
 	var totalQuestions int64
 	db.WithContext(ctx).
 		Table("assessment_questions aq").
@@ -482,7 +480,7 @@ func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, tx *gorm.DB,
 		Where("a.created_by = ? AND aq.deleted_at IS NULL", creatorID).
 		Count(&totalQuestions)
 
-	// Total attempts on creator's assessments
+	// Query 3: Total attempts on creator's assessments
 	var totalAttempts int64
 	db.WithContext(ctx).
 		Table("assessment_attempts att").
@@ -490,13 +488,13 @@ func (a *AssessmentPostgreSQL) GetCreatorStats(ctx context.Context, tx *gorm.DB,
 		Where("a.created_by = ? AND att.deleted_at IS NULL", creatorID).
 		Count(&totalAttempts)
 
-	stats.TotalAssessments = int(totalAssessments)
-	stats.ActiveAssessments = int(activeAssessments)
-	stats.DraftAssessments = int(draftAssessments)
-	stats.TotalQuestions = int(totalQuestions)
-	stats.TotalAttempts = int(totalAttempts)
-
-	return stats, nil
+	return &repositories.CreatorStats{
+		TotalAssessments:  int(assessmentResult.TotalAssessments),
+		ActiveAssessments: int(assessmentResult.ActiveAssessments),
+		DraftAssessments:  int(assessmentResult.DraftAssessments),
+		TotalQuestions:    int(totalQuestions),
+		TotalAttempts:     int(totalAttempts),
+	}, nil
 }
 
 // GetPopularAssessments retrieves the most attempted assessments

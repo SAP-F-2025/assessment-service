@@ -154,7 +154,7 @@ func (s *gradingService) ReGradeAssessment(ctx context.Context, assessmentID uin
 
 // ===== STATISTICS =====
 
-func (s *gradingService) GetGradingOverview(ctx context.Context, assessmentID uint, userID string) (*repositories.GradingStats, error) {
+func (s *gradingService) GetGradingOverview(ctx context.Context, assessmentID uint, userID string, groupID *uint) (*repositories.GradingStats, error) {
 	// Check permission
 	assessmentService := NewAssessmentService(s.repo, s.db, s.logger, s.validator)
 	canAccess, err := assessmentService.CanAccess(ctx, assessmentID, userID)
@@ -165,10 +165,34 @@ func (s *gradingService) GetGradingOverview(ctx context.Context, assessmentID ui
 		return nil, NewPermissionError(userID, assessmentID, "assessment", "view_grading_overview", "not owner or insufficient permissions")
 	}
 
-	// Get grading stats
-	stats, err := s.repo.Answer().GetGradingStats(ctx, nil, assessmentID)
+	// Get grading stats with optional group filter
+	stats, err := s.repo.Answer().GetGradingStats(ctx, nil, assessmentID, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get grading stats: %w", err)
+	}
+
+	return stats, nil
+}
+
+func (s *gradingService) GetGradingStatsOverview(ctx context.Context, userID string, groupID *uint) (*repositories.GradingStatsOverview, error) {
+	s.logger.Info("Getting grading stats overview", "user_id", userID, "group_id", groupID)
+
+	// Get user role to determine filter
+	userRole, err := s.getUserRole(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user role: %w", err)
+	}
+
+	var teacherID *string
+	// Only filter by teacher if not admin - admins see all data
+	if userRole != models.RoleAdmin {
+		teacherID = &userID
+	}
+
+	// Get grading stats overview with optional group filter
+	stats, err := s.repo.Answer().GetGradingStatsOverview(ctx, nil, teacherID, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get grading stats overview: %w", err)
 	}
 
 	return stats, nil
@@ -528,35 +552,21 @@ func (s *gradingService) checkGradingPermission(ctx context.Context, answer *mod
 }
 
 // isGroupOwnerForAssessment checks if user is owner/co-owner of any group the assessment is assigned to
+// Optimized: uses single query instead of N+1 loop queries
 func (s *gradingService) isGroupOwnerForAssessment(ctx context.Context, assessmentID uint, userID string) (bool, error) {
-	// Get all groups this assessment is assigned to
-	assignedGroups, err := s.repo.AssessmentGroup().GetGroupsByAssessment(ctx, nil, assessmentID)
-	if err != nil {
-		return false, err
+	var count int64
+	if err := s.db.WithContext(ctx).
+		Table("groups g").
+		Joins("JOIN assessment_groups ag ON ag.group_id = g.id AND ag.deleted_at IS NULL").
+		Joins("LEFT JOIN group_members gm ON gm.group_id = g.id AND gm.user_id = ? AND gm.deleted_at IS NULL", userID).
+		Where("ag.assessment_id = ? AND g.deleted_at IS NULL", assessmentID).
+		Where("(g.created_by = ? OR gm.role IN (?, ?))", userID, models.GroupMemberRoleOwner, models.GroupMemberRoleCoOwner).
+		Limit(1).
+		Count(&count).Error; err != nil {
+		return false, fmt.Errorf("failed to check group ownership: %w", err)
 	}
 
-	for _, group := range assignedGroups {
-		// Check if user is group creator
-		if group.CreatedBy == userID {
-			return true, nil
-		}
-
-		// Check if user is owner/co-owner member
-		members, err := s.repo.Group().GetMembers(ctx, nil, group.ID)
-		if err != nil {
-			continue
-		}
-
-		for _, member := range members {
-			if member.UserID == userID {
-				if member.Role == models.GroupMemberRoleOwner || member.Role == models.GroupMemberRoleCoOwner {
-					return true, nil
-				}
-			}
-		}
-	}
-
-	return false, nil
+	return count > 0, nil
 }
 
 func (s *gradingService) getUserRole(ctx context.Context, userID string) (models.UserRole, error) {

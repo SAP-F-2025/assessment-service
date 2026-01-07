@@ -14,11 +14,12 @@ import (
 )
 
 type gradingService struct {
-	db             *gorm.DB
-	repo           repositories.Repository
-	logger         *slog.Logger
-	validator      *validator.Validator
-	attemptService AttemptService
+	db                  *gorm.DB
+	repo                repositories.Repository
+	logger              *slog.Logger
+	validator           *validator.Validator
+	attemptService      AttemptService
+	notificationService NotificationEventService
 }
 
 func NewGradingService(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *validator.Validator) GradingService {
@@ -28,6 +29,18 @@ func NewGradingService(db *gorm.DB, repo repositories.Repository, logger *slog.L
 		logger:         logger,
 		validator:      validator,
 		attemptService: NewAttemptService(repo, db, logger, validator, nil),
+	}
+}
+
+// NewGradingServiceWithNotification creates the service with notification support
+func NewGradingServiceWithNotification(db *gorm.DB, repo repositories.Repository, logger *slog.Logger, validator *validator.Validator, notificationService NotificationEventService) GradingService {
+	return &gradingService{
+		db:                  db,
+		repo:                repo,
+		logger:              logger,
+		validator:           validator,
+		attemptService:      NewAttemptService(repo, db, logger, validator, nil),
+		notificationService: notificationService,
 	}
 }
 
@@ -442,6 +455,7 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 				IsCorrect:  false,
 				GradedAt:   time.Now(),
 				GradedBy:   nil,
+				IsGraded:   true,
 			})
 			continue
 		}
@@ -471,16 +485,17 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 
 		// Update answer with auto-grade
 		finalScore := score * (*assessmentQuestion.Points)
-		answer.Score = finalScore
-		answer.Feedback = feedback
-		answer.GradedAt = timePtr(time.Now())
-		answer.IsGraded = true
-		answer.IsCorrect = &isCorrect
-		answer.UpdatedAt = time.Now()
 		answer.MaxScore = *assessmentQuestion.Points
+		answer.Feedback = feedback
+		answer.UpdatedAt = time.Now()
 		// Note: GradedBy is nil for auto-graded answers
 		if !s.isAutoGradeable(answer.Question.Type) {
 			answer.IsGraded = false
+		} else {
+			answer.Score = finalScore
+			answer.GradedAt = timePtr(time.Now())
+			answer.IsGraded = true
+			answer.IsCorrect = &isCorrect
 		}
 
 		answersToUpdate = append(answersToUpdate, answer)
@@ -495,6 +510,7 @@ func (s *gradingService) autoGradeAnswers(ctx context.Context, tx *gorm.DB, answ
 			Feedback:      feedback,
 			GradedAt:      time.Now(),
 			GradedBy:      nil, // Auto-graded
+			IsGraded:      answer.IsGraded,
 		})
 	}
 
@@ -576,8 +592,8 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 		return nil, fmt.Errorf("failed to auto-grade answers: %w", err)
 	}
 
-	for _, answer := range answers {
-		if !s.isAutoGradeable(answer.Question.Type) {
+	for _, answer := range questionResults {
+		if !answer.IsGraded {
 			hasManualGrading = true
 		}
 	}
@@ -639,6 +655,15 @@ func (s *gradingService) AutoGradeAttempt(ctx context.Context, attemptID uint) (
 		"attempt_id", attemptID,
 		"total_score", totalScore,
 		"has_manual_grading", hasManualGrading)
+
+	// Send notification if grading is complete (no manual grading needed)
+	if s.notificationService != nil && !hasManualGrading {
+		go func() {
+			if err := s.notificationService.NotifyAttemptGraded(context.Background(), attemptID); err != nil {
+				s.logger.Error("Failed to send attempt graded notification", "attempt_id", attemptID, "error", err)
+			}
+		}()
+	}
 
 	return result, nil
 }

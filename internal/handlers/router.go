@@ -231,11 +231,14 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 
 			// Grading overview
 			grading.GET("/assessments/:assessment_id/overview", hm.gradingHandler.GetGradingOverview)
+
+			// Grading stats overview (all assessments)
+			grading.GET("/overview", hm.gradingHandler.GetGradingStatsOverview)
 		}
 
 		// Dashboard routes - Teachers and Admins only
 		dashboard := v1.Group("/dashboard")
-		dashboard.Use(hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin))
+		dashboard.Use(hm.authMiddleware.RequireRoleMiddleware(models.RoleTeacher, models.RoleAdmin, models.RoleStudent))
 		{
 			dashboard.GET("/stats", hm.dashboardHandler.GetDashboardStats)
 			dashboard.GET("/activity-trends", hm.dashboardHandler.GetActivityTrends)

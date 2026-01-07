@@ -400,6 +400,7 @@ func (s *attemptService) initializeAttemptAnswers(ctx context.Context, tx *gorm.
 			Flagged:    false,
 			CreatedAt:  time.Now(),
 			UpdatedAt:  time.Now(),
+			MaxScore:   *aq.Points,
 		}
 	}
 

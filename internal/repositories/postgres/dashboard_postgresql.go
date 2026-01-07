@@ -174,7 +174,7 @@ func (r *dashboardRepository) GetAverageScore(ctx context.Context, tx *gorm.DB, 
 			Where("assessments.created_by = ?", *teacherID)
 	}
 
-	if err := query.Select("AVG(assessment_attempts.score) as avg_score").Scan(&result).Error; err != nil {
+	if err := query.Select("COALESCE(AVG(CASE WHEN assessment_attempts.is_graded = true THEN assessment_attempts.score END), 0) as avg_score").Scan(&result).Error; err != nil {
 		return 0, fmt.Errorf("failed to get average score: %w", err)
 	}
 
@@ -290,165 +290,145 @@ func (r *dashboardRepository) GetTrendChange(ctx context.Context, tx *gorm.DB, t
 
 // ===== ACTIVITY TRENDS =====
 
+// GetActivityTrends retrieves activity trend data for the dashboard
+// Optimized: uses single aggregate query instead of N+1 loop queries (21-36 queries → 1 query)
 func (r *dashboardRepository) GetActivityTrends(ctx context.Context, tx *gorm.DB, teacherID *string, period string) ([]repositories.ActivityTrendData, error) {
 	db := r.getDB(tx)
 
+	var startDate time.Time
+	var dateTrunc string
+	var expectedPeriods int
+
+	now := time.Now()
+
+	switch period {
+	case "week":
+		// Last 7 days including today
+		startDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -6)
+		dateTrunc = "day"
+		expectedPeriods = 7
+	case "month":
+		// Current week + 3 complete weeks before
+		// First, find Monday of current week
+		weekday := now.Weekday()
+		daysFromMonday := int(weekday) - 1
+		if weekday == time.Sunday {
+			daysFromMonday = 6
+		}
+		currentWeekMonday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, -daysFromMonday)
+		// Go back 3 weeks from current week's Monday
+		startDate = currentWeekMonday.AddDate(0, 0, -21) // 3 weeks = 21 days
+		dateTrunc = "week"
+		expectedPeriods = 4
+	case "year":
+		// Current month + 11 complete months before
+		currentMonthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		startDate = currentMonthStart.AddDate(0, -11, 0) // 11 months back
+		dateTrunc = "month"
+		expectedPeriods = 12
+	default:
+		return nil, fmt.Errorf("unsupported period: %s", period)
+	}
+
+	// Single aggregate query with DATE_TRUNC
+	var rawResults []struct {
+		PeriodDate   time.Time `gorm:"column:period_date"`
+		Attempts     int64     `gorm:"column:attempts"`
+		Users        int64     `gorm:"column:users"`
+		AverageScore float64   `gorm:"column:avg_score"`
+	}
+
+	query := db.WithContext(ctx).
+		Table("assessment_attempts").
+		Select(`
+			DATE_TRUNC(?, assessment_attempts.created_at) as period_date,
+			COUNT(*) as attempts,
+			COUNT(DISTINCT assessment_attempts.student_id) as users,
+			COALESCE(AVG(CASE WHEN assessment_attempts.status = ? THEN assessment_attempts.score END), 0) as avg_score
+		`, dateTrunc, models.AttemptCompleted).
+		Where("assessment_attempts.created_at >= ?", startDate).
+		Where("assessment_attempts.deleted_at IS NULL")
+
+	// Apply teacher filter if provided
+	if teacherID != nil && *teacherID != "" {
+		query = query.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
+			Where("assessments.created_by = ?", *teacherID)
+	}
+
+	if err := query.Group("period_date").
+		Order("period_date ASC").
+		Scan(&rawResults).Error; err != nil {
+		return nil, fmt.Errorf("failed to get activity trends: %w", err)
+	}
+
+	// Build result map for quick lookup
+	resultMap := make(map[string]struct {
+		Attempts     int64
+		Users        int64
+		AverageScore float64
+	})
+	for _, r := range rawResults {
+		key := r.PeriodDate.Format("2006-01-02")
+		resultMap[key] = struct {
+			Attempts     int64
+			Users        int64
+			AverageScore float64
+		}{r.Attempts, r.Users, r.AverageScore}
+	}
+
+	// Generate complete results with all expected periods (fill gaps with zeros)
 	var results []repositories.ActivityTrendData
 
 	switch period {
 	case "week":
-		// Last 7 days
-		for i := 6; i >= 0; i-- {
-			date := time.Now().AddDate(0, 0, -i)
-			startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-			endOfDay := startOfDay.Add(24 * time.Hour)
-
-			var attempts int64
-			var users int64
-			var avgScore float64
-
-			// Count attempts
-			attemptQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).
-				Where("assessment_attempts.created_at >= ? AND assessment_attempts.created_at < ?", startOfDay, endOfDay)
-			if teacherID != nil && *teacherID != "" {
-				attemptQuery = attemptQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
-					Where("assessments.created_by = ?", *teacherID)
-			}
-			attemptQuery.Count(&attempts)
-
-			// Count users
-			userQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).
-				Where("assessment_attempts.created_at >= ? AND assessment_attempts.created_at < ?", startOfDay, endOfDay)
-			if teacherID != nil && *teacherID != "" {
-				userQuery = userQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
-					Where("assessments.created_by = ?", *teacherID)
-			}
-			userQuery.Distinct("student_id").Count(&users)
-
-			// Get average score
-			var scoreResult struct {
-				AvgScore float64
-			}
-			scoreQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).
-				Where("assessment_attempts.created_at >= ? AND assessment_attempts.created_at < ? AND assessment_attempts.status = ?",
-					startOfDay, endOfDay, models.AttemptCompleted)
-			if teacherID != nil && *teacherID != "" {
-				scoreQuery = scoreQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
-					Where("assessments.created_by = ?", *teacherID)
-			}
-			scoreQuery.Select("COALESCE(AVG(assessment_attempts.score), 0) as avg_score").Scan(&scoreResult)
-			avgScore = scoreResult.AvgScore
-
+		for i := 0; i < expectedPeriods; i++ {
+			date := startDate.AddDate(0, 0, i)
+			key := date.Format("2006-01-02")
+			data := resultMap[key]
 			results = append(results, repositories.ActivityTrendData{
 				Period:       date.Format("Mon"),
-				Attempts:     attempts,
-				Users:        users,
-				AverageScore: avgScore,
+				Attempts:     data.Attempts,
+				Users:        data.Users,
+				AverageScore: data.AverageScore,
 				Date:         date,
 			})
 		}
-
 	case "month":
-		// Last 30 days, grouped by week
-		for i := 3; i >= 0; i-- {
-			endDate := time.Now().AddDate(0, 0, -i*7)
-			startDate := endDate.AddDate(0, 0, -7)
+		// Each period is a week starting from startDate (which is a Monday)
+		for i := 0; i < expectedPeriods; i++ {
+			weekMonday := startDate.AddDate(0, 0, i*7)
+			key := weekMonday.Format("2006-01-02")
+			data := resultMap[key]
 
-			var attempts int64
-			var users int64
-			var avgScore float64
+			// Label: show date range of the week (e.g., "06/12-12/12")
+			weekEnd := weekMonday.AddDate(0, 0, 6)
+			periodLabel := fmt.Sprintf("%02d/%02d-%02d/%02d",
+				weekMonday.Day(), weekMonday.Month(),
+				weekEnd.Day(), weekEnd.Month())
 
-			// Count attempts
-			attemptQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).
-				Where("assessment_attempts.created_at >= ? AND assessment_attempts.created_at < ?", startDate, endDate)
-			if teacherID != nil && *teacherID != "" {
-				attemptQuery = attemptQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
-					Where("assessments.created_by = ?", *teacherID)
-			}
-			attemptQuery.Count(&attempts)
-
-			// Count users
-			userQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).
-				Where("assessment_attempts.created_at >= ? AND assessment_attempts.created_at < ?", startDate, endDate)
-			if teacherID != nil && *teacherID != "" {
-				userQuery = userQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
-					Where("assessments.created_by = ?", *teacherID)
-			}
-			userQuery.Distinct("student_id").Count(&users)
-
-			// Get average score
-			var scoreResult struct {
-				AvgScore float64
-			}
-			scoreQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).
-				Where("assessment_attempts.created_at >= ? AND assessment_attempts.created_at < ? AND assessment_attempts.status = ?",
-					startDate, endDate, models.AttemptCompleted)
-			if teacherID != nil && *teacherID != "" {
-				scoreQuery = scoreQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
-					Where("assessments.created_by = ?", *teacherID)
-			}
-			scoreQuery.Select("COALESCE(AVG(assessment_attempts.score), 0) as avg_score").Scan(&scoreResult)
-			avgScore = scoreResult.AvgScore
-
-			weekNum := 4 - i
 			results = append(results, repositories.ActivityTrendData{
-				Period:       fmt.Sprintf("T%d", weekNum),
-				Attempts:     attempts,
-				Users:        users,
-				AverageScore: avgScore,
-				Date:         startDate,
+				Period:       periodLabel,
+				Attempts:     data.Attempts,
+				Users:        data.Users,
+				AverageScore: data.AverageScore,
+				Date:         weekMonday,
 			})
 		}
-
 	case "year":
-		// Last 12 months
-		for i := 11; i >= 0; i-- {
-			date := time.Now().AddDate(0, -i, 0)
-			startOfMonth := time.Date(date.Year(), date.Month(), 1, 0, 0, 0, 0, date.Location())
-			endOfMonth := startOfMonth.AddDate(0, 1, 0)
+		for i := 0; i < expectedPeriods; i++ {
+			monthStart := startDate.AddDate(0, i, 0)
+			key := monthStart.Format("2006-01-02")
+			data := resultMap[key]
 
-			var attempts int64
-			var users int64
-			var avgScore float64
-
-			// Count attempts
-			attemptQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).
-				Where("assessment_attempts.created_at >= ? AND assessment_attempts.created_at < ?", startOfMonth, endOfMonth)
-			if teacherID != nil && *teacherID != "" {
-				attemptQuery = attemptQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
-					Where("assessments.created_by = ?", *teacherID)
-			}
-			attemptQuery.Count(&attempts)
-
-			// Count users
-			userQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).
-				Where("assessment_attempts.created_at >= ? AND assessment_attempts.created_at < ?", startOfMonth, endOfMonth)
-			if teacherID != nil && *teacherID != "" {
-				userQuery = userQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
-					Where("assessments.created_by = ?", *teacherID)
-			}
-			userQuery.Distinct("student_id").Count(&users)
-
-			// Get average score
-			var scoreResult struct {
-				AvgScore float64
-			}
-			scoreQuery := db.WithContext(ctx).Model(&models.AssessmentAttempt{}).
-				Where("assessment_attempts.created_at >= ? AND assessment_attempts.created_at < ? AND assessment_attempts.status = ?",
-					startOfMonth, endOfMonth, models.AttemptCompleted)
-			if teacherID != nil && *teacherID != "" {
-				scoreQuery = scoreQuery.Joins("JOIN assessments ON assessment_attempts.assessment_id = assessments.id AND assessments.deleted_at IS NULL").
-					Where("assessments.created_by = ?", *teacherID)
-			}
-			scoreQuery.Select("COALESCE(AVG(assessment_attempts.score), 0) as avg_score").Scan(&scoreResult)
-			avgScore = scoreResult.AvgScore
+			// Label: actual month name (e.g., "Jan", "Feb", "Mar")
+			periodLabel := monthStart.Format("Jan")
 
 			results = append(results, repositories.ActivityTrendData{
-				Period:       fmt.Sprintf("T%d", 12-i),
-				Attempts:     attempts,
-				Users:        users,
-				AverageScore: avgScore,
-				Date:         startOfMonth,
+				Period:       periodLabel,
+				Attempts:     data.Attempts,
+				Users:        data.Users,
+				AverageScore: data.AverageScore,
+				Date:         monthStart,
 			})
 		}
 	}
