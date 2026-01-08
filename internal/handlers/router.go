@@ -24,6 +24,7 @@ type HandlerManager struct {
 	userHandler            *UserHandler
 	importExportHandler    *ImportExportHandler
 	authMiddleware         *CasdoorAuthMiddleware
+	serviceAuthMiddleware  *ServiceAuthMiddleware
 }
 
 func NewHandlerManager(
@@ -31,9 +32,11 @@ func NewHandlerManager(
 	validator *validator.Validator,
 	logger utils.Logger,
 	casdoorConfig config.CasdoorConfig,
+	serviceAuthConfig config.ServiceAuthConfig,
 	userRepo repositories.UserRepository,
 ) *HandlerManager {
 	authMiddleware := NewCasdoorAuthMiddleware(casdoorConfig, userRepo)
+	serviceAuthMiddleware := NewServiceAuthMiddleware(serviceAuthConfig)
 
 	return &HandlerManager{
 		assessmentHandler:      NewAssessmentHandler(serviceManager.Assessment(), validator, logger),
@@ -48,6 +51,7 @@ func NewHandlerManager(
 		userHandler:            NewUserHandler(userRepo, logger),
 		importExportHandler:    NewImportExportHandler(serviceManager.ImportExport(), logger),
 		authMiddleware:         authMiddleware,
+		serviceAuthMiddleware:  serviceAuthMiddleware,
 	}
 }
 
@@ -57,8 +61,11 @@ func (hm *HandlerManager) SetupRoutes(router *gin.Engine) {
 	// router.GET("/health", HealthCheck)
 
 	// API v1 routes with authentication
+	// Uses ServiceAuthOrJWTMiddleware to allow either:
+	// 1. X-Service-Key header for internal service calls (e.g., proctoring-service)
+	// 2. Bearer JWT token for user calls
 	v1 := router.Group("/api/v1")
-	v1.Use(hm.authMiddleware.AuthMiddleware()) // Apply authentication to all API routes
+	v1.Use(hm.serviceAuthMiddleware.ServiceAuthOrJWTMiddleware(hm.authMiddleware))
 	{
 		// Assessment routes
 		assessments := v1.Group("/assessments")
