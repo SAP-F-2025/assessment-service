@@ -83,7 +83,7 @@ func main() {
 	}
 
 	// Initialize handlers
-	handlerManager := handlers.NewHandlerManager(serviceManager, validator, logger, cfg.Casdoor, repoManager.GetRepository().User())
+	handlerManager := handlers.NewHandlerManager(serviceManager, validator, logger, cfg.Casdoor, cfg.ServiceAuth, repoManager.GetRepository().User())
 
 	// Setup Gin router
 	if cfg.Environment == "production" {

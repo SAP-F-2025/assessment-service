@@ -18,6 +18,12 @@ type Config struct {
 	LogLevel    slog.Level
 	Events      EventConfig
 	Casdoor     CasdoorConfig
+	ServiceAuth ServiceAuthConfig
+}
+
+type ServiceAuthConfig struct {
+	Enabled bool
+	Keys    map[string]string // service_key -> service_name
 }
 
 type CasdoorConfig struct {
@@ -56,6 +62,10 @@ func LoadConfig() (*Config, error) {
 			Application:  getEnv("CASDOOR_APPLICATION", ""),
 			Cert:         getEnv("CASDOOR_CERT", ""),
 		},
+		ServiceAuth: ServiceAuthConfig{
+			Enabled: getEnv("SERVICE_AUTH_ENABLED", "true") == "true",
+			Keys:    parseServiceKeys(getEnv("SERVICE_AUTH_KEYS", "")),
+		},
 	}, nil
 }
 
@@ -80,4 +90,26 @@ func parseLogLevel(level string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// parseServiceKeys parses service keys from format:
+// "key1:service1,key2:service2"
+func parseServiceKeys(input string) map[string]string {
+	keys := make(map[string]string)
+	if input == "" {
+		return keys
+	}
+
+	pairs := strings.Split(input, ",")
+	for _, pair := range pairs {
+		parts := strings.SplitN(strings.TrimSpace(pair), ":", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			serviceName := strings.TrimSpace(parts[1])
+			if key != "" && serviceName != "" {
+				keys[key] = serviceName
+			}
+		}
+	}
+	return keys
 }
